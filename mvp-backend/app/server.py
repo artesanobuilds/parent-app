@@ -15,6 +15,7 @@ from app.onboarding_agent import get_onboarding_agent
 from app.memory import MemoryRepository
 from app.profiling import profiling_service
 from app.storage import LocalFileStorage
+from app import content as content_service
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -38,7 +39,7 @@ async def lifespan(app: FastAPI):
     persist_state()
 
 
-app = FastAPI(title="Sway Backend", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="MVP Backend", version="1.0.0", lifespan=lifespan)
 
 # Enable CORS for all origins (dev mode)
 app.add_middleware(
@@ -222,6 +223,36 @@ def dump_memory(user_id: str):
         "onboarding_threads": onboarding_memory.snapshot_user(user_id),
         "profile": profiling_service.get_family_profile(user_id),
     }
+
+@app.get("/content/categories")
+def list_categories():
+    """Return all content categories."""
+    return content_service.get_categories()
+
+
+@app.get("/content/articles")
+def list_articles(category: str | None = None, limit: int = 50):
+    """Return library articles, optionally filtered by category."""
+    return content_service.get_articles(category=category, limit=limit)
+
+
+@app.get("/content/community")
+def list_community_posts(category: str | None = None, limit: int = 50):
+    """Return community posts, optionally filtered by category."""
+    return content_service.get_community_posts(category=category, limit=limit)
+
+
+@app.get("/content/search")
+def search_content(q: str, limit: int = 10):
+    """Search articles and community posts by keyword."""
+    return content_service.search_content(q, limit=limit)
+
+
+@app.get("/content/relevant")
+def relevant_content(topic: str, limit: int = 5):
+    """Return content relevant to a topic (for contextual recommendations)."""
+    return content_service.get_relevant_content(topic, limit=limit)
+
 
 @app.get("/health")
 def health_check():

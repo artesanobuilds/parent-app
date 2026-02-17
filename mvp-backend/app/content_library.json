@@ -1,0 +1,734 @@
+{
+  "categories": [
+    {
+      "id": "emotional-wellness",
+      "name": "Emotional Wellness",
+      "emoji": "🧠",
+      "description": "Mental health, midlife transitions, and inner work for parents"
+    },
+    {
+      "id": "family-dynamics",
+      "name": "Family Dynamics",
+      "emoji": "👨‍👩‍👧‍👦",
+      "description": "Siblings, co-parenting, divorce, marriage, and single parenting"
+    },
+    {
+      "id": "health-nutrition",
+      "name": "Health & Nutrition",
+      "emoji": "🥗",
+      "description": "Wellness, sickness, kids' meds, recipes, and hydration"
+    },
+    {
+      "id": "daily-routines",
+      "name": "Daily Routines",
+      "emoji": "🌙",
+      "description": "Sleep, schedules, bedtime, and morning routines"
+    },
+    {
+      "id": "childcare-village",
+      "name": "Childcare & Village",
+      "emoji": "🏘️",
+      "description": "Nannies, babysitters, play dates, and building your support network"
+    },
+    {
+      "id": "education-growth",
+      "name": "Education & Growth",
+      "emoji": "📚",
+      "description": "School choice, clubs, first-time parenting, and child development"
+    },
+    {
+      "id": "adventures-play",
+      "name": "Adventures & Play",
+      "emoji": "🌿",
+      "description": "Travel, nature, outings, music, and crafts"
+    },
+    {
+      "id": "style-gear",
+      "name": "Style & Practical",
+      "emoji": "👟",
+      "description": "Kids' clothes, shoes, upcycling, car safety, and gear"
+    },
+    {
+      "id": "social-skills",
+      "name": "Social & Relationships",
+      "emoji": "🤝",
+      "description": "Bullying, etiquette, friendships, and relationship modeling"
+    },
+    {
+      "id": "parental-growth",
+      "name": "Parental Growth",
+      "emoji": "🌱",
+      "description": "Advocacy, longevity, curated resources, and self-development"
+    }
+  ],
+
+  "library_articles": [
+    {
+      "id": "ew-shadow-triggers",
+      "category": "emotional-wellness",
+      "title": "Your Trigger Is Your Teacher",
+      "subtitle": "Shadow Work for the Everyday Parent",
+      "emoji": "🪞",
+      "author": "MVP Editorial",
+      "read_time": "6 min",
+      "summary": "When your child's tantrum sends you spiraling, the intensity of your reaction often has roots far deeper than the present moment. Jung called it the shadow — the parts of ourselves we buried in childhood that resurface when our kids mirror them back. Dr. Becky would say: you're a good parent having a hard time. Both are true. This guide walks you through a 3-step process to notice the trigger, name the shadow, and choose a different response — not to be perfect, but to be present.",
+      "tags": ["mental-health", "triggers", "shadow-work", "self-regulation"]
+    },
+    {
+      "id": "ew-perimenopause-parenting",
+      "category": "emotional-wellness",
+      "title": "Parenting Through Perimenopause",
+      "subtitle": "When Your Body Rewrites the Rules",
+      "emoji": "🔥",
+      "author": "Dr. Lena Morales",
+      "read_time": "8 min",
+      "summary": "Brain fog at pickup. Rage at homework time. The invisible hormonal shift of perimenopause can make parenting feel like driving with the parking brake on. This isn't a character flaw — it's biology. Here's how to adapt your routines, communicate with your kids about mom's changing energy, and build a support system that actually works.",
+      "tags": ["perimenopause", "hormones", "wellness", "self-care"]
+    },
+    {
+      "id": "ew-midlife-identity",
+      "category": "emotional-wellness",
+      "title": "The Midlife Unraveling",
+      "subtitle": "Finding Yourself Again Inside the Parent Role",
+      "emoji": "🦋",
+      "author": "MVP Editorial",
+      "read_time": "7 min",
+      "summary": "Jung described midlife as the point where the sun begins its descent — not a crisis, but an invitation to integrate the parts of yourself you left behind. For parents, this often hits when the kids are finally sleeping through the night and you realize you've forgotten who you are outside of 'mom' or 'dad.' A framework for reclaiming your identity without guilt.",
+      "tags": ["midlife", "identity", "individuation", "self-discovery"]
+    },
+    {
+      "id": "ew-anxiety-spiral",
+      "category": "emotional-wellness",
+      "title": "Breaking the Anxiety Spiral",
+      "subtitle": "When Your Worry Becomes Their Worry",
+      "emoji": "🌀",
+      "author": "Dr. Tanya Reeves",
+      "read_time": "5 min",
+      "summary": "Kids are emotional sponges. Your anxiety about their anxiety creates a feedback loop that neither of you can exit. This playbook gives you the exact scripts Dr. Becky uses — 'I believe you, AND I know you can handle this' — combined with Jungian grounding techniques to regulate yourself first so you can be the sturdy leader your child needs.",
+      "tags": ["anxiety", "co-regulation", "scripts", "mental-health"]
+    },
+    {
+      "id": "ew-rage-repair",
+      "category": "emotional-wellness",
+      "title": "After You've Lost It",
+      "subtitle": "The Repair Playbook for Parental Rage",
+      "emoji": "💔",
+      "author": "MVP Editorial",
+      "read_time": "5 min",
+      "summary": "You yelled. Maybe you slammed a door. The guilt is crushing. Here's the truth Dr. Becky wants you to hear: repair is not the consolation prize — it IS the skill you're teaching. Your child doesn't need a parent who never loses it. They need a parent who knows how to come back. Step-by-step repair scripts that actually work.",
+      "tags": ["rage", "repair", "scripts", "guilt", "self-compassion"]
+    },
+
+    {
+      "id": "fd-sibling-rivalry",
+      "category": "family-dynamics",
+      "title": "The Sibling Rivalry Reset",
+      "subtitle": "Why 'Be Nice to Your Sister' Never Works",
+      "emoji": "⚡",
+      "author": "MVP Editorial",
+      "read_time": "6 min",
+      "summary": "When you tell siblings to 'just get along,' you're asking them to bypass real emotions. Jung saw sibling dynamics as each child's first encounter with the Other — a mirror that reveals their developing sense of self. Instead of refereeing, try Dr. Becky's approach: narrate what you see, validate both sides, and set the boundary. Scripts included.",
+      "tags": ["siblings", "conflict", "scripts", "boundaries"]
+    },
+    {
+      "id": "fd-divorce-kids",
+      "category": "family-dynamics",
+      "title": "Two Homes, One Heart",
+      "subtitle": "Helping Kids Thrive After Separation",
+      "emoji": "🏠",
+      "author": "Dr. Carla Simmons",
+      "read_time": "9 min",
+      "summary": "Divorce doesn't break children — unresolved conflict between parents does. This guide covers transition-day scripts, how to handle 'I want to go to Mom's/Dad's house' without crumbling, and building rituals that give kids an anchor in each home. Includes a printable transition-day checklist.",
+      "tags": ["divorce", "separation", "co-parenting", "transitions"]
+    },
+    {
+      "id": "fd-single-parent",
+      "category": "family-dynamics",
+      "title": "The Single Parent's Superpower",
+      "subtitle": "You Are Enough — Here's the Proof",
+      "emoji": "💪",
+      "author": "James Whitfield",
+      "read_time": "6 min",
+      "summary": "Solo parenting isn't a deficit model. Research consistently shows that a single attuned parent is better than two disengaged ones. But the exhaustion is real. This piece covers the three things single parents should ruthlessly protect: their sleep, their village, and their right to say 'not today.' Practical systems from parents who've been there.",
+      "tags": ["single-parent", "self-care", "village", "systems"]
+    },
+    {
+      "id": "fd-marriage-dates",
+      "category": "family-dynamics",
+      "title": "Date Night Is Not Optional",
+      "subtitle": "Your Marriage Needs You to Show Up",
+      "emoji": "❤️",
+      "author": "MVP Editorial",
+      "read_time": "5 min",
+      "summary": "The relationship between partners is the emotional foundation of the house. When it cracks, kids feel the tremor. But 'date night' doesn't have to mean a $200 dinner. It can be 20 minutes on the porch after bedtime. The point is intentional presence — the same thing Dr. Becky teaches about parenting, applied to your partner. 12 at-home date ideas that actually reconnect you.",
+      "tags": ["marriage", "relationships", "connection", "date-night"]
+    },
+    {
+      "id": "fd-blended-family",
+      "category": "family-dynamics",
+      "title": "Blending Without Breaking",
+      "subtitle": "Stepparenting with Grace and Boundaries",
+      "emoji": "🧩",
+      "author": "Dr. Carla Simmons",
+      "read_time": "7 min",
+      "summary": "The stepparent archetype is one of the most misunderstood in family life. You're not replacing anyone — you're adding. But boundaries are everything: let the bio-parent lead discipline for the first year, build trust through play, and never compete for love. A Jungian-informed framework for the blended family journey.",
+      "tags": ["blended-family", "stepparenting", "boundaries", "trust"]
+    },
+
+    {
+      "id": "hn-kid-nutrition",
+      "category": "health-nutrition",
+      "title": "The No-Stress Feeding Playbook",
+      "subtitle": "Ending the Dinner Table Power Struggle",
+      "emoji": "🥦",
+      "author": "Mia Chen, RD",
+      "read_time": "7 min",
+      "summary": "Your job is to decide what, when, and where. Their job is to decide whether and how much. That's Ellyn Satter's division of responsibility, and it works because it respects your child's autonomy — their early individuation, as Jung would frame it. Stop short-order cooking. Stop bribing with dessert. Start here.",
+      "tags": ["nutrition", "picky-eating", "food", "autonomy"]
+    },
+    {
+      "id": "hn-hydration-kids",
+      "category": "health-nutrition",
+      "title": "The Hydration Cheat Sheet",
+      "subtitle": "How Much Water Kids Actually Need (By Age)",
+      "emoji": "💧",
+      "author": "MVP Editorial",
+      "read_time": "3 min",
+      "summary": "Most kids are mildly dehydrated by 3pm — and it shows up as crankiness, not thirst. Quick reference: toddlers need 4 cups, school-age kids need 5-8. Tips for making water appealing without juice boxes, and the one sports drink that pediatricians actually recommend.",
+      "tags": ["hydration", "water", "health", "quick-reference"]
+    },
+    {
+      "id": "hn-sick-kid-guide",
+      "category": "health-nutrition",
+      "title": "When to Worry, When to Wait",
+      "subtitle": "A Parent's Guide to Common Childhood Illnesses",
+      "emoji": "🤒",
+      "author": "Dr. Priya Nair, MD",
+      "read_time": "8 min",
+      "summary": "Fevers, rashes, coughs that won't quit — the parental anxiety machine runs 24/7. This evidence-based guide covers the 10 most common childhood illnesses with clear 'call the doctor' vs. 'ride it out' decision trees. Includes an at-home sick kit checklist and when ibuprofen vs. acetaminophen is the right call.",
+      "tags": ["sickness", "fever", "pediatric", "first-aid"]
+    },
+    {
+      "id": "hn-meal-prep-families",
+      "category": "health-nutrition",
+      "title": "30-Minute Family Meals",
+      "subtitle": "12 Recipes That Kids Will Actually Eat",
+      "emoji": "🍳",
+      "author": "Chef Rosa Martinez",
+      "read_time": "10 min",
+      "summary": "No one has time for a 90-minute recipe on a Tuesday. These 12 meals are tested by real families, take 30 minutes or less, and each one has a kid-friendly version and an adult upgrade. From sheet-pan chicken thighs to a hidden-veggie pasta sauce that has survived hundreds of picky eaters.",
+      "tags": ["recipes", "meal-prep", "quick-meals", "nutrition"]
+    },
+    {
+      "id": "hn-kids-meds-guide",
+      "category": "health-nutrition",
+      "title": "The Parents' Medicine Cabinet",
+      "subtitle": "Dosing Charts, Expiration Dates, and What You Actually Need",
+      "emoji": "💊",
+      "author": "Dr. Priya Nair, MD",
+      "read_time": "6 min",
+      "summary": "Acetaminophen vs. ibuprofen — when to use which, and the weight-based dosing chart every fridge needs. Plus: what OTC meds are actually safe for toddlers, how to check expiration dates properly, and the 8 items every family medicine cabinet should have stocked.",
+      "tags": ["medications", "dosing", "safety", "pediatric"]
+    },
+
+    {
+      "id": "dr-sleep-science",
+      "category": "daily-routines",
+      "title": "The Sleep Reset",
+      "subtitle": "Evidence-Based Strategies That Don't Involve Crying It Out",
+      "emoji": "🌙",
+      "author": "Dr. Sarah Kim",
+      "read_time": "8 min",
+      "summary": "Sleep training is not binary. Between 'cry it out' and 'co-sleep until college' lies a spectrum of gentle approaches that respect your child's attachment needs while protecting your sanity. This guide covers the chair method, timed checks, and Dr. Becky's 'I'm right outside' script — organized by age from infant to school-age.",
+      "tags": ["sleep", "bedtime", "sleep-training", "routines"]
+    },
+    {
+      "id": "dr-morning-routine",
+      "category": "daily-routines",
+      "title": "Mornings Without Meltdowns",
+      "subtitle": "The 4-Step System That Gets Everyone Out the Door",
+      "emoji": "☀️",
+      "author": "MVP Editorial",
+      "read_time": "5 min",
+      "summary": "If your mornings feel like herding cats through molasses, you're not alone. The fix isn't more yelling — it's more structure. This system uses visual schedules, strategic choices ('red shirt or blue shirt?'), and one key Dr. Becky principle: kids cooperate when they feel connected. Printable morning chart included.",
+      "tags": ["morning-routine", "schedules", "visual-aids", "cooperation"]
+    },
+    {
+      "id": "dr-bedtime-battles",
+      "category": "daily-routines",
+      "title": "Bedtime Battles: A Field Guide",
+      "subtitle": "When 'One More Story' Becomes a Hostage Negotiation",
+      "emoji": "📖",
+      "author": "MVP Editorial",
+      "read_time": "6 min",
+      "summary": "Bedtime resistance is almost never about bedtime. It's about separation, control, or unprocessed feelings from the day. Jung called nighttime the territory of the unconscious — for kids, that can feel scary. Here's how to build a bedtime ritual that addresses the real need: connection, safety, and a gentle bridge to sleep.",
+      "tags": ["bedtime", "resistance", "connection", "rituals"]
+    },
+    {
+      "id": "dr-screen-time",
+      "category": "daily-routines",
+      "title": "The Screen Time Truce",
+      "subtitle": "Realistic Limits That Don't Start a War",
+      "emoji": "📱",
+      "author": "Dr. Amanda Cross",
+      "read_time": "6 min",
+      "summary": "Zero screens is unrealistic. Unlimited screens is harmful. The research points to a middle path: intentional use, co-viewing when possible, and hard stops built into the routine — not negotiated in the moment. Includes age-appropriate guidelines and the one transition strategy that actually prevents meltdowns when the iPad goes off.",
+      "tags": ["screen-time", "limits", "technology", "transitions"]
+    },
+    {
+      "id": "dr-schedules-autonomy",
+      "category": "daily-routines",
+      "title": "Structure That Feels Like Freedom",
+      "subtitle": "Building Schedules Kids Actually Follow",
+      "emoji": "📋",
+      "author": "MVP Editorial",
+      "read_time": "5 min",
+      "summary": "The paradox of childhood: kids thrive with structure but resist being controlled. The key is building routines that offer micro-choices within firm boundaries — what Jung called 'individuation within containment.' Visual schedule templates for toddlers, school-age, and tweens.",
+      "tags": ["schedules", "routines", "autonomy", "visual-aids"]
+    },
+
+    {
+      "id": "cv-finding-nanny",
+      "category": "childcare-village",
+      "title": "Finding Your Family's Right-Fit Nanny",
+      "subtitle": "Interview Questions, Red Flags, and Fair Pay",
+      "emoji": "👶",
+      "author": "MVP Editorial",
+      "read_time": "9 min",
+      "summary": "A great nanny isn't just about credentials — it's about nervous-system compatibility. Can they stay calm when your toddler is melting down? Do they narrate emotions or dismiss them? This hiring guide covers the 15 questions that reveal caregiving philosophy, regional pay benchmarks, and how to structure a trial period that protects everyone.",
+      "tags": ["nanny", "childcare", "hiring", "interview"]
+    },
+    {
+      "id": "cv-babysitter-prep",
+      "category": "childcare-village",
+      "title": "The Babysitter Briefing Sheet",
+      "subtitle": "Everything They Need on One Page",
+      "emoji": "📝",
+      "author": "MVP Editorial",
+      "read_time": "3 min",
+      "summary": "You're finally going out. Don't spend 20 minutes at the door explaining everything. Use this one-page template: emergency contacts, bedtime routine, food allergies, screen rules, and the magic phrase that calms your specific kid. Printable PDF included.",
+      "tags": ["babysitter", "template", "printable", "date-night"]
+    },
+    {
+      "id": "cv-playdate-survival",
+      "category": "childcare-village",
+      "title": "The Play Date Playbook",
+      "subtitle": "Hosting, Boundaries, and When to Intervene",
+      "emoji": "🎈",
+      "author": "Nora Ellison",
+      "read_time": "5 min",
+      "summary": "Play dates are where kids practice being human — sharing, negotiating, handling disappointment. Your job isn't to engineer a perfect experience. It's to set the container and step back. When to intervene (safety, cruelty) vs. when to let them work it out. Plus: the post-play-date debrief that builds emotional intelligence.",
+      "tags": ["play-dates", "social-skills", "boundaries", "friendship"]
+    },
+    {
+      "id": "cv-building-village",
+      "category": "childcare-village",
+      "title": "It Takes a Village (Here's How to Build One)",
+      "subtitle": "Creating Support Networks in the Age of Isolation",
+      "emoji": "🏘️",
+      "author": "MVP Editorial",
+      "read_time": "7 min",
+      "summary": "The village didn't disappear — it was never rebuilt after we scattered into suburbs and screens. Building one today requires intentionality: the neighbor you trade school pickups with, the group chat that's actually supportive, the 'Tuesday park crew.' Practical strategies from parents who built their village from scratch.",
+      "tags": ["village", "community", "support", "isolation"]
+    },
+    {
+      "id": "cv-livein-nanny",
+      "category": "childcare-village",
+      "title": "Live-In vs. Live-Out",
+      "subtitle": "Making the Childcare Decision That Fits Your Family",
+      "emoji": "🏠",
+      "author": "MVP Editorial",
+      "read_time": "6 min",
+      "summary": "Live-in care offers flexibility and deeper bonds. Live-out preserves privacy and clearer boundaries. Neither is objectively better — it depends on your family's rhythm, space, and budget. A comparison framework covering cost, boundaries, backup plans, and the conversation to have with your partner before deciding.",
+      "tags": ["nanny", "live-in", "childcare", "decision-making"]
+    },
+
+    {
+      "id": "eg-school-choice",
+      "category": "education-growth",
+      "title": "Public vs. Private",
+      "subtitle": "The School Choice Decision Framework",
+      "emoji": "🏫",
+      "author": "MVP Editorial",
+      "read_time": "8 min",
+      "summary": "This isn't about which school is 'better' — it's about which environment lets your specific child individuate. A shy, creative kid may bloom in a small private setting. A social kid may thrive in the diversity of public school. The framework: visit both, watch the playground (not the brochure), and trust your gut over the rankings.",
+      "tags": ["school", "private-school", "public-school", "education"]
+    },
+    {
+      "id": "eg-first-time-parents",
+      "category": "education-growth",
+      "title": "The First-Time Parent Survival Kit",
+      "subtitle": "What Nobody Tells You (But Everyone Should)",
+      "emoji": "🍼",
+      "author": "Dr. Lena Morales",
+      "read_time": "10 min",
+      "summary": "Forget the 47 books on your nightstand. Here are the 5 things that actually matter in the first year: sleep when the baby sleeps (yes, really), lower your standards for everything except safety, accept help without guilt, know that crying is communication not failure, and remember that you are being transformed — not broken.",
+      "tags": ["first-time-parents", "newborn", "survival", "expectations"]
+    },
+    {
+      "id": "eg-clubs-activities",
+      "category": "education-growth",
+      "title": "The Overscheduling Trap",
+      "subtitle": "How Many Activities Is Too Many?",
+      "emoji": "⚽",
+      "author": "MVP Editorial",
+      "read_time": "5 min",
+      "summary": "Soccer, piano, art class, coding camp, swim — at what point does enrichment become exhaustion? The research is clear: kids need unstructured time to develop creativity and self-direction. Rule of thumb: one sport, one creative pursuit, and acres of boredom. How to cut back without guilt.",
+      "tags": ["activities", "clubs", "overscheduling", "boredom"]
+    },
+    {
+      "id": "eg-crafts-connection",
+      "category": "education-growth",
+      "title": "Crafts as Connection",
+      "subtitle": "15 Low-Mess Projects That Build More Than Art",
+      "emoji": "🎨",
+      "author": "Sara DeLuca",
+      "read_time": "6 min",
+      "summary": "The craft isn't the point — the side-by-side time is. Kids open up when their hands are busy and the pressure of eye contact is off. These 15 projects require minimal supplies, create minimal mess, and maximize the kind of casual conversation where real feelings slip out.",
+      "tags": ["crafts", "connection", "art", "bonding"]
+    },
+
+    {
+      "id": "ap-nature-reset",
+      "category": "adventures-play",
+      "title": "The 20-Minute Nature Reset",
+      "subtitle": "Why Outside Time Is the Best Medicine",
+      "emoji": "🌲",
+      "author": "MVP Editorial",
+      "read_time": "4 min",
+      "summary": "The research is staggering: 20 minutes outside reduces cortisol by 20%. For kids with big emotions, nature is the ultimate co-regulator — it's bigger than their feelings. Doesn't have to be a national park. Your backyard, a puddle, a stick. Here are 10 'nature micro-adventures' you can do in under an hour.",
+      "tags": ["nature", "outdoors", "stress-relief", "micro-adventures"]
+    },
+    {
+      "id": "ap-travel-kids",
+      "category": "adventures-play",
+      "title": "Traveling With Kids Without Losing Your Mind",
+      "subtitle": "Packing Lists, Plane Strategies, and Lowered Expectations",
+      "emoji": "✈️",
+      "author": "Nora Ellison",
+      "read_time": "8 min",
+      "summary": "The secret to traveling with kids: expect nothing to go as planned and pack twice the snacks. This guide covers age-specific plane strategies (toddler vs. school-age are different games), the carry-on essentials that save flights, and how to build in 'kid pace' days so everyone actually enjoys the trip.",
+      "tags": ["travel", "flying", "vacation", "packing"]
+    },
+    {
+      "id": "ap-music-development",
+      "category": "adventures-play",
+      "title": "Why Music Matters More Than You Think",
+      "subtitle": "The Neuroscience of Rhythm, Bonding, and Regulation",
+      "emoji": "🎵",
+      "author": "Dr. Amanda Cross",
+      "read_time": "5 min",
+      "summary": "Music activates more brain regions simultaneously than any other activity. For kids, it builds language, math readiness, and — critically — emotional regulation. You don't need lessons or instruments. Singing in the car, kitchen dance parties, and bedtime lullabies are enough. The science behind why your off-key singing matters enormously.",
+      "tags": ["music", "development", "neuroscience", "bonding"]
+    },
+    {
+      "id": "ap-weekend-outings",
+      "category": "adventures-play",
+      "title": "50 Weekend Outings Under $20",
+      "subtitle": "Because Adventure Doesn't Require a Budget",
+      "emoji": "🗺️",
+      "author": "MVP Editorial",
+      "read_time": "4 min",
+      "summary": "Libraries, farmers markets, fire station tours, letterboxing, cloud-watching picnics, neighborhood scavenger hunts — the best outings are often free and fueled by curiosity. A categorized list of 50 ideas organized by age group, energy level, and weather.",
+      "tags": ["outings", "budget", "weekend", "adventure"]
+    },
+
+    {
+      "id": "sg-kids-clothes",
+      "category": "style-gear",
+      "title": "Dressing Kids Without the Drama",
+      "subtitle": "Autonomy, Weather, and Letting Go of Matching",
+      "emoji": "👗",
+      "author": "MVP Editorial",
+      "read_time": "4 min",
+      "summary": "The preschooler in a tutu and rain boots in July? That's individuation in action. Clothing battles are rarely about clothes — they're about control and identity. Dr. Becky's framework: offer two acceptable choices, then step back. The only non-negotiables: safety and weather-appropriate layers. Everything else? Let them be weird.",
+      "tags": ["clothes", "autonomy", "toddler", "independence"]
+    },
+    {
+      "id": "sg-upcycled-kids",
+      "category": "style-gear",
+      "title": "The Upcycled Kids' Wardrobe",
+      "subtitle": "Sustainable Style on a Real-Life Budget",
+      "emoji": "♻️",
+      "author": "Jess Park",
+      "read_time": "5 min",
+      "summary": "Kids outgrow clothes every 3 months. New wardrobes every season is financially and environmentally insane. The smartest parents have a system: buy-sell-swap groups, consignment apps, a capsule wardrobe of 12 mix-and-match pieces, and the one brand whose secondhand value is worth the upfront cost.",
+      "tags": ["upcycled", "sustainable", "budget", "clothes"]
+    },
+    {
+      "id": "sg-car-safety",
+      "category": "style-gear",
+      "title": "Car Seat Safety: What You're Probably Getting Wrong",
+      "subtitle": "The Updated Guidelines Every Parent Needs",
+      "emoji": "🚗",
+      "author": "Dr. Priya Nair, MD",
+      "read_time": "5 min",
+      "summary": "90% of car seats are installed incorrectly. Rear-facing until at least age 2 (ideally 4). The chest clip goes at armpit level. The harness should pass the pinch test. And the coat trick that could save your child's life in a crash. Updated 2026 guidelines with photo examples.",
+      "tags": ["car-safety", "car-seat", "safety", "guidelines"]
+    },
+    {
+      "id": "sg-shoes-kids",
+      "category": "style-gear",
+      "title": "Kids' Shoes That Actually Last",
+      "subtitle": "A Podiatrist-Approved Buying Guide",
+      "emoji": "👟",
+      "author": "MVP Editorial",
+      "read_time": "4 min",
+      "summary": "Flat, flexible, and wide-toe-box. That's it. Most kids' shoes are miniature adult shoes designed for looks, not developing feet. This guide covers the 5 brands podiatrists actually recommend, when to size up, and why barefoot time is the best shoe of all.",
+      "tags": ["shoes", "footwear", "podiatry", "buying-guide"]
+    },
+
+    {
+      "id": "ss-bullying-scripts",
+      "category": "social-skills",
+      "title": "When Your Kid Is Being Bullied",
+      "subtitle": "Scripts for Them, Scripts for You, and When to Escalate",
+      "emoji": "🛡️",
+      "author": "Dr. Tanya Reeves",
+      "read_time": "7 min",
+      "summary": "First: believe them. Don't minimize ('kids are mean') or catastrophize ('I'm calling the principal NOW'). Dr. Becky's approach: validate the feeling, then empower the response. Teach your child the 'boring reaction' technique, the buddy system, and when to loop in an adult. And for you: scripts for talking to the school without becoming the parent everyone avoids.",
+      "tags": ["bullying", "scripts", "school", "empowerment"]
+    },
+    {
+      "id": "ss-etiquette-modern",
+      "category": "social-skills",
+      "title": "Modern Manners for Little Humans",
+      "subtitle": "Teaching Etiquette Without Shaming",
+      "emoji": "🎩",
+      "author": "MVP Editorial",
+      "read_time": "5 min",
+      "summary": "Manners aren't about obedience — they're about awareness of others. And that's a developmental skill, not a character trait. A 3-year-old interrupting isn't rude; their prefrontal cortex is under construction. Here's an age-appropriate etiquette guide that builds social awareness through practice, not punishment.",
+      "tags": ["etiquette", "manners", "social-skills", "development"]
+    },
+    {
+      "id": "ss-friendship-skills",
+      "category": "social-skills",
+      "title": "Helping the Shy Kid Make Friends",
+      "subtitle": "Connection Without Forcing It",
+      "emoji": "🌟",
+      "author": "Dr. Amanda Cross",
+      "read_time": "6 min",
+      "summary": "Introversion is a temperament, not a problem to solve. But every child needs at least one solid friendship for emotional resilience. For the shy kid, the strategy is small: one-on-one play dates (not group chaos), shared-interest activities, and never — ever — saying 'don't be shy' in front of other people. How to scaffold social confidence without changing who they are.",
+      "tags": ["friendship", "shy", "introversion", "social-confidence"]
+    },
+    {
+      "id": "ss-relationship-modeling",
+      "category": "social-skills",
+      "title": "They're Watching How You Fight",
+      "subtitle": "Modeling Healthy Conflict for Your Kids",
+      "emoji": "👀",
+      "author": "MVP Editorial",
+      "read_time": "5 min",
+      "summary": "Your kids don't need to see you agree on everything. They need to see you disagree respectfully, repair after rupture, and apologize when you're wrong. Jung called this living out the archetype of the 'conscious relationship.' Dr. Becky calls it 'showing your work.' Either way: your relationship is their first textbook on love.",
+      "tags": ["conflict", "modeling", "relationships", "repair"]
+    },
+
+    {
+      "id": "pg-parental-longevity",
+      "category": "parental-growth",
+      "title": "Parenting Is a Long Game",
+      "subtitle": "Investing in Your Health So You're There for All of It",
+      "emoji": "🏃",
+      "author": "Dr. Marcus Webb",
+      "read_time": "7 min",
+      "summary": "You can't pour from an empty cup — and you can't be at their wedding if you burn out at 55. Parental longevity isn't selfish; it's strategic. The four pillars: sleep (protect it ruthlessly), movement (15 min/day minimum), nutrition (eat what you'd feed them), and stress management (your cortisol is their cortisol).",
+      "tags": ["longevity", "health", "wellness", "self-care"]
+    },
+    {
+      "id": "pg-advocacy",
+      "category": "parental-growth",
+      "title": "Becoming Your Child's Best Advocate",
+      "subtitle": "Navigating Schools, Doctors, and Systems",
+      "emoji": "📢",
+      "author": "MVP Editorial",
+      "read_time": "6 min",
+      "summary": "Whether it's an IEP meeting, a pediatrician who dismisses your concern, or a school policy that doesn't fit your kid — advocacy is a skill. This guide covers how to prepare, how to be heard without being labeled 'difficult,' and when to bring backup. Includes email templates for common scenarios.",
+      "tags": ["advocacy", "school", "medical", "IEP"]
+    },
+    {
+      "id": "pg-best-resources",
+      "category": "parental-growth",
+      "title": "The MVP Resource Guide",
+      "subtitle": "Curated Blogs, Newsletters, Books, and Accounts",
+      "emoji": "📚",
+      "author": "MVP Editorial",
+      "read_time": "5 min",
+      "summary": "We filtered hundreds of parenting resources down to the ones worth your limited time. The blogs that aren't sponsored fluff. The newsletters that deliver actual value. The Instagram accounts run by real clinicians, not influencers. And the 5 parenting books that belong on every shelf — no matter your child's age.",
+      "tags": ["resources", "blogs", "books", "newsletters", "social-media"]
+    },
+    {
+      "id": "pg-inner-child",
+      "category": "parental-growth",
+      "title": "Reparenting Your Inner Child",
+      "subtitle": "The Jungian Key to Breaking Generational Patterns",
+      "emoji": "🔑",
+      "author": "Dr. Tanya Reeves",
+      "read_time": "8 min",
+      "summary": "Every time your child triggers you, your inner child is asking to be seen. Jung called this the 'wounded child' archetype — the part of you that never got what you're now trying to give your kids. This isn't therapy homework; it's a practical journaling framework (10 min/week) that helps you notice when you're parenting from your wounds instead of your wisdom.",
+      "tags": ["inner-child", "shadow-work", "generational", "journaling"]
+    }
+  ],
+
+  "community_posts": [
+    {
+      "id": "cp-annie-holidays",
+      "category": "family-dynamics",
+      "initials": "AQ",
+      "name": "Annie Q",
+      "title": "First holidays divorced",
+      "preview": "Hey there — this is my first holiday season divorced (last yr when separated we were nesting and doing it together). Any tips for making it feel okay for the kids when they're splitting time?"
+    },
+    {
+      "id": "cp-lynsey-meltdowns",
+      "category": "family-dynamics",
+      "initials": "LP",
+      "name": "Lynsey Park",
+      "title": "Managing meltdowns when Dad's away",
+      "preview": "My husband is gone on a work trip, and I'm solo with 3 kids under 7. Bedtime has been a disaster — everyone feeds off each other's energy. What's your survival-mode routine?"
+    },
+    {
+      "id": "cp-maria-daycare",
+      "category": "daily-routines",
+      "initials": "MR",
+      "name": "Maria R",
+      "title": "Toddler won't let go at daycare",
+      "preview": "Every morning is a battle. My 3-year-old clings to me and cries when I try to leave. I've tried everything — quick goodbyes, special lovey, talking about it the night before. I'm starting to dread drop-off."
+    },
+    {
+      "id": "cp-james-newbaby",
+      "category": "family-dynamics",
+      "initials": "JT",
+      "name": "James T",
+      "title": "Sibling rivalry after new baby",
+      "preview": "Our oldest (4) has been acting out since we brought the baby home — hitting, regressing on potty training, saying 'take the baby back.' I know it's normal but it's breaking my heart."
+    },
+    {
+      "id": "cp-sarah-perimenopause",
+      "category": "emotional-wellness",
+      "initials": "SK",
+      "name": "Sarah K",
+      "title": "Perimenopause rage + parenting",
+      "preview": "I never used to yell. Now I snap at my kids over nothing and then cry in the bathroom. I'm 43 and my doctor says it's hormonal but I feel like a terrible mother. Anyone else?"
+    },
+    {
+      "id": "cp-david-single-dad",
+      "category": "family-dynamics",
+      "initials": "DM",
+      "name": "David M",
+      "title": "Single dad doing hair — help!",
+      "preview": "My daughter's mom isn't in the picture and I have NO idea how to do her hair. She's biracial with curly hair and I'm learning from YouTube but every morning is tears. What products and styles are easiest?"
+    },
+    {
+      "id": "cp-rachel-sleep",
+      "category": "daily-routines",
+      "initials": "RB",
+      "name": "Rachel B",
+      "title": "4-year-old won't stay in bed",
+      "preview": "We switched from crib to toddler bed 3 months ago and every night she's up 10-15 times. I've tried everything gentle and I'm losing it. Is sleep training at 4 even a thing?"
+    },
+    {
+      "id": "cp-michelle-nanny",
+      "category": "childcare-village",
+      "initials": "MW",
+      "name": "Michelle W",
+      "title": "How much should I pay my nanny?",
+      "preview": "We're in a MCOL area and I keep getting wildly different numbers. $18/hr? $25/hr? Does it change for 2 kids vs 1? What about guaranteed hours? I want to be fair but we're on a budget."
+    },
+    {
+      "id": "cp-tom-screen-time",
+      "category": "daily-routines",
+      "initials": "TL",
+      "name": "Tom L",
+      "title": "Screen time guilt is eating me alive",
+      "preview": "I work from home and my 5-year-old gets way more tablet time than I'd like to admit. The guilt is constant but I literally can't be in two places at once. How do you balance WFH + parenting without screens?"
+    },
+    {
+      "id": "cp-priya-picky",
+      "category": "health-nutrition",
+      "initials": "PS",
+      "name": "Priya S",
+      "title": "My kid only eats 5 foods",
+      "preview": "Pasta, chicken nuggets, plain rice, bananas, and goldfish crackers. That's it. She's 6. Pediatrician says she's growing fine but I worry constantly. Has anyone successfully expanded a picky eater's range?"
+    },
+    {
+      "id": "cp-emma-triggers",
+      "category": "emotional-wellness",
+      "initials": "EH",
+      "name": "Emma H",
+      "title": "I parent exactly like my mother",
+      "preview": "I swore I'd never be like her. But when I'm stressed, I hear her words coming out of my mouth — the criticism, the guilt trips. How do you break generational patterns when they're so deeply wired?"
+    },
+    {
+      "id": "cp-carlos-school",
+      "category": "education-growth",
+      "initials": "CG",
+      "name": "Carlos G",
+      "title": "Public vs. private school anxiety",
+      "preview": "We can technically afford private school but it would be tight. Our public school is 'okay' rated. I keep going back and forth. For those who chose one or the other — do you regret it?"
+    },
+    {
+      "id": "cp-lisa-village",
+      "category": "childcare-village",
+      "initials": "LT",
+      "name": "Lisa T",
+      "title": "Moved to new city — no village",
+      "preview": "We relocated for my husband's job and I know literally no one. I have a 2-year-old and a newborn. I've never felt so isolated. How did you build your village from scratch?"
+    },
+    {
+      "id": "cp-nina-marriage",
+      "category": "family-dynamics",
+      "initials": "NP",
+      "name": "Nina P",
+      "title": "Kids killed our marriage — how to reconnect?",
+      "preview": "We love our kids. We're great co-parents. But we're basically roommates now. No intimacy, no real conversation beyond logistics. We need to reconnect but we're both so tired. Where do you even start?"
+    },
+    {
+      "id": "cp-jason-bullying",
+      "category": "social-skills",
+      "initials": "JR",
+      "name": "Jason R",
+      "title": "My 7-year-old is being excluded at recess",
+      "preview": "He comes home saying 'nobody wants to play with me' and it's gutting. Teacher says he's fine in class but recess is a different story. Do I talk to other parents? Teach him strategies? Just listen?"
+    },
+    {
+      "id": "cp-amanda-travel",
+      "category": "adventures-play",
+      "initials": "AF",
+      "name": "Amanda F",
+      "title": "Flying solo with a toddler — tips?",
+      "preview": "I have a 5-hour flight next month with my 2-year-old. No other adult. I'm already anxious. What snacks, toys, and strategies got you through a long flight alone with a little one?"
+    },
+    {
+      "id": "cp-mike-midlife",
+      "category": "emotional-wellness",
+      "initials": "MK",
+      "name": "Mike K",
+      "title": "Dad's midlife identity crisis",
+      "preview": "I'm 41, I have two amazing kids, a good job... and I feel completely lost. Like I built someone else's life. Anyone else going through this? I don't even know what I'd want to change."
+    },
+    {
+      "id": "cp-jen-upcycle",
+      "category": "style-gear",
+      "initials": "JD",
+      "name": "Jen D",
+      "title": "Best consignment apps for kids' clothes?",
+      "preview": "My kids grow out of everything in 2 months and I'm done buying new. What apps or local swaps do you use? I've tried Poshmark but the search is overwhelming for kids' sizes."
+    },
+    {
+      "id": "cp-alex-adhd",
+      "category": "education-growth",
+      "initials": "AT",
+      "name": "Alex T",
+      "title": "Navigating school with an ADHD kid",
+      "preview": "My son just got diagnosed at 8 and suddenly everything makes sense. But the school seems clueless. Do I push for a 504? An IEP? Any parents been through this process who can guide me?"
+    },
+    {
+      "id": "cp-sam-separation",
+      "category": "daily-routines",
+      "initials": "SJ",
+      "name": "Sam J",
+      "title": "Post-holiday separation tears",
+      "preview": "After winter break, my kindergartener is back to clinging and crying at drop-off like it's September again. I thought we were past this. How long does the re-adjustment usually take?"
+    }
+  ]
+}

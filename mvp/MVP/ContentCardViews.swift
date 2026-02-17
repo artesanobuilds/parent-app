@@ -62,12 +62,18 @@ struct LibraryItemCard: View {
                         .font(.system(size: 26))
                 )
 
-            // Title
-            Text(item.title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(.brandNavy)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
+            // Title + Subtitle
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.brandNavy)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Text(item.subtitle)
+                    .font(.caption)
+                    .foregroundColor(.brandGray)
+                    .lineLimit(1)
+            }
 
             Spacer(minLength: 0)
         }
