@@ -2,6 +2,12 @@ import Foundation
 
 // MARK: - Models
 
+struct ContentCategory: Identifiable {
+    let id: String
+    let name: String
+    let emoji: String
+}
+
 struct CommunityPost: Identifiable {
     let id = UUID()
     let initials: String
@@ -22,6 +28,21 @@ struct LibraryItem: Identifiable {
 // MARK: - Content Library
 
 enum MockContentProvider {
+
+    // MARK: Categories
+
+    static let categories: [ContentCategory] = [
+        ContentCategory(id: "emotional-wellness", name: "Emotional Wellness", emoji: "🧠"),
+        ContentCategory(id: "family-dynamics", name: "Family Dynamics", emoji: "👨‍👩‍👧‍👦"),
+        ContentCategory(id: "health-nutrition", name: "Health & Nutrition", emoji: "🥗"),
+        ContentCategory(id: "daily-routines", name: "Daily Routines", emoji: "⏰"),
+        ContentCategory(id: "childcare-village", name: "Childcare & Village", emoji: "🏘️"),
+        ContentCategory(id: "education-growth", name: "Education & Growth", emoji: "📖"),
+        ContentCategory(id: "social-skills", name: "Social Skills", emoji: "🤝"),
+        ContentCategory(id: "adventures-play", name: "Adventures & Play", emoji: "🌲"),
+        ContentCategory(id: "style-gear", name: "Style & Gear", emoji: "👟"),
+        ContentCategory(id: "parental-growth", name: "Parental Growth", emoji: "🌱"),
+    ]
 
     // MARK: Community Posts
 
@@ -181,5 +202,20 @@ enum MockContentProvider {
     /// Returns a random subset of library items (3 items).
     static func randomLibraryItems() -> [LibraryItem] {
         Array(libraryItems.shuffled().prefix(3))
+    }
+
+    /// Returns library items filtered by category.
+    static func libraryItems(for category: String) -> [LibraryItem] {
+        libraryItems.filter { $0.category == category }
+    }
+
+    /// Returns community posts filtered by category.
+    static func communityPosts(for category: String) -> [CommunityPost] {
+        communityPosts.filter { $0.category == category }
+    }
+
+    /// Returns a featured library item (first one from emotional-wellness).
+    static var featuredItem: LibraryItem {
+        libraryItems.first { $0.category == "emotional-wellness" }!
     }
 }

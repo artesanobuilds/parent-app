@@ -35,7 +35,6 @@ struct CommunityPostCard: View {
                 .lineLimit(3)
         }
         .padding(14)
-        .frame(width: 220, alignment: .leading)
         .background(Color.brandCardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .shadow(color: Color.black.opacity(0.06), radius: 8, y: 3)
@@ -78,7 +77,6 @@ struct LibraryItemCard: View {
             Spacer(minLength: 0)
         }
         .padding(10)
-        .frame(width: 240, alignment: .leading)
         .background(Color.brandCardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .shadow(color: Color.black.opacity(0.06), radius: 8, y: 3)
@@ -107,6 +105,7 @@ struct CommunitySection: View {
                 HStack(spacing: 12) {
                     ForEach(posts) { post in
                         CommunityPostCard(post: post)
+                            .frame(width: 220)
                     }
                 }
             }
@@ -130,6 +129,7 @@ struct LibrarySection: View {
                 HStack(spacing: 12) {
                     ForEach(items) { item in
                         LibraryItemCard(item: item)
+                            .frame(width: 240)
                     }
                 }
             }

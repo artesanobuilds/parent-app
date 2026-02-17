@@ -8,62 +8,159 @@ struct HomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     // Greeting header
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(username.isEmpty ? "Welcome" : username)
-                                .font(.title.weight(.bold))
-                                .foregroundColor(.brandNavy)
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.brandNavy)
-                            Spacer()
-                            Circle()
-                                .fill(Color.brandCoral.opacity(0.15))
-                                .frame(width: 40, height: 40)
-                                .overlay(
-                                    Image(systemName: "person.fill")
-                                        .foregroundColor(.brandCoral)
-                                        .font(.system(size: 18))
-                                )
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 8)
+                    greetingHeader
+                        .padding(.horizontal)
+                        .padding(.top, 8)
 
-                    // Coming soon card
-                    VStack(spacing: 16) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 40))
-                            .foregroundColor(.brandCoral.opacity(0.6))
+                    // Featured hero card
+                    featuredCard
+                        .padding(.horizontal)
 
-                        Text("Home is coming soon")
-                            .font(.title3.weight(.semibold))
-                            .foregroundColor(.brandNavy)
+                    // Community section
+                    CommunitySection(posts: MockContentProvider.randomCommunityPosts())
+                        .padding(.leading)
 
-                        Text("Personalized content, progress tracking, and daily recommendations will appear here.")
-                            .font(.body)
-                            .foregroundColor(.brandGray)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 48)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(Color.brandCardBackground)
-                            .shadow(color: Color.black.opacity(0.04), radius: 12, y: 4)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .stroke(Color.brandNavy.opacity(0.06), lineWidth: 1)
-                    )
-                    .padding(.horizontal)
+                    // Library section
+                    LibrarySection(items: MockContentProvider.randomLibraryItems())
+                        .padding(.leading)
 
-                    Spacer()
+                    // Category grid
+                    categoriesSection
+                        .padding(.horizontal)
+
+                    Spacer(minLength: 20)
                 }
             }
             .background(Color.brandBackground.ignoresSafeArea())
             .navigationBarHidden(true)
+        }
+    }
+
+    // MARK: - Greeting Header
+
+    private var greetingHeader: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(greeting)
+                    .font(.caption)
+                    .foregroundColor(.brandGray)
+                Text(username.isEmpty ? "Welcome" : username)
+                    .font(.title2.weight(.bold))
+                    .foregroundColor(.brandNavy)
+            }
+            Spacer()
+            Circle()
+                .fill(Color.brandCoral.opacity(0.15))
+                .frame(width: 40, height: 40)
+                .overlay(
+                    Text(username.isEmpty ? "?" : String(username.prefix(1)).uppercased())
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.brandCoral)
+                )
+        }
+    }
+
+    // MARK: - Featured Card
+
+    private var featuredCard: some View {
+        let item = MockContentProvider.featuredItem
+        return VStack(alignment: .leading, spacing: 0) {
+            // Colored top area with emoji
+            ZStack(alignment: .bottomLeading) {
+                LinearGradient(
+                    colors: [Color.brandCoral.opacity(0.15), Color.brandCoral.opacity(0.08)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .frame(height: 160)
+
+                Text(item.emoji)
+                    .font(.system(size: 56))
+                    .padding(20)
+            }
+
+            // Text area
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Start Here Today")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(.brandCoral)
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+
+                Text(item.title)
+                    .font(.title3.weight(.bold))
+                    .foregroundColor(.brandNavy)
+
+                Text(item.subtitle)
+                    .font(.subheadline)
+                    .foregroundColor(.brandGray)
+
+                Button {
+                    // Placeholder action
+                } label: {
+                    Text("Start Here")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(Color.brandCoral)
+                        .clipShape(Capsule())
+                }
+                .padding(.top, 4)
+            }
+            .padding(16)
+        }
+        .background(Color.brandCardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.brandNavy.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Categories Section
+
+    private var categoriesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Browse by topic")
+                .font(.footnote.weight(.semibold))
+                .foregroundColor(.brandGray)
+                .textCase(.uppercase)
+                .tracking(0.5)
+                .padding(.leading, 4)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                ForEach(MockContentProvider.categories) { category in
+                    HStack(spacing: 8) {
+                        Text(category.emoji)
+                            .font(.system(size: 20))
+                        Text(category.name)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(.brandNavy)
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(Color.brandCardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.brandNavy.opacity(0.08), lineWidth: 1)
+                    )
+                }
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
+    private var greeting: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 5..<12: return "Good morning"
+        case 12..<17: return "Good afternoon"
+        default: return "Good evening"
         }
     }
 }
