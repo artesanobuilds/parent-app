@@ -236,6 +236,16 @@ def list_articles(category: str | None = None, limit: int = 50):
     return content_service.get_articles(category=category, limit=limit)
 
 
+@app.get("/content/articles/{article_id}")
+def get_article(article_id: str):
+    """Return a single article with full content."""
+    article = content_service.get_article(article_id)
+    if article is None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"error": "Article not found"})
+    return article
+
+
 @app.get("/content/community")
 def list_community_posts(category: str | None = None, limit: int = 50):
     """Return community posts, optionally filtered by category."""

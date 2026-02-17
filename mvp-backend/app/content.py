@@ -32,7 +32,16 @@ def get_articles(category: Optional[str] = None, limit: int = 50) -> List[Dict]:
     articles = _load()["library_articles"]
     if category:
         articles = [a for a in articles if a["category"] == category]
-    return articles[:limit]
+    # Strip full content from list responses for performance
+    return [{k: v for k, v in a.items() if k != "content"} for a in articles[:limit]]
+
+
+def get_article(article_id: str) -> Optional[Dict]:
+    """Return a single article by ID, including full content."""
+    for article in _load()["library_articles"]:
+        if article["id"] == article_id:
+            return article
+    return None
 
 
 def get_community_posts(category: Optional[str] = None, limit: int = 50) -> List[Dict]:
