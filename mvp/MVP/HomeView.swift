@@ -33,6 +33,7 @@ struct HomeView: View {
             }
             .background(Color.brandBackground.ignoresSafeArea())
             .navigationBarHidden(true)
+            .withContentNavigationDestinations()
         }
     }
 
@@ -64,59 +65,59 @@ struct HomeView: View {
 
     private var featuredCard: some View {
         let item = MockContentProvider.featuredItem
-        return VStack(alignment: .leading, spacing: 0) {
-            // Colored top area with emoji
-            ZStack(alignment: .bottomLeading) {
-                LinearGradient(
-                    colors: [Color.brandCoral.opacity(0.15), Color.brandCoral.opacity(0.08)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .frame(height: 160)
+        return NavigationLink(value: ArticleRoute(id: item.id)) {
+            VStack(alignment: .leading, spacing: 0) {
+                // Colored top area with emoji
+                ZStack(alignment: .bottomLeading) {
+                    LinearGradient(
+                        colors: [Color.brandCoral.opacity(0.15), Color.brandCoral.opacity(0.08)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .frame(height: 160)
 
-                Text(item.emoji)
-                    .font(.system(size: 56))
-                    .padding(20)
-            }
+                    Text(item.emoji)
+                        .font(.system(size: 56))
+                        .padding(20)
+                }
 
-            // Text area
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Start Here Today")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundColor(.brandCoral)
-                    .textCase(.uppercase)
-                    .tracking(0.5)
+                // Text area
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Start Here Today")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundColor(.brandCoral)
+                        .textCase(.uppercase)
+                        .tracking(0.5)
 
-                Text(item.title)
-                    .font(.title3.weight(.bold))
-                    .foregroundColor(.brandNavy)
+                    Text(item.title)
+                        .font(.title3.weight(.bold))
+                        .foregroundColor(.brandNavy)
+                        .multilineTextAlignment(.leading)
 
-                Text(item.subtitle)
-                    .font(.subheadline)
-                    .foregroundColor(.brandGray)
+                    Text(item.subtitle)
+                        .font(.subheadline)
+                        .foregroundColor(.brandGray)
 
-                Button {
-                    // Placeholder action
-                } label: {
                     Text("Start Here")
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 10)
-                        .background(Color.brandCoral)
+                        .background(Color.brandNavy)
                         .clipShape(Capsule())
+                        .padding(.top, 4)
                 }
-                .padding(.top, 4)
+                .padding(16)
             }
-            .padding(16)
+            .background(Color.brandCardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.brandNavy.opacity(0.06), lineWidth: 1)
+            )
         }
-        .background(Color.brandCardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.brandNavy.opacity(0.06), lineWidth: 1)
-        )
+        .buttonStyle(.plain)
     }
 
     // MARK: - Categories Section
@@ -132,24 +133,30 @@ struct HomeView: View {
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 ForEach(MockContentProvider.categories) { category in
-                    HStack(spacing: 8) {
-                        Text(category.emoji)
-                            .font(.system(size: 20))
-                        Text(category.name)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundColor(.brandNavy)
-                            .lineLimit(1)
-                        Spacer()
+                    NavigationLink(value: category.id) {
+                        HStack(spacing: 8) {
+                            Text(category.emoji)
+                                .font(.system(size: 20))
+                            Text(category.name)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundColor(.brandNavy)
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .padding(12)
+                        .background(Color.brandCardBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.brandNavy.opacity(0.08), lineWidth: 1)
+                        )
                     }
-                    .padding(12)
-                    .background(Color.brandCardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.brandNavy.opacity(0.08), lineWidth: 1)
-                    )
+                    .buttonStyle(.plain)
                 }
             }
+        }
+        .navigationDestination(for: String.self) { categoryId in
+            CategoryDetailView(categoryId: categoryId)
         }
     }
 
@@ -162,5 +169,68 @@ struct HomeView: View {
         case 12..<17: return "Good afternoon"
         default: return "Good evening"
         }
+    }
+}
+
+// MARK: - Category Detail View
+
+struct CategoryDetailView: View {
+    let categoryId: String
+
+    private var category: ContentCategory? {
+        MockContentProvider.categories.first { $0.id == categoryId }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                let items = MockContentProvider.libraryItems(for: categoryId)
+                let posts = MockContentProvider.communityPosts(for: categoryId)
+
+                if !items.isEmpty {
+                    Text("Articles")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundColor(.brandGray)
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                        .padding(.horizontal)
+
+                    ForEach(items) { item in
+                        NavigationLink(value: ArticleRoute(id: item.id)) {
+                            LibraryItemCard(item: item)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if !posts.isEmpty {
+                    Text("Community")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundColor(.brandGray)
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                        .padding(.horizontal)
+                        .padding(.top, 8)
+
+                    ForEach(posts) { post in
+                        NavigationLink(value: PostRoute(id: post.id)) {
+                            CommunityPostCard(post: post)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                Spacer(minLength: 20)
+            }
+            .padding(.top, 8)
+        }
+        .background(Color.brandBackground.ignoresSafeArea())
+        .navigationTitle(category.map { "\($0.emoji) \($0.name)" } ?? "Category")
+        .navigationBarTitleDisplayMode(.large)
+        .withContentNavigationDestinations()
     }
 }

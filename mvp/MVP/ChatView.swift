@@ -387,7 +387,7 @@ private struct AgentChoiceView: View {
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color.brandCoral)
+                        .background(Color.brandNavy)
                         .foregroundColor(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }

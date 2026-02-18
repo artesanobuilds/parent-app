@@ -30,7 +30,7 @@ struct AgentView: View {
                     }
                 }
                 ToolbarItem(placement: .principal) {
-                    Text("Ask MVP")
+                    Text("MVP")
                         .font(.headline.weight(.semibold))
                         .foregroundColor(.brandNavy)
                 }
@@ -79,6 +79,7 @@ struct AgentView: View {
                 Text(viewModel.errorMessage ?? "")
             }
             .background(Color.brandBackground.ignoresSafeArea())
+            .withContentNavigationDestinations()
         }
     }
 

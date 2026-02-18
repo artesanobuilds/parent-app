@@ -104,8 +104,11 @@ struct CommunitySection: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(posts) { post in
-                        CommunityPostCard(post: post)
-                            .frame(width: 220)
+                        NavigationLink(value: PostRoute(id: post.id)) {
+                            CommunityPostCard(post: post)
+                                .frame(width: 220)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -128,12 +131,29 @@ struct LibrarySection: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(items) { item in
-                        LibraryItemCard(item: item)
-                            .frame(width: 240)
+                        NavigationLink(value: ArticleRoute(id: item.id)) {
+                            LibraryItemCard(item: item)
+                                .frame(width: 240)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
         }
+    }
+}
+
+// MARK: - Navigation Destination Modifier
+
+extension View {
+    func withContentNavigationDestinations() -> some View {
+        self
+            .navigationDestination(for: ArticleRoute.self) { route in
+                ArticleDetailView(articleId: route.id)
+            }
+            .navigationDestination(for: PostRoute.self) { route in
+                CommunityPostDetailView(postId: route.id)
+            }
     }
 }
 

@@ -74,7 +74,7 @@ struct MainTabView: View {
     private var customTabBar: some View {
         HStack(spacing: 0) {
             tabBarItem(tab: .home, icon: "house", activeIcon: "house.fill", label: "Home")
-            tabBarItem(tab: .agent, icon: "message", activeIcon: "message.fill", label: "Agent")
+            tabBarItem(tab: .agent, icon: "message", activeIcon: "message.fill", label: "MVP")
             tabBarItem(tab: .library, icon: "book", activeIcon: "book.fill", label: "Library")
         }
         .padding(.top, 8)

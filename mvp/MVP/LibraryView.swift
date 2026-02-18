@@ -22,9 +22,12 @@ struct LibraryView: View {
                                 .padding(.horizontal)
 
                             ForEach(items) { item in
-                                LibraryItemCard(item: item)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal)
+                                NavigationLink(value: ArticleRoute(id: item.id)) {
+                                    LibraryItemCard(item: item)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
 
@@ -34,9 +37,12 @@ struct LibraryView: View {
                                 .padding(.top, 8)
 
                             ForEach(posts) { post in
-                                CommunityPostCard(post: post)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal)
+                                NavigationLink(value: PostRoute(id: post.id)) {
+                                    CommunityPostCard(post: post)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
 
@@ -63,8 +69,11 @@ struct LibraryView: View {
                                     ScrollView(.horizontal, showsIndicators: false) {
                                         HStack(spacing: 12) {
                                             ForEach(items) { item in
-                                                LibraryItemCard(item: item)
-                                                    .frame(width: 240)
+                                                NavigationLink(value: ArticleRoute(id: item.id)) {
+                                                    LibraryItemCard(item: item)
+                                                        .frame(width: 240)
+                                                }
+                                                .buttonStyle(.plain)
                                             }
                                         }
                                         .padding(.horizontal)
@@ -81,6 +90,7 @@ struct LibraryView: View {
             .navigationTitle("Library")
             .toolbarBackground(Color.brandBackground, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .withContentNavigationDestinations()
         }
     }
 
@@ -117,7 +127,7 @@ struct LibraryView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(isSelected ? Color.brandCoral : Color.brandCardBackground)
+            .background(isSelected ? Color.brandNavy : Color.brandCardBackground)
             .foregroundColor(isSelected ? .white : .brandNavy)
             .clipShape(Capsule())
             .overlay(

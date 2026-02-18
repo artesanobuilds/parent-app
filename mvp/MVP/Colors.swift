@@ -1,17 +1,18 @@
 import SwiftUI
 
-/// Centralized brand colors for MVP.
+/// Centralized brand colors for MVP — inspired by SchoolMom editorial aesthetic.
+/// Palette: warm dusty rose, dark charcoal, soft blush tones.
 extension Color {
-    static let brandCoral = Color(red: 0.94, green: 0.44, blue: 0.39)
-    static let brandNavy = Color(red: 0.12, green: 0.17, blue: 0.23)
-    static let brandBackground = Color(red: 1.0, green: 0.97, blue: 0.96)
+    // Primary palette
+    static let brandCoral = Color(red: 0.77, green: 0.64, blue: 0.58)          // Dusty rose #C4A494
+    static let brandNavy = Color(red: 0.18, green: 0.16, blue: 0.15)           // Dark charcoal #2D2926
+    static let brandBackground = Color(red: 0.96, green: 0.92, blue: 0.89)     // Light warm blush #F5EBE3
     static let brandSurface = Color.white.opacity(0.94)
-    static let brandStroke = Color.brandCoral.opacity(0.25)
+    static let brandStroke = Color.brandCoral.opacity(0.30)
 
-    // Agent / GiGi-style UI additions
-    static let brandYellow = Color(red: 0.98, green: 0.80, blue: 0.20)       // Agent avatar circle
-    static let brandLightBlue = Color(red: 0.91, green: 0.94, blue: 0.97)    // User question pill background
-    static let brandGray = Color(red: 0.60, green: 0.62, blue: 0.65)         // Inactive tab icons / secondary text
-    static let brandCardBackground = Color.white                               // Content card background
+    // UI accents
+    static let brandYellow = Color(red: 0.77, green: 0.64, blue: 0.58)         // Agent avatar — matches dusty rose
+    static let brandLightBlue = Color(red: 0.94, green: 0.90, blue: 0.87)      // User question pill — warm blush
+    static let brandGray = Color(red: 0.55, green: 0.50, blue: 0.47)           // Warm gray for secondary text
+    static let brandCardBackground = Color.white                                 // Content card background
 }
-
