@@ -8,7 +8,7 @@ struct MainTabView: View {
     @State private var username: String = ""
 
     enum Tab: String {
-        case home, agent, library
+        case home, library, agent, circle
     }
 
     init() {
@@ -24,10 +24,12 @@ struct MainTabView: View {
                 switch selectedTab {
                 case .home:
                     HomeView(username: username)
-                case .agent:
-                    AgentView(viewModel: viewModel, configuration: configuration)
                 case .library:
                     LibraryView()
+                case .agent:
+                    AgentView(viewModel: viewModel, configuration: configuration)
+                case .circle:
+                    CircleView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -74,8 +76,9 @@ struct MainTabView: View {
     private var customTabBar: some View {
         HStack(spacing: 0) {
             tabBarItem(tab: .home, icon: "house", activeIcon: "house.fill", label: "Home")
-            tabBarItem(tab: .agent, icon: "message", activeIcon: "message.fill", label: "MVP")
             tabBarItem(tab: .library, icon: "book", activeIcon: "book.fill", label: "Library")
+            tabBarItem(tab: .agent, icon: "message", activeIcon: "message.fill", label: "MVP")
+            tabBarItem(tab: .circle, icon: "person.2", activeIcon: "person.2.fill", label: "Circle")
         }
         .padding(.top, 8)
         .padding(.bottom, 2)
