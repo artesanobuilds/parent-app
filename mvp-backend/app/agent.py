@@ -1,15 +1,21 @@
 import json
+import logging
 import os
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from langchain_openai import ChatOpenAI
 from langchain_tavily import TavilySearch
 from langgraph.checkpoint.memory import MemorySaver
 from langchain.agents import create_agent
+from langchain.tools import tool
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 from app.profiling import profiling_service
 from app.content import content_catalog_for_prompt
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -19,14 +25,17 @@ model_name = os.getenv("OPENAI_MODEL_NAME", "gpt-5.2")
 llm = ChatOpenAI(model=model_name)
 
 # Initialize Tools
-# Tavily is a search engine optimized for LLMs
 search = TavilySearch(max_results=2)
 tools = [search]
 
 # Initialize Memory
-# In production, you would use a persistent checkpointer (e.g. Postgres)
-# For now, in-memory is fine for conversation state during a session
 checkpointer = MemorySaver()
+
+# Load soul file once at module level
+_soul_path = Path(__file__).resolve().parent.parent / "soul.md"
+_soul_content = _soul_path.read_text(encoding="utf-8")
+logger.info("Loaded soul.md (%d chars)", len(_soul_content))
+
 
 def _prune_empty(value: Any) -> Any:
     """Recursively prune empty/None values from dicts/lists to keep prompt lean."""
@@ -43,66 +52,133 @@ def _build_system_prompt(user_name: str, profile_context: str | None = None) -> 
     profile_section = ""
     if profile_context:
         profile_section = f"""
-
-Profile context (use when relevant; do not ignore this):
+Family profile (weave into advice, never dump as raw data):
 {profile_context}
-
-Instructions:
-- Tailor guidance to this parent/child context when applicable.
-- Ask concise clarifying questions before assuming missing details.
-- Do not restate the JSON unless the user asks; weave it into concise advice.
 """
 
-    return f"""
-You are MVP (Most Value Parent), a supportive parenting coach. Your mission is to help caregivers navigate parenting questions with empathy, clarity, and evidence-backed guidance.
+    return f"""{_soul_content}
 
-Core identity and scope
-- Role: Parenting coach focused on practical, emotionally attuned support.
-- Voice: Warm, concise, assertive, and direct; avoid fluff. Use short paragraphs or up to 5 bullets and adapt tone to the user's needs and goals.
-- Formatting: Prefer compact bullets and short sections; avoid long narrative paragraphs. Use md formating and amojis to add visual interest.
-- Ethics: Never give medical or safety-critical advice beyond reputable sources; suggest consulting professionals when appropriate.
-- Constraints: You are a parenting coach, not a medical professional. Do not give medical or safety-critical advice.
-- Constraints: Stick to parenting; you can venture into psychology and mental health only within the parenting context.
-- Constraints: Do not enagage into any non-serious or non-parenting topics. Explain to user you are a parenting coach.
-- Do not rephrase the user's request unless it changes semantics.
-- Personalize responses for the user named "{user_name}". Use their name when natural and tune tone to feel bespoke and supportive.
+---
 
-Knowledge and frameworks
-- Anchor advice in teachings from Carl Jung, Dr. Becky Kennedy, Gabor Mate, and Dr. Daniel Amen. 
-- If the user asks for this, state when you are drawing on these perspectives to ground advice, otherwise it is not necessary to state this.
-- When using web sources, cite them (e.g., "[source](link)") and prefer primary or high-quality outlets. Include the source's date when available for time-sensitive facts.
+# Operational context
 
-Tool use (web search)
-- You can search the web. Use the tool for factual claims, examples, or recent info.
-- Search with purpose: cover the user's topic, then fill gaps or resolve disagreements.
-- Summarize findings clearly; cite sources after each paragraph or cohesive set of claims.
+User: "{user_name}" — use their name when natural.
 
-Interaction style
-- Start by briefly restating the user's goal and key constraints you infer.
-- If ambiguity is present, state 1-2 plausible interpretations with assumptions and cover them; do not ask clarifying questions unless the user requests.
-- Offer a short, actionable, and succinct plan: 3-5 intentional steps or bullets that clearly help the user's goal.
-- Keep answers compact: default 3-6 sentences or <=5 bullets unless depth is clearly needed.
-- Keep responses to 1 paragraph or less.
+Web search: use for factual claims or recent info. Cite sources as markdown links.
 
-Safety and humility
-- If unsure or if evidence is thin, say so and suggest the next best step.
-- Avoid overclaims; qualify time-sensitive info.
-
-Content recommendations
-- You have access to an in-app content library. When your advice relates to a topic covered in the library, include 1-2 inline links naturally in your response.
-- Format content links as markdown: e.g., "You might find our guide on [Your Trigger Is Your Teacher](mvp://library/ew-shadow-triggers) helpful."
-- Also suggest relevant community posts when a parent might benefit from peer connection: e.g., "Other parents are discussing this in [First holidays divorced](mvp://community/cp-annie-holidays)."
-- Do not force recommendations — only include when genuinely relevant to the conversation.
+Content library: when relevant, weave max 1 link per response naturally into your sentence.
+Format: [Title](mvp://library/slug) or [Title](mvp://community/slug)
 
 {content_catalog_for_prompt()}
-
-Self-check before finalizing
-- Verify you cited web-derived claims.
-- Ensure advice aligns with the named thinkers' principles.
-- Confirm brevity and clarity match the constraints above.
-- Include 1-2 relevant content links when applicable.
 {profile_section}
-"""
+
+# Passive profiling
+
+As you coach, silently extract profile details from what the parent shares.
+Call LearnedAboutParent or LearnedAboutChild whenever the conversation reveals new info about:
+- The parent: household, work, stress patterns, coping, energy, goals, support system, parenting style, etc.
+- A child: temperament, triggers, interests, challenges, school, sleep, escalation patterns, etc.
+
+Rules:
+- NEVER ask questions just to fill the profile. Your primary job is coaching. Profile building is a silent side effect.
+- Only record what the parent actually said or clearly implied. Don't infer beyond their words.
+- Partial updates are fine — send only the fields you learned in that exchange.
+- Don't mention the profile or that you're tracking anything. Just coach naturally."""
+
+
+class ParentUpdate(BaseModel):
+    name: Optional[str] = None
+    pronouns: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = None
+    primary_language: Optional[str] = None
+    parent_age_range: Optional[str] = None
+    adults_in_household: Optional[int] = None
+    household_structure: Optional[str] = None
+    employment: Optional[str] = None
+    work_hours: Optional[str] = None
+    energy_pattern: Optional[str] = None
+    default_stress_response: Optional[str] = None
+    dreaded_moment: Optional[str] = None
+    support_system: Optional[str] = None
+    support_boundaries: Optional[str] = None
+    cultural_background: Optional[str] = None
+    parenting_style: Optional[str] = None
+    stressors: Optional[List[str]] = None
+    goals: Optional[List[str]] = None
+    coping_strategies: Optional[List[str]] = None
+    deescalation_works: Optional[List[str]] = None
+    deescalation_backfires: Optional[List[str]] = None
+    mental_health_notes: Optional[str] = None
+    co_parenting: Optional[str] = None
+    guidance_style: Optional[str] = None
+
+
+class ChildUpdate(BaseModel):
+    child_name: str
+    pronouns: Optional[str] = None
+    age: Optional[float] = None
+    grade_band: Optional[str] = None
+    temperament: Optional[str] = None
+    interests: Optional[List[str]] = None
+    strengths: Optional[List[str]] = None
+    academic_strengths: Optional[List[str]] = None
+    challenges: Optional[List[str]] = None
+    emotion_regulation: Optional[str] = None
+    social_profile: Optional[str] = None
+    learning_profile: Optional[str] = None
+    neurodiversity: Optional[str] = None
+    sensory_notes: Optional[str] = None
+    sleep_routine: Optional[str] = None
+    health_notes: Optional[str] = None
+    triggers: Optional[List[str]] = None
+    escalation_pattern: Optional[str] = None
+    calming_strategies: Optional[List[str]] = None
+    recent_changes: Optional[List[str]] = None
+    school_context: Optional[str] = None
+    teacher_notes: Optional[str] = None
+    sibling_conflicts: Optional[List[str]] = None
+    repair_helpers: Optional[List[str]] = None
+    motivators: Optional[List[str]] = None
+    safety_flags: Optional[str] = None
+
+
+def _make_parent_tool(user_id: str):
+    @tool
+    def LearnedAboutParent(parent_updates: ParentUpdate) -> str:
+        """
+        Silently save new details about the parent gleaned from the conversation.
+        Call this whenever the parent reveals something about themselves: household,
+        work, stress triggers, coping, energy patterns, goals, etc.
+        Partial updates are fine — send only the fields you learned.
+        """
+        payload = parent_updates.model_dump(exclude_none=True)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"[coaching_tool] LearnedAboutParent user_id={user_id} updates={payload}")
+        updated = profiling_service.update_parent_profile(user_id, payload)
+        return f"Parent profile updated: {updated}"
+
+    return LearnedAboutParent
+
+
+def _make_child_tool(user_id: str):
+    @tool
+    def LearnedAboutChild(update: ChildUpdate) -> str:
+        """
+        Silently save new details about a child gleaned from the conversation.
+        Call this whenever the parent reveals something about a child: temperament,
+        triggers, interests, challenges, school context, etc.
+        child_name is required; send only the fields you learned.
+        """
+        payload = update.model_dump(exclude_none=True)
+        child_name = payload.pop("child_name")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"[coaching_tool] LearnedAboutChild user_id={user_id} child_name={child_name} updates={payload}")
+        updated = profiling_service.update_child_profile(user_id, child_name, payload)
+        return f"Child profile updated: {updated}"
+
+    return LearnedAboutChild
+
 
 _agent_cache: Dict[str, Dict[str, Any]] = {}
 
@@ -116,9 +192,10 @@ def get_agent(user_name: str = "0"):
     if cached and cached.get("profile") == profile_context:
         return cached["agent"]
 
+    user_tools = [search, _make_parent_tool(user_name), _make_child_tool(user_name)]
     agent_executor = create_agent(
         model=llm,
-        tools=tools,
+        tools=user_tools,
         checkpointer=checkpointer,
         system_prompt=_build_system_prompt(user_name, profile_context),
     )

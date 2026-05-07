@@ -57,8 +57,9 @@ Profile context (use when relevant; keep enriching):
 You are MVP (Most Value Parent), an onboarding parenting coach. Your sole goal is to interview {{user}} to build structured parent and child profiles for personalized guidance. Keep tone warm, concise, and practical; prefer bullets.
 
 What to gather (prioritize clarity over completeness):
-- Parent: household structure, employment & work hours, energy pattern, default stress response, dreaded moments, support system/boundaries, cultural/primary language notes, parenting style tendencies, current stressors, goals/pain points, coping/de-escalation (what works/backfires), mental/physical health notes (non-clinical), coparent dynamics/boundaries, preferred guidance style.
-- Each child: name, age/grade band, temperament/traits (e.g., sensitivity, intensity, adaptability), interests/motivators, strengths (incl. academic), current challenges, triggers, escalation pattern, calming strategies, emotion regulation + triggers, social profile, learning profile (visual/auditory/kinesthetic, EF notes), neurodiversity/special needs/health, sensory notes, recent changes, school context/teacher notes, sibling conflict patterns, repair helpers, sleep/routines, safety flags.
+- Parent demographics: approximate location (postal_code + country), primary language at home, parent_age_range (bracket only — never ask for exact age), adults_in_household (1–4), pronouns, cultural_background, employment status.
+- Parent context: household structure, work hours, energy pattern, default stress response, dreaded moments, support system/boundaries, parenting style tendencies, current stressors, goals/pain points, coping/de-escalation (what works/backfires), mental/physical health notes (non-clinical), coparent dynamics/boundaries, preferred guidance style.
+- Each child: name, pronouns, age, grade_band (Pre-K, K, 1–12, or N/A), temperament/traits (e.g., sensitivity, intensity, adaptability), interests/motivators, strengths (incl. academic), current challenges, triggers, escalation pattern, calming strategies, emotion regulation + triggers, social profile, learning profile (visual/auditory/kinesthetic, EF notes), neurodiversity/special needs/health, sensory notes, recent changes, school context/teacher notes, sibling conflict patterns, repair helpers, sleep/routines, safety flags.
 
 How to operate:
 - Ask concise, empathic questions; reflect back specifics learned. Be very succinct and compress information into the fewest words possible. As if it was a conversation with wise coach.
@@ -77,6 +78,11 @@ Personalize to user name: \"{user_name}\".
 class ParentUpdate(BaseModel):
     name: Optional[str] = None
     pronouns: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = None
+    primary_language: Optional[str] = None
+    parent_age_range: Optional[str] = None
+    adults_in_household: Optional[int] = None
     household_structure: Optional[str] = None
     employment: Optional[str] = None
     work_hours: Optional[str] = None
@@ -131,7 +137,8 @@ def _make_parent_tool(user_id: str):
     def FoundMoreAboutParent(parent_updates: ParentUpdate) -> str:
         """
         Update the parent profile with structured fields (partial updates allowed).
-        Fields: name, pronouns, household_structure, employment, work_hours, energy_pattern,
+        Fields: name, pronouns, postal_code, country, primary_language, parent_age_range,
+        adults_in_household, household_structure, employment, work_hours, energy_pattern,
         default_stress_response, dreaded_moment, support_system, support_boundaries,
         cultural_background, parenting_style, stressors, goals, coping_strategies,
         deescalation_works, deescalation_backfires, mental_health_notes, co_parenting,

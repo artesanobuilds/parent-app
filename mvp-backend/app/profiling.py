@@ -9,6 +9,11 @@ class ParentProfile:
 
     name: Optional[str] = None
     pronouns: Optional[str] = None
+    postal_code: Optional[str] = None  # zip / international postal code
+    country: Optional[str] = None  # ISO-3166 alpha-2 (e.g., US, MX, CA)
+    primary_language: Optional[str] = None  # e.g., en, es, zh, "other"
+    parent_age_range: Optional[str] = None  # "<25" | "25-34" | "35-44" | "45-54" | "55+" | "prefer_not_to_say"
+    adults_in_household: Optional[int] = None  # 1-4
     household_structure: Optional[str] = None  # e.g., single, co-parenting, divorced, widowed
     employment: Optional[str] = None  # e.g., stay-at-home, part-time, full-time, shift
     work_hours: Optional[str] = None  # schedule/availability windows
