@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+.env
+.venv
+local-storage/
+cms/node_modules
+cms/dist
+.git
+data/*.duckdb
+data/*.duckdb.wal

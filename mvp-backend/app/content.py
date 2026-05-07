@@ -1,124 +1,154 @@
 """Content library service for MVP.
 
-Loads the content library JSON and provides methods to query articles and
-community posts by category or keyword. Also exposes a compact summary
+Queries content from DuckDB storage and provides methods to search articles
+and community posts by category or keyword. Also exposes a compact summary
 suitable for injection into the AI agent's system prompt.
 """
 
-import json
-import os
 import random
 from typing import Any, Dict, List, Optional
 
-_DIR = os.path.dirname(os.path.abspath(__file__))
-_LIBRARY_PATH = os.path.join(_DIR, "content_library.json")
+from app.duckdb_storage import DuckDBStorage
 
-_data: Dict[str, Any] = {}
+_storage: Optional[DuckDBStorage] = None
 
 
-def _load():
-    global _data
-    if not _data:
-        with open(_LIBRARY_PATH, "r") as f:
-            _data = json.load(f)
-    return _data
+def init(storage: DuckDBStorage) -> None:
+    """Initialize with the shared DuckDBStorage instance."""
+    global _storage
+    _storage = storage
+
+
+def _db() -> DuckDBStorage:
+    if _storage is None:
+        raise RuntimeError("content service not initialized — call content.init(storage) first")
+    return _storage
 
 
 def get_categories() -> List[Dict]:
-    return _load()["categories"]
+    return _db().get_categories()
 
 
 def get_articles(category: Optional[str] = None, limit: int = 50) -> List[Dict]:
-    articles = _load()["library_articles"]
-    if category:
-        articles = [a for a in articles if a["category"] == category]
-    # Strip full content from list responses for performance
-    return [{k: v for k, v in a.items() if k != "content"} for a in articles[:limit]]
+    return _db().get_articles(category=category, limit=limit)
 
 
 def get_article(article_id: str) -> Optional[Dict]:
     """Return a single article by ID, including full content."""
-    for article in _load()["library_articles"]:
-        if article["id"] == article_id:
-            return article
-    return None
+    return _db().get_article(article_id)
 
 
 def get_community_posts(category: Optional[str] = None, limit: int = 50) -> List[Dict]:
-    posts = _load()["community_posts"]
-    if category:
-        posts = [p for p in posts if p["category"] == category]
-    return posts[:limit]
+    return _db().get_community_posts(category=category, limit=limit)
 
 
 def search_content(query: str, limit: int = 10) -> Dict[str, List[Dict]]:
-    """Simple keyword search across articles and community posts."""
-    query_lower = query.lower()
-    data = _load()
-
-    matching_articles = []
-    for article in data["library_articles"]:
-        searchable = f"{article['title']} {article['subtitle']} {article['summary']} {' '.join(article.get('tags', []))}".lower()
-        if query_lower in searchable:
-            matching_articles.append(article)
-
-    matching_posts = []
-    for post in data["community_posts"]:
-        searchable = f"{post['title']} {post['preview']}".lower()
-        if query_lower in searchable:
-            matching_posts.append(post)
-
+    """Keyword search across articles and community posts using DuckDB ILIKE."""
     return {
-        "articles": matching_articles[:limit],
-        "community_posts": matching_posts[:limit],
+        "articles": _db().search_articles(query, limit=limit),
+        "community_posts": _db().search_community_posts(query, limit=limit),
     }
 
 
 def get_relevant_content(topic: str, limit: int = 5) -> Dict[str, List[Dict]]:
-    """Return content relevant to a topic, using keyword matching and tag overlap."""
-    topic_words = set(topic.lower().split())
-    data = _load()
+    """Return content relevant to a topic, using per-word ILIKE matching in DuckDB."""
+    words = [w for w in topic.lower().split() if len(w) > 2]
 
-    def score_article(a: Dict) -> int:
-        text = f"{a['title']} {a['subtitle']} {' '.join(a.get('tags', []))}".lower()
-        return sum(1 for w in topic_words if w in text)
+    if words:
+        articles = _db().score_articles_by_words(words, limit=limit)
+        posts = _db().score_posts_by_words(words, limit=limit)
+    else:
+        articles = []
+        posts = []
 
-    def score_post(p: Dict) -> int:
-        text = f"{p['title']} {p['preview']}".lower()
-        return sum(1 for w in topic_words if w in text)
-
-    scored_articles = [(score_article(a), a) for a in data["library_articles"]]
-    scored_posts = [(score_post(p), p) for p in data["community_posts"]]
-
-    scored_articles.sort(key=lambda x: x[0], reverse=True)
-    scored_posts.sort(key=lambda x: x[0], reverse=True)
-
-    # Return top matches, falling back to random if no keyword matches
-    articles = [a for s, a in scored_articles if s > 0][:limit]
-    posts = [p for s, p in scored_posts if s > 0][:limit]
-
+    # Fallback to random if no keyword matches
     if not articles:
-        articles = random.sample(data["library_articles"], min(limit, len(data["library_articles"])))
+        all_articles = _db().get_articles(limit=100)
+        articles = random.sample(all_articles, min(limit, len(all_articles)))
     if not posts:
-        posts = random.sample(data["community_posts"], min(limit, len(data["community_posts"])))
+        all_posts = _db().get_community_posts(limit=100)
+        posts = random.sample(all_posts, min(limit, len(all_posts)))
 
     return {"articles": articles, "community_posts": posts}
 
 
+def get_community_post(post_id: str) -> Optional[Dict]:
+    return _db().get_community_post(post_id)
+
+
+def create_article(data: Dict) -> Dict:
+    return _db().create_article(data)
+
+
+def update_article(article_id: str, data: Dict) -> Optional[Dict]:
+    return _db().update_article(article_id, data)
+
+
+def delete_article(article_id: str) -> bool:
+    return _db().delete_article(article_id)
+
+
+def create_community_post(data: Dict) -> Dict:
+    return _db().create_community_post(data)
+
+
+def update_community_post(post_id: str, data: Dict) -> Optional[Dict]:
+    return _db().update_community_post(post_id, data)
+
+
+def delete_community_post(post_id: str) -> bool:
+    return _db().delete_community_post(post_id)
+
+
+def get_replies_for_post(post_id: str, limit: int = 100) -> List[Dict]:
+    return _db().get_replies_for_post(post_id, limit=limit)
+
+
+def create_reply(data: Dict) -> Dict:
+    return _db().create_reply(data)
+
+
+def get_reply_counts(post_ids: List[str]) -> Dict[str, int]:
+    return _db().get_reply_counts(post_ids)
+
+
+def create_category(data: Dict) -> Dict:
+    return _db().create_category(data)
+
+
+def update_category(category_id: str, data: Dict) -> Optional[Dict]:
+    return _db().update_category(category_id, data)
+
+
+def delete_category(category_id: str) -> bool:
+    return _db().delete_category(category_id)
+
+
+def get_content_stats() -> Dict:
+    return _db().get_content_stats()
+
+
+def export_content_parquet() -> None:
+    _db().export_content_parquet()
+
+
 def content_catalog_for_prompt() -> str:
     """Return a compact content catalog string for the AI agent system prompt."""
-    data = _load()
+    categories = _db().get_categories()
+    all_articles = _db().get_articles(limit=100)
+    all_posts = _db().get_community_posts(limit=100)
+
     lines = ["Available MVP content library (recommend relevant items inline with markdown links):"]
     lines.append("")
-    for cat in data["categories"]:
+    for cat in categories:
         lines.append(f"## {cat['emoji']} {cat['name']}")
-        cat_articles = [a for a in data["library_articles"] if a["category"] == cat["id"]]
+        cat_articles = [a for a in all_articles if a["category"] == cat["id"]]
         for a in cat_articles:
             lines.append(f"- [{a['title']}](mvp://library/{a['id']}) — {a['subtitle']}")
         lines.append("")
 
     lines.append("## Community discussions (suggest when relevant):")
-    for p in data["community_posts"][:10]:
+    for p in all_posts[:10]:
         lines.append(f"- [{p['title']}](mvp://community/{p['id']}) by {p['name']}")
 
     return "\n".join(lines)

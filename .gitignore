@@ -5,3 +5,5 @@ xcuserdata/
 DerivedData/
 __pycache__/
 *.pyc
+mvp-backend/data/*.duckdb
+mvp-backend/data/*.duckdb.wal

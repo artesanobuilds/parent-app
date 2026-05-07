@@ -1,0 +1,16 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --color-brand-gold: #C9A84C;
+  --color-brand-black: #1C1C1E;
+  --color-brand-surface: #2B2B2E;
+  --color-brand-card-bg: #FFFFFF;
+  --color-brand-navy: #212123;
+  --color-brand-gray: #999999;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+}
