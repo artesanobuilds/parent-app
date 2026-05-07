@@ -1,17 +1,19 @@
 import SwiftUI
 
 struct MainTabView: View {
+    let username: String
+
     @StateObject private var configuration = ServerConfiguration()
     @StateObject private var viewModel: ChatViewModel
+    @StateObject private var contentVM = ContentViewModel()
     @State private var selectedTab: Tab = .home
-    @State private var isShowingUsernamePrompt: Bool = true
-    @State private var username: String = ""
 
     enum Tab: String {
         case home, library, agent, circle
     }
 
-    init() {
+    init(username: String = "") {
+        self.username = username
         let config = ServerConfiguration()
         _configuration = StateObject(wrappedValue: config)
         _viewModel = StateObject(wrappedValue: ChatViewModel(configuration: config, mode: .coaching))
@@ -39,34 +41,18 @@ struct MainTabView: View {
             // Custom bottom tab bar
             customTabBar
         }
+        .environmentObject(contentVM)
+        .environmentObject(configuration)
         .ignoresSafeArea(.keyboard, edges: .bottom)
-        .preferredColorScheme(.light)
-        .sheet(isPresented: $isShowingUsernamePrompt) {
-            NavigationStack {
-                Form {
-                    Section(header: Text("Enter your username")) {
-                        TextField("Username", text: $username)
-                            .textInputAutocapitalization(.none)
-                            .autocorrectionDisabled()
-                    }
-                }
-                .navigationTitle("Welcome")
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Continue") {
-                            let trimmed = username.trimmingCharacters(in: .whitespacesAndNewlines)
-                            viewModel.setUserID(trimmed)
-                            username = trimmed
-                            isShowingUsernamePrompt = false
-                        }
-                        .disabled(username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                }
-            }
-        }
+        .preferredColorScheme(.dark)
         .onAppear {
-            if viewModel.isUserIDMissing {
-                isShowingUsernamePrompt = true
+            viewModel.setUserID(username)
+            contentVM.userId = username
+        }
+        .task {
+            if let url = configuration.baseURL {
+                contentVM.baseURL = url
+                await contentVM.loadAllContent(baseURL: url)
             }
         }
     }
@@ -85,11 +71,11 @@ struct MainTabView: View {
         .background(
             VStack(spacing: 0) {
                 Rectangle()
-                    .fill(Color.brandNavy.opacity(0.08))
+                    .fill(Color.white.opacity(0.08))
                     .frame(height: 0.5)
-                Color.white
+                Color.brandBlack
             }
-            .shadow(color: Color.black.opacity(0.04), radius: 8, y: -2)
+            .shadow(color: Color.black.opacity(0.20), radius: 8, y: -2)
         )
     }
 
@@ -107,7 +93,7 @@ struct MainTabView: View {
                 Text(label)
                     .font(.system(size: 10, weight: .medium))
             }
-            .foregroundColor(selectedTab == tab ? .brandNavy : .brandGray)
+            .foregroundColor(selectedTab == tab ? .brandGold : .brandGray)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 4)
         }

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct LibraryView: View {
+    @EnvironmentObject private var contentVM: ContentViewModel
     @State private var selectedCategory: String? = nil
 
     var body: some View {
@@ -13,9 +14,9 @@ struct LibraryView: View {
 
                     if let selected = selectedCategory {
                         // Filtered view: show items for selected category
-                        let items = MockContentProvider.libraryItems(for: selected)
-                        let posts = MockContentProvider.communityPosts(for: selected)
-                        let categoryName = MockContentProvider.categories.first { $0.id == selected }?.name ?? ""
+                        let items = contentVM.libraryItems(for: selected)
+                        let posts = contentVM.communityPosts(for: selected)
+                        let categoryName = contentVM.categories.first { $0.id == selected }?.name ?? ""
 
                         if !items.isEmpty {
                             sectionHeader("Articles", subtitle: categoryName)
@@ -51,8 +52,8 @@ struct LibraryView: View {
                         }
                     } else {
                         // All categories view: horizontal scroll per category
-                        ForEach(MockContentProvider.categories) { category in
-                            let items = MockContentProvider.libraryItems(for: category.id)
+                        ForEach(contentVM.categories) { category in
+                            let items = contentVM.libraryItems(for: category.id)
                             if !items.isEmpty {
                                 VStack(alignment: .leading, spacing: 10) {
                                     HStack(spacing: 6) {
@@ -88,6 +89,7 @@ struct LibraryView: View {
             }
             .background(Color.brandBackground.ignoresSafeArea())
             .navigationTitle("Library")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.brandBackground, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .withContentNavigationDestinations()
@@ -103,7 +105,7 @@ struct LibraryView: View {
                     withAnimation(.easeInOut(duration: 0.2)) { selectedCategory = nil }
                 }
 
-                ForEach(MockContentProvider.categories) { category in
+                ForEach(contentVM.categories) { category in
                     chipButton(label: category.name, emoji: category.emoji, isSelected: selectedCategory == category.id) {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             selectedCategory = selectedCategory == category.id ? nil : category.id
@@ -127,12 +129,12 @@ struct LibraryView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(isSelected ? Color.brandNavy : Color.brandCardBackground)
-            .foregroundColor(isSelected ? .white : .brandNavy)
+            .background(isSelected ? Color.brandGold : Color.brandSurface)
+            .foregroundColor(isSelected ? .brandBlack : .white)
             .clipShape(Capsule())
             .overlay(
                 Capsule()
-                    .stroke(isSelected ? Color.clear : Color.brandNavy.opacity(0.12), lineWidth: 1)
+                    .stroke(isSelected ? Color.clear : Color.brandStroke, lineWidth: 1)
             )
         }
     }
@@ -148,7 +150,7 @@ struct LibraryView: View {
                 .tracking(0.5)
             Text(subtitle)
                 .font(.headline.weight(.bold))
-                .foregroundColor(.brandNavy)
+                .foregroundColor(.white)
         }
     }
 

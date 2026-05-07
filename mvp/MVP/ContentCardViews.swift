@@ -3,19 +3,19 @@ import SwiftUI
 // MARK: - Community Post Card
 
 struct CommunityPostCard: View {
-    let post: CommunityPost
+    let post: APICommunityPost
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Avatar + name row
             HStack(spacing: 8) {
                 Circle()
-                    .fill(Color.brandCoral.opacity(0.15))
+                    .fill(Color.brandGold.opacity(0.15))
                     .frame(width: 32, height: 32)
                     .overlay(
                         Text(post.initials)
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.brandCoral)
+                            .foregroundColor(.brandGold)
                     )
                 Text(post.name)
                     .font(.subheadline.weight(.semibold))
@@ -37,10 +37,10 @@ struct CommunityPostCard: View {
         .padding(14)
         .background(Color.brandCardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .shadow(color: Color.black.opacity(0.06), radius: 8, y: 3)
+        .shadow(color: Color.black.opacity(0.2), radius: 10, y: 3)
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.brandNavy.opacity(0.08), lineWidth: 1)
+                .stroke(Color.brandStroke, lineWidth: 1)
         )
     }
 }
@@ -48,13 +48,13 @@ struct CommunityPostCard: View {
 // MARK: - Library Item Card
 
 struct LibraryItemCard: View {
-    let item: LibraryItem
+    let item: APIArticle
 
     var body: some View {
         HStack(spacing: 12) {
             // Emoji thumbnail
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.brandLightBlue)
+                .fill(Color.brandGold.opacity(0.1))
                 .frame(width: 56, height: 56)
                 .overlay(
                     Text(item.emoji)
@@ -79,10 +79,10 @@ struct LibraryItemCard: View {
         .padding(10)
         .background(Color.brandCardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .shadow(color: Color.black.opacity(0.06), radius: 8, y: 3)
+        .shadow(color: Color.black.opacity(0.2), radius: 10, y: 3)
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.brandNavy.opacity(0.08), lineWidth: 1)
+                .stroke(Color.brandStroke, lineWidth: 1)
         )
     }
 }
@@ -90,7 +90,7 @@ struct LibraryItemCard: View {
 // MARK: - Content Sections
 
 struct CommunitySection: View {
-    let posts: [CommunityPost]
+    let posts: [APICommunityPost]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -117,7 +117,7 @@ struct CommunitySection: View {
 }
 
 struct LibrarySection: View {
-    let items: [LibraryItem]
+    let items: [APIArticle]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -160,22 +160,22 @@ extension View {
 // MARK: - Feedback Row
 
 struct FeedbackRow: View {
+    let feedback: MessageFeedback?
+    let onThumbsUp: () -> Void
+    let onThumbsDown: () -> Void
+
     var body: some View {
         HStack(spacing: 16) {
             Spacer()
-            Button {
-                // Placeholder action
-            } label: {
-                Image(systemName: "hand.thumbsup")
+            Button(action: onThumbsUp) {
+                Image(systemName: feedback == .thumbsUp ? "hand.thumbsup.fill" : "hand.thumbsup")
                     .font(.system(size: 18))
-                    .foregroundColor(.brandGray.opacity(0.7))
+                    .foregroundColor(feedback == .thumbsUp ? .brandGold : .brandGray.opacity(0.7))
             }
-            Button {
-                // Placeholder action
-            } label: {
-                Image(systemName: "hand.thumbsdown")
+            Button(action: onThumbsDown) {
+                Image(systemName: feedback == .thumbsDown ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                     .font(.system(size: 18))
-                    .foregroundColor(.brandGray.opacity(0.7))
+                    .foregroundColor(feedback == .thumbsDown ? .brandGold : .brandGray.opacity(0.7))
             }
             Spacer()
         }

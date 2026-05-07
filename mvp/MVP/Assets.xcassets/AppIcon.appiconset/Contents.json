@@ -1,11 +1,13 @@
 {
   "images" : [
     {
+      "filename" : "app-icon.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
     },
     {
+      "filename" : "app-icon.png",
       "appearances" : [
         {
           "appearance" : "luminosity",
@@ -17,6 +19,7 @@
       "size" : "1024x1024"
     },
     {
+      "filename" : "app-icon.png",
       "appearances" : [
         {
           "appearance" : "luminosity",

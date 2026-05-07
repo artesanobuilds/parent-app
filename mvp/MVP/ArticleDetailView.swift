@@ -3,37 +3,47 @@ import MarkdownUI
 
 struct ArticleDetailView: View {
     let articleId: String
-
-    private var article: ArticleData? {
-        ContentStore.shared.articleContent(articleId)
-    }
+    @EnvironmentObject private var contentVM: ContentViewModel
+    @EnvironmentObject private var configuration: ServerConfiguration
+    @State private var article: APIArticle?
+    @State private var isLoading = true
 
     var body: some View {
         Group {
-            if let article = article {
+            if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.brandBackground.ignoresSafeArea())
+            } else if let article = article {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         header(article)
                         markdownBody(article)
                     }
                 }
-                .background(Color.brandBackground.ignoresSafeArea())
+                .background(Color.brandCardBackground.ignoresSafeArea())
                 .navigationTitle("")
                 .navigationBarTitleDisplayMode(.inline)
             } else {
                 notFound
             }
         }
+        .task {
+            if let url = configuration.baseURL {
+                article = await contentVM.fetchArticleDetail(baseURL: url, id: articleId)
+            }
+            isLoading = false
+        }
     }
 
     // MARK: - Header
 
-    private func header(_ article: ArticleData) -> some View {
+    private func header(_ article: APIArticle) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             // Emoji banner
             ZStack {
                 LinearGradient(
-                    colors: [Color.brandCoral.opacity(0.12), Color.brandCoral.opacity(0.04)],
+                    colors: [Color.brandGold.opacity(0.12), Color.brandGold.opacity(0.04)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -45,13 +55,13 @@ struct ArticleDetailView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 // Category badge
-                if let category = MockContentProvider.categories.first(where: { $0.id == article.category }) {
+                if let category = contentVM.categories.first(where: { $0.id == article.category }) {
                     Text("\(category.emoji) \(category.name)")
                         .font(.caption.weight(.semibold))
-                        .foregroundColor(.brandCoral)
+                        .foregroundColor(.brandGold)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
-                        .background(Color.brandCoral.opacity(0.1))
+                        .background(Color.brandGold.opacity(0.1))
                         .clipShape(Capsule())
                 }
 
@@ -82,8 +92,8 @@ struct ArticleDetailView: View {
 
     // MARK: - Markdown Body
 
-    private func markdownBody(_ article: ArticleData) -> some View {
-        Markdown(article.content)
+    private func markdownBody(_ article: APIArticle) -> some View {
+        Markdown(article.content ?? "")
             .markdownTextStyle {
                 ForegroundColor(Color.brandNavy)
                 FontSize(16)
@@ -116,7 +126,7 @@ struct ArticleDetailView: View {
                     .padding(.leading, 12)
                     .overlay(alignment: .leading) {
                         Rectangle()
-                            .fill(Color.brandCoral.opacity(0.5))
+                            .fill(Color.brandGold.opacity(0.5))
                             .frame(width: 3)
                     }
                     .padding(.vertical, 4)

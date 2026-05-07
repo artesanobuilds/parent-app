@@ -77,6 +77,33 @@ struct ChatService {
         }
     }
 
+    func sendFeedback(
+        messageID: String,
+        threadID: String,
+        userID: String,
+        feedback: String,
+        baseURL: URL
+    ) async throws {
+        let url = baseURL.appendingPathComponent("feedback")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload: [String: String] = [
+            "message_id": messageID,
+            "thread_id": threadID,
+            "user_id": userID,
+            "feedback": feedback
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (_, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw ChatServiceError.invalidResponse
+        }
+    }
+
     // MARK: - Helpers
 
     private func buildChatRequest(

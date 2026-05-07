@@ -1,18 +1,27 @@
 import SwiftUI
 
-/// Centralized brand colors for MVP — inspired by SchoolMom editorial aesthetic.
-/// Palette: warm dusty rose, dark charcoal, soft blush tones.
+/// Centralized brand colors for MVP — dark badge aesthetic with gold accents.
+/// Logo: black circle, gold stars, white "MVP" text, silver ring.
+/// Rule: dark/black for chrome and backgrounds, white for content sections, gold for accents.
 extension Color {
-    // Primary palette
-    static let brandCoral = Color(red: 0.77, green: 0.64, blue: 0.58)          // Dusty rose #C4A494
-    static let brandNavy = Color(red: 0.18, green: 0.16, blue: 0.15)           // Dark charcoal #2D2926
-    static let brandBackground = Color(red: 0.96, green: 0.92, blue: 0.89)     // Light warm blush #F5EBE3
-    static let brandSurface = Color.white.opacity(0.94)
-    static let brandStroke = Color.brandCoral.opacity(0.30)
+    // Primary brand colors from logo
+    static let brandGold = Color(red: 0.79, green: 0.66, blue: 0.30)           // #C9A84C gold stars
+    static let brandBlack = Color(red: 0.11, green: 0.11, blue: 0.12)          // #1C1C1E primary dark
 
-    // UI accents
-    static let brandYellow = Color(red: 0.77, green: 0.64, blue: 0.58)         // Agent avatar — matches dusty rose
-    static let brandLightBlue = Color(red: 0.94, green: 0.90, blue: 0.87)      // User question pill — warm blush
-    static let brandGray = Color(red: 0.55, green: 0.50, blue: 0.47)           // Warm gray for secondary text
-    static let brandCardBackground = Color.white                                 // Content card background
+    // Backgrounds
+    static let brandBackground = Color(red: 0.11, green: 0.11, blue: 0.12)     // App-level dark bg
+    static let brandSurface = Color(red: 0.17, green: 0.17, blue: 0.18)        // Elevated dark cards/surfaces
+    static let brandCardBackground = Color.white                                 // Content cards & reading bg
+
+    // Text
+    static let brandNavy = Color(red: 0.13, green: 0.13, blue: 0.14)           // Dark text on light bg
+    static let brandGray = Color(red: 0.60, green: 0.60, blue: 0.60)           // Secondary/muted text
+
+    // Accent aliases (swap coral → gold everywhere)
+    static let brandCoral = Color(red: 0.79, green: 0.66, blue: 0.30)          // Gold (compat alias)
+    static let brandYellow = Color(red: 0.79, green: 0.66, blue: 0.30)         // Agent avatar
+    static let brandLightBlue = Color(red: 0.22, green: 0.22, blue: 0.23)      // User message pill (dark)
+
+    // Borders
+    static let brandStroke = Color.white.opacity(0.10)                           // Subtle border on dark
 }

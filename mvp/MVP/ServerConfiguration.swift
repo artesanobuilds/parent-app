@@ -2,6 +2,19 @@ import Foundation
 
 /// Persists and validates the backend configuration the chat feature needs.
 final class ServerConfiguration: ObservableObject {
+
+    /// Production URL — update this once you deploy to Railway.
+    static let productionURL = "https://mvp-backend-production-8678.up.railway.app"
+    static let localURL = "http://localhost:8904"
+
+    static var defaultURL: String {
+        #if DEBUG
+        return localURL
+        #else
+        return productionURL
+        #endif
+    }
+
     @Published var baseURLString: String {
         didSet { persist(key: Self.baseURLKey, value: baseURLString) }
     }
@@ -14,7 +27,7 @@ final class ServerConfiguration: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        baseURLString = defaults.string(forKey: Self.baseURLKey) ?? "http://localhost:8000"
+        baseURLString = defaults.string(forKey: Self.baseURLKey) ?? Self.defaultURL
         threadID = defaults.string(forKey: Self.threadIDKey) ?? UUID().uuidString
     }
 
@@ -22,8 +35,20 @@ final class ServerConfiguration: ObservableObject {
         URL(string: baseURLString)
     }
 
+    var isUsingProduction: Bool {
+        baseURLString == Self.productionURL
+    }
+
     func resetThread() {
         threadID = UUID().uuidString
+    }
+
+    func switchToLocal() {
+        baseURLString = Self.localURL
+    }
+
+    func switchToProduction() {
+        baseURLString = Self.productionURL
     }
 
     // MARK: - Private

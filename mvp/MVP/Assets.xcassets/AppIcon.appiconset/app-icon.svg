@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="silver" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#D2D4D6"/>
+      <stop offset="45%" stop-color="#8C8E93"/>
+      <stop offset="100%" stop-color="#D2D4D6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Dark background (fills the rounded icon shape) -->
+  <rect width="1024" height="1024" fill="#1C1C1E"/>
+
+  <!-- Silver outer ring -->
+  <circle cx="512" cy="512" r="420" fill="url(#silver)"/>
+
+  <!-- Black inner circle -->
+  <circle cx="512" cy="512" r="370" fill="#1E1E20"/>
+
+  <!-- Large background star -->
+  <path d="M512.0,182.0L591.0,393.3L816.3,403.1L639.8,543.5L700.1,760.9L512.0,636.4L323.9,760.9L384.2,543.5L207.7,403.1L433.0,393.3Z"
+        fill="#7F6B2E" opacity="0.5"/>
+
+  <!-- Small accent stars -->
+  <path d="M350.0,212.0L359.4,237.1L386.1,238.3L365.2,254.9L372.3,280.7L350.0,266.0L327.7,280.7L334.8,254.9L313.9,238.3L340.6,237.1Z" fill="#C9A84C"/>
+  <path d="M680.0,256.0L688.4,278.4L712.3,279.5L693.6,294.4L700.0,317.5L680.0,304.3L660.0,317.5L666.4,294.4L647.7,279.5L671.6,278.4Z" fill="#C9A84C"/>
+  <path d="M255.0,505.0L261.2,521.5L278.8,522.3L265.0,533.2L269.7,550.2L255.0,540.5L240.3,550.2L245.0,533.2L231.2,522.3L248.8,521.5Z" fill="#C9A84C"/>
+  <path d="M765.0,490.0L771.2,506.5L788.8,507.3L775.0,518.2L779.7,535.2L765.0,525.5L750.3,535.2L755.0,518.2L741.2,507.3L758.8,506.5Z" fill="#C9A84C"/>
+  <path d="M345.0,728.0L352.9,749.1L375.4,750.1L357.8,764.2L363.8,785.9L345.0,773.4L326.2,785.9L332.2,764.2L314.6,750.1L337.1,749.1Z" fill="#C9A84C"/>
+  <path d="M685.0,728.0L692.9,749.1L715.4,750.1L697.8,764.2L703.8,785.9L685.0,773.4L666.2,785.9L672.2,764.2L654.6,750.1L677.1,749.1Z" fill="#C9A84C"/>
+
+  <!-- Gold dots -->
+  <circle cx="420" cy="320" r="6" fill="#C9A84C" opacity="0.7"/>
+  <circle cx="590" cy="305" r="6" fill="#C9A84C" opacity="0.7"/>
+  <circle cx="310" cy="420" r="5" fill="#C9A84C" opacity="0.7"/>
+  <circle cx="710" cy="410" r="5" fill="#C9A84C" opacity="0.7"/>
+  <circle cx="512" cy="280" r="5" fill="#C9A84C" opacity="0.7"/>
+  <circle cx="470" cy="555" r="5" fill="#C9A84C" opacity="0.7"/>
+  <circle cx="555" cy="545" r="5" fill="#C9A84C" opacity="0.7"/>
+
+  <!-- "MVP" text -->
+  <text x="512" y="548" text-anchor="middle"
+        font-family="-apple-system, 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+        font-size="205" font-weight="900" fill="white" letter-spacing="4">MVP</text>
+
+  <!-- Gold divider -->
+  <line x1="290" y1="590" x2="734" y2="590" stroke="#C9A84C" stroke-width="3" opacity="0.6"/>
+
+  <!-- "MOST VALUABLE PARENT" -->
+  <text x="512" y="635" text-anchor="middle"
+        font-family="-apple-system, 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+        font-size="38" font-weight="600" fill="#C9A84C" letter-spacing="5">MOST VALUABLE PARENT</text>
+</svg>

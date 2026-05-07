@@ -7,8 +7,23 @@ struct ServerSettingsView: View {
 
     var body: some View {
         Form {
+            Section("Environment") {
+                Picker("Server", selection: Binding(
+                    get: { draftBaseURL == ServerConfiguration.localURL ? "local" : "production" },
+                    set: { selection in
+                        draftBaseURL = selection == "local"
+                            ? ServerConfiguration.localURL
+                            : ServerConfiguration.productionURL
+                    }
+                )) {
+                    Text("Local").tag("local")
+                    Text("Production").tag("production")
+                }
+                .pickerStyle(.segmented)
+            }
+
             Section("Backend") {
-                TextField("Server URL", text: $draftBaseURL, prompt: Text("e.g. http://localhost:8000"))
+                TextField("Server URL", text: $draftBaseURL, prompt: Text("e.g. http://localhost:8904"))
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()

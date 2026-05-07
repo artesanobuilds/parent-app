@@ -7,14 +7,17 @@ struct AgentView: View {
     @State private var messageText: String = ""
     @State private var isShowingSettings: Bool = false
 
+    @EnvironmentObject private var contentVM: ContentViewModel
+
     /// Tracks which assistant message IDs have had content cards generated.
     /// Maps message ID -> (community posts, library items) so content is stable.
-    @State private var contentCards: [UUID: ([CommunityPost], [LibraryItem])] = [:]
+    @State private var contentCards: [UUID: ([APICommunityPost], [APIArticle])] = [:]
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Divider().opacity(0.3)
+                Divider()
+                    .overlay(Color.white.opacity(0.08))
                 messageList
                 inputArea
             }
@@ -26,13 +29,13 @@ struct AgentView: View {
                     } label: {
                         Image(systemName: "line.3.horizontal")
                             .font(.system(size: 18, weight: .medium))
-                            .foregroundColor(.brandNavy)
+                            .foregroundColor(.white)
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     Text("MVP")
                         .font(.headline.weight(.semibold))
-                        .foregroundColor(.brandNavy)
+                        .foregroundColor(.white)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 16) {
@@ -42,14 +45,14 @@ struct AgentView: View {
                         } label: {
                             Image(systemName: "square.and.pencil")
                                 .font(.system(size: 17, weight: .medium))
-                                .foregroundColor(.brandNavy)
+                                .foregroundColor(.white)
                         }
                         Button {
                             // Bookmark placeholder
                         } label: {
                             Image(systemName: "bookmark")
                                 .font(.system(size: 17, weight: .medium))
-                                .foregroundColor(.brandNavy)
+                                .foregroundColor(.white)
                         }
                     }
                 }
@@ -104,7 +107,11 @@ struct AgentView: View {
                                     VStack(alignment: .leading, spacing: 20) {
                                         CommunitySection(posts: cards.0)
                                         LibrarySection(items: cards.1)
-                                        FeedbackRow()
+                                        FeedbackRow(
+                                            feedback: message.feedback,
+                                            onThumbsUp: { viewModel.submitFeedback(messageID: message.id, feedback: .thumbsUp) },
+                                            onThumbsDown: { viewModel.submitFeedback(messageID: message.id, feedback: .thumbsDown) }
+                                        )
                                     }
                                     .padding(.horizontal, 16)
                                     .padding(.top, 16)
@@ -135,7 +142,7 @@ struct AgentView: View {
             Spacer(minLength: 60)
             Text(message.content)
                 .font(.body)
-                .foregroundColor(.brandNavy)
+                .foregroundColor(.white)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 12)
                 .background(Color.brandLightBlue)
@@ -149,9 +156,9 @@ struct AgentView: View {
 
     private func assistantMessageRow(_ message: ChatMessage) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            // Yellow branded avatar
+            // Gold branded avatar
             Circle()
-                .fill(Color.brandYellow)
+                .fill(Color.brandGold)
                 .frame(width: 30, height: 30)
                 .overlay(
                     Text("M")
@@ -164,14 +171,14 @@ struct AgentView: View {
                 Markdown(message.content.isEmpty ? "..." : message.content)
                     .markdownTextStyle {
                         FontSize(15)
-                        ForegroundColor(.brandNavy)
+                        ForegroundColor(.white)
                     }
                     .markdownBlockStyle(\.heading2) { configuration in
                         configuration.label
                             .markdownTextStyle {
                                 FontWeight(.bold)
                                 FontSize(17)
-                                ForegroundColor(.brandNavy)
+                                ForegroundColor(.white)
                             }
                     }
 
@@ -196,27 +203,28 @@ struct AgentView: View {
 
     private var inputArea: some View {
         VStack(spacing: 6) {
-            Divider().opacity(0.3)
+            Divider()
+                .overlay(Color.white.opacity(0.08))
 
             HStack(alignment: .bottom, spacing: 10) {
                 // Text field
                 TextField("Type your question", text: $messageText, axis: .vertical)
                     .font(.body)
+                    .foregroundColor(.white)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                     .background(
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .fill(Color.white)
+                            .fill(Color.brandSurface)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                    .stroke(Color.brandNavy.opacity(0.12), lineWidth: 1)
+                                    .stroke(Color.brandStroke, lineWidth: 1)
                             )
                     )
                     .lineLimit(1...4)
                     .disabled(viewModel.isSending || configuration.baseURL == nil || viewModel.isUserIDMissing)
                     .textInputAutocapitalization(.sentences)
                     .onSubmit(sendMessage)
-                    .foregroundColor(.brandNavy)
 
                 // Microphone button (decorative)
                 Button {
@@ -235,11 +243,11 @@ struct AgentView: View {
                 } label: {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(canSend ? .white : .brandGray)
+                        .foregroundColor(canSend ? .brandBlack : .brandGray)
                         .frame(width: 34, height: 34)
                         .background(
                             Circle()
-                                .fill(canSend ? Color.brandNavy : Color.brandNavy.opacity(0.1))
+                                .fill(canSend ? Color.brandGold : Color.brandSurface)
                         )
                 }
                 .disabled(!canSend)
@@ -289,12 +297,12 @@ struct AgentView: View {
     }
 
     /// Returns stable content cards for a given message, generating them once.
-    private func cardsForMessage(_ message: ChatMessage) -> ([CommunityPost], [LibraryItem]) {
+    private func cardsForMessage(_ message: ChatMessage) -> ([APICommunityPost], [APIArticle]) {
         if let existing = contentCards[message.id] {
             return existing
         }
-        let posts = MockContentProvider.randomCommunityPosts()
-        let items = MockContentProvider.randomLibraryItems()
+        let posts = contentVM.randomCommunityPosts()
+        let items = contentVM.randomLibraryItems()
         // Schedule state mutation outside of the view body
         DispatchQueue.main.async {
             contentCards[message.id] = (posts, items)

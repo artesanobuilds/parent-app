@@ -1,0 +1,126 @@
+import Foundation
+
+@MainActor
+final class ContentViewModel: ObservableObject {
+    @Published var categories: [APICategory] = []
+    @Published var libraryItems: [APIArticle] = []
+    @Published var communityPosts: [APICommunityPost] = []
+    @Published var isLoading = false
+    @Published var repliesCache: [String: [APIReply]] = [:]
+    var userId: String = ""
+    var baseURL: URL?
+
+    /// Cache for full article content (keyed by article id).
+    private var articleCache: [String: APIArticle] = [:]
+
+    // MARK: - Load All Content
+
+    func loadAllContent(baseURL: URL) async {
+        guard categories.isEmpty else { return }  // already loaded
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let c = try await ContentService.fetchCategories(baseURL: baseURL)
+            categories = c
+            print("[ContentViewModel] loaded \(c.count) categories")
+        } catch {
+            print("[ContentViewModel] fetchCategories failed: \(error)")
+        }
+
+        do {
+            let a = try await ContentService.fetchArticles(baseURL: baseURL)
+            libraryItems = a
+            print("[ContentViewModel] loaded \(a.count) articles")
+        } catch {
+            print("[ContentViewModel] fetchArticles failed: \(error)")
+        }
+
+        do {
+            let p = try await ContentService.fetchCommunityPosts(baseURL: baseURL)
+            communityPosts = p
+            print("[ContentViewModel] loaded \(p.count) posts")
+        } catch {
+            print("[ContentViewModel] fetchCommunityPosts failed: \(error)")
+        }
+    }
+
+    // MARK: - Article Detail
+
+    func fetchArticleDetail(baseURL: URL, id: String) async -> APIArticle? {
+        if let cached = articleCache[id] { return cached }
+        do {
+            let article = try await ContentService.fetchArticle(baseURL: baseURL, id: id)
+            articleCache[id] = article
+            return article
+        } catch {
+            print("[ContentViewModel] fetchArticleDetail failed: \(error)")
+            return nil
+        }
+    }
+
+    // MARK: - Community Post & Reply Actions
+
+    func createPost(baseURL: URL, category: String, title: String, body: String, authorName: String) async {
+        do {
+            let post = try await ContentService.createCommunityPost(
+                baseURL: baseURL, category: category, title: title, preview: body,
+                userId: userId, authorName: authorName
+            )
+            communityPosts.insert(post, at: 0)
+        } catch {
+            print("[ContentViewModel] createPost failed: \(error)")
+        }
+    }
+
+    func loadReplies(baseURL: URL, postId: String) async {
+        do {
+            let replies = try await ContentService.fetchReplies(baseURL: baseURL, postId: postId)
+            repliesCache[postId] = replies
+        } catch {
+            print("[ContentViewModel] loadReplies failed: \(error)")
+        }
+    }
+
+    func createReply(baseURL: URL, postId: String, authorName: String, body: String) async {
+        do {
+            let reply = try await ContentService.createReply(
+                baseURL: baseURL, postId: postId, userId: userId, authorName: authorName, body: body
+            )
+            repliesCache[postId, default: []].append(reply)
+            // Increment reply count on the post
+            if let index = communityPosts.firstIndex(where: { $0.id == postId }) {
+                // APICommunityPost has let properties, so we need to rebuild it
+                // Since replyCount is optional and let, we'll track counts in repliesCache instead
+            }
+        } catch {
+            print("[ContentViewModel] createReply failed: \(error)")
+        }
+    }
+
+    // MARK: - Convenience Accessors
+
+    func libraryItems(for category: String) -> [APIArticle] {
+        libraryItems.filter { $0.category == category }
+    }
+
+    func communityPosts(for category: String) -> [APICommunityPost] {
+        communityPosts.filter { $0.category == category }
+    }
+
+    func randomCommunityPosts() -> [APICommunityPost] {
+        Array(communityPosts.shuffled().prefix(2))
+    }
+
+    func randomLibraryItems() -> [APIArticle] {
+        Array(libraryItems.shuffled().prefix(3))
+    }
+
+    var featuredItem: APIArticle? {
+        libraryItems.first { $0.category == "emotional-wellness" }
+    }
+
+    func postData(_ id: String) -> APICommunityPost? {
+        communityPosts.first { $0.id == id }
+    }
+}

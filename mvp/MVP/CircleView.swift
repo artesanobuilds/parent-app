@@ -1,19 +1,21 @@
 import SwiftUI
 
 struct CircleView: View {
+    @EnvironmentObject private var contentVM: ContentViewModel
     @State private var selectedCategory: String? = nil
+    @State private var showingNewPost = false
 
-    private var filteredPosts: [CommunityPost] {
+    private var filteredPosts: [APICommunityPost] {
         if let selected = selectedCategory {
-            return MockContentProvider.communityPosts.filter { $0.category == selected }
+            return contentVM.communityPosts.filter { $0.category == selected }
         }
-        return MockContentProvider.communityPosts
+        return contentVM.communityPosts
     }
 
     /// Categories that actually have community posts.
-    private var activeCategories: [ContentCategory] {
-        let postCategoryIds = Set(MockContentProvider.communityPosts.map { $0.category })
-        return MockContentProvider.categories.filter { postCategoryIds.contains($0.id) }
+    private var activeCategories: [APICategory] {
+        let postCategoryIds = Set(contentVM.communityPosts.map { $0.category })
+        return contentVM.categories.filter { postCategoryIds.contains($0.id) }
     }
 
     var body: some View {
@@ -24,7 +26,7 @@ struct CircleView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Real parents. Real questions.")
                             .font(.title3.weight(.bold))
-                            .foregroundColor(.brandNavy)
+                            .foregroundColor(.white)
                         Text("You're not alone in this.")
                             .font(.subheadline)
                             .foregroundColor(.brandGray)
@@ -56,8 +58,25 @@ struct CircleView: View {
             }
             .background(Color.brandBackground.ignoresSafeArea())
             .navigationTitle("Circle")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.brandBackground, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showingNewPost = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(.brandGold)
+                    }
+                }
+            }
+            .sheet(isPresented: $showingNewPost) {
+                if let url = contentVM.baseURL {
+                    NewPostView(baseURL: url)
+                }
+            }
             .withContentNavigationDestinations()
         }
     }
@@ -95,12 +114,12 @@ struct CircleView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(isSelected ? Color.brandNavy : Color.brandCardBackground)
-            .foregroundColor(isSelected ? .white : .brandNavy)
+            .background(isSelected ? Color.brandGold : Color.brandSurface)
+            .foregroundColor(isSelected ? .brandBlack : .white)
             .clipShape(Capsule())
             .overlay(
                 Capsule()
-                    .stroke(isSelected ? Color.clear : Color.brandNavy.opacity(0.12), lineWidth: 1)
+                    .stroke(isSelected ? Color.clear : Color.brandStroke, lineWidth: 1)
             )
         }
     }
@@ -124,10 +143,11 @@ struct CircleView: View {
 // MARK: - Circle Post Card (full-width community card)
 
 struct CirclePostCard: View {
-    let post: CommunityPost
+    let post: APICommunityPost
+    @EnvironmentObject private var contentVM: ContentViewModel
 
-    private var category: ContentCategory? {
-        MockContentProvider.categories.first { $0.id == post.category }
+    private var category: APICategory? {
+        contentVM.categories.first { $0.id == post.category }
     }
 
     var body: some View {
@@ -135,12 +155,12 @@ struct CirclePostCard: View {
             // Author row
             HStack(spacing: 10) {
                 Circle()
-                    .fill(Color.brandCoral.opacity(0.15))
+                    .fill(Color.brandGold.opacity(0.15))
                     .frame(width: 40, height: 40)
                     .overlay(
                         Text(post.initials)
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.brandCoral)
+                            .foregroundColor(.brandGold)
                     )
 
                 VStack(alignment: .leading, spacing: 1) {
@@ -173,7 +193,8 @@ struct CirclePostCard: View {
 
             // Engagement row
             HStack(spacing: 20) {
-                Label("Reply", systemImage: "bubble.left")
+                let count = post.replyCount ?? 0
+                Label(count > 0 ? "\(count) \(count == 1 ? "reply" : "replies")" : "Reply", systemImage: "bubble.left")
                 Label("Support", systemImage: "heart")
             }
             .font(.caption)
@@ -183,10 +204,10 @@ struct CirclePostCard: View {
         .padding(16)
         .background(Color.brandCardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: Color.black.opacity(0.05), radius: 8, y: 3)
+        .shadow(color: Color.black.opacity(0.3), radius: 8, y: 3)
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.brandNavy.opacity(0.06), lineWidth: 1)
+                .stroke(Color.brandStroke, lineWidth: 1)
         )
     }
 }

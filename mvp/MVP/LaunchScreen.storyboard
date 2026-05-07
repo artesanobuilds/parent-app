@@ -15,17 +15,19 @@
                         <rect key="frame" x="0.0" y="0.0" width="414" height="896"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFill" translatesAutoresizingMaskIntoConstraints="NO" image="LaunchScreen" id="launch-image">
-                                <rect key="frame" x="0.0" y="0.0" width="414" height="896"/>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" translatesAutoresizingMaskIntoConstraints="NO" image="MVPLogo" id="launch-logo">
+                                <rect key="frame" x="55" y="298" width="304" height="304"/>
+                                <constraints>
+                                    <constraint firstAttribute="width" secondItem="launch-logo" secondAttribute="height" multiplier="1:1" id="constraint-aspect"/>
+                                </constraints>
                             </imageView>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="launch-safe-area"/>
-                        <color key="backgroundColor" systemColor="systemBackgroundColor"/>
+                        <color key="backgroundColor" red="0.10980392156862745" green="0.10980392156862745" blue="0.11764705882352941" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
-                            <constraint firstItem="launch-image" firstAttribute="top" secondItem="launch-view" secondAttribute="top" id="constraint-top"/>
-                            <constraint firstItem="launch-image" firstAttribute="leading" secondItem="launch-view" secondAttribute="leading" id="constraint-leading"/>
-                            <constraint firstAttribute="trailing" secondItem="launch-image" secondAttribute="trailing" id="constraint-trailing"/>
-                            <constraint firstAttribute="bottom" secondItem="launch-image" secondAttribute="bottom" id="constraint-bottom"/>
+                            <constraint firstItem="launch-logo" firstAttribute="centerX" secondItem="launch-view" secondAttribute="centerX" id="constraint-cx"/>
+                            <constraint firstItem="launch-logo" firstAttribute="centerY" secondItem="launch-view" secondAttribute="centerY" id="constraint-cy"/>
+                            <constraint firstItem="launch-logo" firstAttribute="width" secondItem="launch-view" secondAttribute="width" multiplier="0.6" id="constraint-width-pct"/>
                         </constraints>
                     </view>
                 </viewController>
@@ -35,7 +37,6 @@
         </scene>
     </scenes>
     <resources>
-        <image name="LaunchScreen" width="1242" height="2688"/>
+        <image name="MVPLogo" width="500" height="500"/>
     </resources>
 </document>
-

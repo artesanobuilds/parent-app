@@ -362,10 +362,7 @@ private struct AgentChoiceView: View {
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
-            Image(logoName)
-                .resizable()
-                .scaledToFit()
-                .frame(maxHeight: 180)
+            MVPLogoView(size: 160)
                 .accessibilityHidden(true)
 
             VStack(spacing: 12) {

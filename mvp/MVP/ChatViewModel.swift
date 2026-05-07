@@ -73,6 +73,31 @@ final class ChatViewModel: ObservableObject {
         userID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    func submitFeedback(messageID: UUID, feedback: MessageFeedback) {
+        // Toggle: if same feedback already set, remove it
+        guard let index = messages.firstIndex(where: { $0.id == messageID }) else { return }
+        if messages[index].feedback == feedback {
+            messages[index].feedback = nil
+        } else {
+            messages[index].feedback = feedback
+        }
+
+        let currentFeedback = messages[index].feedback
+        guard let baseURL = configuration.baseURL else { return }
+        let userID = userID
+        let threadID = configuration.threadID
+
+        Task {
+            try? await service.sendFeedback(
+                messageID: messageID.uuidString,
+                threadID: threadID,
+                userID: userID,
+                feedback: currentFeedback?.rawValue ?? "none",
+                baseURL: baseURL
+            )
+        }
+    }
+
     func resetConversation() {
         streamTask?.cancel()
         messages = []
