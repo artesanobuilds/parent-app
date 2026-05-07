@@ -7,3 +7,6 @@ __pycache__/
 *.pyc
 mvp-backend/data/*.duckdb
 mvp-backend/data/*.duckdb.wal
+mvp-backend/data/.last-sync-summary.json
+mvp-backend/data/.remote-checksums.json
+mvp-backend/data/.sync-audit.log
