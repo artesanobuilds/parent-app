@@ -3,6 +3,7 @@ import SwiftUI
 struct HomeView: View {
     let username: String
     @EnvironmentObject private var contentVM: ContentViewModel
+    @Environment(\.triggerKidHandoff) private var triggerKidHandoff
 
     var body: some View {
         NavigationStack {
@@ -19,6 +20,11 @@ struct HomeView: View {
 
                             featuredCard
                                 .padding(.horizontal)
+
+                            if let baseURL = ServerConfiguration().baseURL, !username.isEmpty {
+                                KidsHomeSection(userID: username, baseURL: baseURL)
+                                    .padding(.horizontal)
+                            }
 
                             CommunitySection(posts: contentVM.randomCommunityPosts())
                                 .padding(.leading)
@@ -43,7 +49,7 @@ struct HomeView: View {
     // MARK: - Greeting Header
 
     private var greetingHeader: some View {
-        HStack {
+        HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(greeting)
                     .font(.caption)
@@ -53,6 +59,9 @@ struct HomeView: View {
                     .foregroundColor(.white)
             }
             Spacer()
+            if !username.isEmpty {
+                HandoffEntryButton { triggerKidHandoff() }
+            }
             Circle()
                 .fill(Color.brandGold.opacity(0.2))
                 .frame(width: 40, height: 40)

@@ -45,12 +45,14 @@ final class ChatViewModel: ObservableObject {
         streamTask = Task { [weak self] in
             guard let self else { return }
             do {
+                let authHeader = await AuthService.shared.header(for: userID)
                 for try await token in service.streamResponse(
                     message: trimmed,
                     threadID: configuration.threadID,
                     userID: userID,
                     baseURL: baseURL,
-                    chatPath: chatPath
+                    chatPath: chatPath,
+                    authHeader: authHeader
                 ) {
                     self.appendToken(token, to: assistantID)
                 }
@@ -88,12 +90,14 @@ final class ChatViewModel: ObservableObject {
         let threadID = configuration.threadID
 
         Task {
+            let authHeader = await AuthService.shared.header(for: userID)
             try? await service.sendFeedback(
                 messageID: messageID.uuidString,
                 threadID: threadID,
                 userID: userID,
                 feedback: currentFeedback?.rawValue ?? "none",
-                baseURL: baseURL
+                baseURL: baseURL,
+                authHeader: authHeader
             )
         }
     }

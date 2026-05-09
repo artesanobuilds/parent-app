@@ -30,7 +30,8 @@ struct ChatService {
         threadID: String,
         userID: String,
         baseURL: URL,
-        chatPath: String = "chat"
+        chatPath: String = "chat",
+        authHeader: [String: String] = [:]
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             Task {
@@ -40,7 +41,8 @@ struct ChatService {
                         threadID: threadID,
                         userID: userID,
                         baseURL: baseURL,
-                        chatPath: chatPath
+                        chatPath: chatPath,
+                        authHeader: authHeader
                     )
                     let (bytes, response) = try await session.bytes(for: request)
                     guard let httpResponse = response as? HTTPURLResponse else {
@@ -82,12 +84,14 @@ struct ChatService {
         threadID: String,
         userID: String,
         feedback: String,
-        baseURL: URL
+        baseURL: URL,
+        authHeader: [String: String] = [:]
     ) async throws {
         let url = baseURL.appendingPathComponent("feedback")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (key, value) in authHeader { request.setValue(value, forHTTPHeaderField: key) }
 
         let payload: [String: String] = [
             "message_id": messageID,
@@ -111,13 +115,15 @@ struct ChatService {
         threadID: String,
         userID: String,
         baseURL: URL,
-        chatPath: String
+        chatPath: String,
+        authHeader: [String: String] = [:]
     ) throws -> URLRequest {
         let chatURL = baseURL.appendingPathComponent(chatPath)
         var request = URLRequest(url: chatURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        for (key, value) in authHeader { request.setValue(value, forHTTPHeaderField: key) }
 
         let payload = ChatRequest(message: message, threadID: threadID, userID: userID)
         request.httpBody = try JSONEncoder().encode(payload)

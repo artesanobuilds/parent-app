@@ -20,6 +20,32 @@ struct MainTabView: View {
     }
 
     var body: some View {
+        Group {
+            if !username.isEmpty, let baseURL = configuration.baseURL {
+                HandoffCurtain(userID: username, baseURL: baseURL) {
+                    tabContent
+                }
+            } else {
+                tabContent
+            }
+        }
+        .environmentObject(contentVM)
+        .environmentObject(configuration)
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .preferredColorScheme(.dark)
+        .onAppear {
+            viewModel.setUserID(username)
+            contentVM.userId = username
+        }
+        .task {
+            if let url = configuration.baseURL {
+                contentVM.baseURL = url
+                await contentVM.loadAllContent(baseURL: url)
+            }
+        }
+    }
+
+    private var tabContent: some View {
         ZStack(alignment: .bottom) {
             // Tab content
             Group {
@@ -40,20 +66,6 @@ struct MainTabView: View {
 
             // Custom bottom tab bar
             customTabBar
-        }
-        .environmentObject(contentVM)
-        .environmentObject(configuration)
-        .ignoresSafeArea(.keyboard, edges: .bottom)
-        .preferredColorScheme(.dark)
-        .onAppear {
-            viewModel.setUserID(username)
-            contentVM.userId = username
-        }
-        .task {
-            if let url = configuration.baseURL {
-                contentVM.baseURL = url
-                await contentVM.loadAllContent(baseURL: url)
-            }
         }
     }
 

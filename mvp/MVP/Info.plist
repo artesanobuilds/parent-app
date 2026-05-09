@@ -6,5 +6,9 @@
 	<false/>
 	<key>UILaunchScreen</key>
 	<false/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Used to talk to your kid's companion when they're in Kid Mode.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Used to turn your kid's voice into text so the companion can respond.</string>
 </dict>
 </plist>

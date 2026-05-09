@@ -967,6 +967,78 @@ struct OnboardingView: View {
 
     // MARK: - Screen 8: Preview / Launch
 
+    /// Builds compact chips of filled-in parent demographics. Empty array if nothing is set
+    /// (e.g., returning user who bypassed the demographic step).
+    private func parentSummaryChips() -> [String] {
+        var parts: [String] = []
+        let flag = countryOptions.first(where: { $0.0 == country })?.1 ?? "\u{1F4CD}"
+        if !postalCode.trimmed.isEmpty {
+            parts.append("\(flag) \(postalCode.trimmed)")
+        } else if !country.isEmpty && country != "US" {
+            parts.append("\(flag) \(country)")
+        }
+        if !primaryLanguage.isEmpty { parts.append(primaryLanguage) }
+        if !parentAgeRange.isEmpty { parts.append(parentAgeRange) }
+        if !employment.isEmpty { parts.append(employment) }
+        if !pronouns.isEmpty { parts.append(pronouns) }
+        if !culturalBackground.trimmed.isEmpty { parts.append(culturalBackground.trimmed) }
+        if !household.isEmpty { parts.append(household) }
+        // Only surface the adults count if the user touched any other field on the About-you step
+        if !parts.isEmpty { parts.append("\(adultsInHousehold) adult\(adultsInHousehold == 1 ? "" : "s")") }
+        return parts
+    }
+
+    private func kidSummaryLine(_ kid: KidEntry) -> String {
+        var head = kid.name.trimmed
+        if !kid.age.trimmed.isEmpty { head += " (\(kid.age.trimmed))" }
+        var tail: [String] = []
+        if !kid.temperament.isEmpty { tail.append(kid.temperament) }
+        if !kid.pronouns.isEmpty { tail.append(kid.pronouns) }
+        if !kid.gradeBand.isEmpty { tail.append("\(kid.gradeBand) grade") }
+        return tail.isEmpty ? head : "\(head) · \(tail.joined(separator: " · "))"
+    }
+
+    @ViewBuilder
+    private var personalizedSummary: some View {
+        let parentChips = parentSummaryChips()
+        let filledKids = kids.filter { !$0.name.trimmed.isEmpty }
+        let hasAnything = !parentChips.isEmpty || !filledKids.isEmpty
+
+        if hasAnything {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Here's what we have")
+                    .font(.system(.subheadline, design: .serif).weight(.semibold))
+                    .foregroundColor(.brandGold)
+
+                if !parentChips.isEmpty {
+                    Text(parentChips.joined(separator: " · "))
+                        .font(.system(.subheadline, design: .serif))
+                        .foregroundColor(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                ForEach(filledKids) { kid in
+                    HStack(alignment: .top, spacing: 10) {
+                        Text("\u{1F33F}")
+                            .font(.system(size: 14))
+                        Text(kidSummaryLine(kid))
+                            .font(.system(.subheadline, design: .serif))
+                            .foregroundColor(.white)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.brandSurface.opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.brandStroke, lineWidth: 1)
+            )
+        }
+    }
+
     private var previewScreen: some View {
         let features: [(String, String)] = [
             ("\u{1F9E0}", "AI coach that knows your family"),
@@ -1013,23 +1085,28 @@ struct OnboardingView: View {
             }
             .padding(.horizontal, 24)
 
-            Spacer().frame(height: 32)
+            Spacer().frame(height: 24)
 
-            VStack(alignment: .leading, spacing: 20) {
-                ForEach(features, id: \.1) { emoji, text in
-                    HStack(spacing: 14) {
-                        Text(emoji)
-                            .font(.system(size: 24))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    personalizedSummary
 
-                        Text(text)
-                            .font(.system(.body, design: .serif).weight(.medium))
-                            .foregroundColor(.white)
+                    VStack(alignment: .leading, spacing: 20) {
+                        ForEach(features, id: \.1) { emoji, text in
+                            HStack(spacing: 14) {
+                                Text(emoji)
+                                    .font(.system(size: 24))
+
+                                Text(text)
+                                    .font(.system(.body, design: .serif).weight(.medium))
+                                    .foregroundColor(.white)
+                            }
+                        }
                     }
                 }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
             }
-            .padding(.horizontal, 24)
-
-            Spacer()
 
             let displayName = parentName.trimmed
             brandButton(label: "Let's go, \(displayName)!") {
