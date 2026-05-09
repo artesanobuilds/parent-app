@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator, Dict, List, Any, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +18,17 @@ from app.memory import MemoryRepository
 from app.profiling import profiling_service
 from app.duckdb_storage import DuckDBStorage
 from app import content as content_service
+from app import kid_agent as kid_agent_service
+from app import moderation
+from app import telemetry
+from app import summary as kid_summary
+from app.auth import current_user, authorize_user_match, issue_token as auth_issue_token
+from app.rate_limit import enforce as rate_limit_enforce
+from app.prompt_synthesis import _age_band as _kid_age_band, synthesize as kid_synthesize
+
+
+# Closed-beta consent agreement version. Bump when terms change to force re-consent.
+CONSENT_AGREEMENT_VERSION = os.getenv("CONSENT_AGREEMENT_VERSION", "closed-beta-v1-2026-05")
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -45,10 +56,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MVP Backend", version="1.0.0", lifespan=lifespan)
 
-# Enable CORS for all origins (dev mode)
+# Lock CORS to known origins. Env: ALLOWED_ORIGINS=https://a.com,https://b.com
+# Default keeps localhost dev usable. iOS does not need CORS (not a browser).
+_allowed_origins = [
+    o.strip() for o in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:8904,http://localhost:5173,http://127.0.0.1:8904",
+    ).split(",") if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,6 +76,17 @@ class ChatRequest(BaseModel):
     message: str
     thread_id: str = "default_thread"
     user_id: str = "0"
+
+
+class AuthIssueRequest(BaseModel):
+    user_id: str  # closed-beta: clients claim a user_id; v1 upgrades to Apple Sign-In
+
+
+class ConsentSubmitRequest(BaseModel):
+    parent_name: Optional[str] = None
+    parent_email: Optional[str] = None
+    kid_age_band: Optional[str] = None
+    agreement_version: str  # must match CONSENT_AGREEMENT_VERSION
 
 
 class FeedbackRequest(BaseModel):
@@ -310,8 +339,82 @@ async def generate_onboarding_stream(message: str, thread_id: str, user_id: str)
         logger.error(f"Error in onboarding stream: {e}")
         yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
 
+# ── Auth (closed-beta opaque tokens) ─────────────────────────────────
+
+@app.post("/auth/issue-token")
+def auth_issue_token_endpoint(request: AuthIssueRequest, http_request: Request):
+    """
+    Issue a Bearer token bound to user_id. v0 closed-beta: any client can
+    claim a user_id (the existing app generates a UUID at first run). v1
+    public launch tightens this with Apple Sign-In + server-side validation.
+
+    Rate-limited per source IP to slow token-issuance flooding (the only
+    closed-beta-safe knob until App Attest / Sign-In lands).
+    """
+    client_ip = http_request.client.host if http_request.client else "unknown"
+    rate_limit_enforce(client_ip, "auth")
+    token = auth_issue_token(request.user_id)
+    return {"token": token, "user_id": request.user_id}
+
+
+# ── Consent ──────────────────────────────────────────────────────────
+
+@app.post("/consent/submit")
+def consent_submit(req: ConsentSubmitRequest, request: Request,
+                   user_id: str = Depends(current_user)):
+    if req.agreement_version != CONSENT_AGREEMENT_VERSION:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "agreement_version_mismatch",
+                "required_version": CONSENT_AGREEMENT_VERSION,
+            },
+        )
+    saved = storage_backend.record_consent(
+        user_id=user_id,
+        parent_name=req.parent_name,
+        parent_email=req.parent_email,
+        kid_age_band=req.kid_age_band,
+        agreement_version=req.agreement_version,
+        ip_address=(request.client.host if request.client else None),
+        user_agent=request.headers.get("user-agent"),
+    )
+    return saved
+
+
+@app.get("/consent/status")
+def consent_status(user_id: str = Depends(current_user)):
+    latest = storage_backend.latest_consent(user_id)
+    accepted = bool(latest and latest.get("agreement_version") == CONSENT_AGREEMENT_VERSION)
+    return {
+        "accepted": accepted,
+        "latest_version": CONSENT_AGREEMENT_VERSION,
+        "accepted_version": latest.get("agreement_version") if latest else None,
+        "accepted_at": latest.get("accepted_at") if latest else None,
+    }
+
+
+def _require_consent(user_id: str) -> None:
+    """Raise 403 if user has not accepted the current consent agreement."""
+    latest = storage_backend.latest_consent(user_id)
+    if not latest or latest.get("agreement_version") != CONSENT_AGREEMENT_VERSION:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "consent_required",
+                "required_version": CONSENT_AGREEMENT_VERSION,
+            },
+        )
+
+
+# ── Chat / onboarding (parent-facing, auth required) ────────────────
+
 @app.post("/chat")
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(request: ChatRequest, user_id: str = Depends(current_user)):
+    authorize_user_match(authenticated=user_id, claimed=request.user_id)
+    rate_limit_enforce(user_id, "chat")
     return StreamingResponse(
         generate_stream(request.message, request.thread_id, request.user_id),
         media_type="text/event-stream"
@@ -319,7 +422,9 @@ async def chat_endpoint(request: ChatRequest):
 
 
 @app.post("/onboarding-chat")
-async def onboarding_chat_endpoint(request: ChatRequest):
+async def onboarding_chat_endpoint(request: ChatRequest, user_id: str = Depends(current_user)):
+    authorize_user_match(authenticated=user_id, claimed=request.user_id)
+    rate_limit_enforce(user_id, "chat")
     return StreamingResponse(
         generate_onboarding_stream(request.message, request.thread_id, request.user_id),
         media_type="text/event-stream"
@@ -327,11 +432,12 @@ async def onboarding_chat_endpoint(request: ChatRequest):
 
 
 @app.get("/memory/{user_id}")
-def dump_memory(user_id: str):
+def dump_memory(user_id: str, authenticated_user: str = Depends(current_user)):
     """
     Returns all conversation threads for a given user_id from in-memory storage.
     Includes both coaching (/chat) and onboarding (/onboarding-chat) memories.
     """
+    authorize_user_match(authenticated=authenticated_user, claimed=user_id)
     return {
         "user_id": user_id,
         "chat_threads": chat_memory.snapshot_user(user_id),
@@ -439,11 +545,12 @@ def relevant_content(topic: str, limit: int = 5):
 
 
 @app.post("/profile/seed")
-def seed_profile(request: OnboardingSeedRequest):
+def seed_profile(request: OnboardingSeedRequest, user_id: str = Depends(current_user)):
     """
     Receive structured onboarding data from the mobile app and seed
     the parent + child profiles so the coaching agent has context.
     """
+    authorize_user_match(authenticated=user_id, claimed=request.user_id)
     # Seed parent profile
     parent_updates: Dict[str, Any] = {"name": request.parent_name}
     if request.challenges:
@@ -508,11 +615,12 @@ def seed_profile(request: OnboardingSeedRequest):
 
 
 @app.post("/feedback")
-def submit_feedback(req: FeedbackRequest):
+def submit_feedback(req: FeedbackRequest, user_id: str = Depends(current_user)):
     """
     Store thumbs-up/down feedback for an assistant message.
     Persisted inside the user's chat_threads data keyed by message_id.
     """
+    authorize_user_match(authenticated=user_id, claimed=req.user_id)
     # Load existing feedback store (or create one)
     feedback_data = storage_backend.load_user_data(req.user_id, "feedback") or {}
     if req.feedback == "none":
@@ -525,6 +633,499 @@ def submit_feedback(req: FeedbackRequest):
     storage_backend.save_user_data(req.user_id, "feedback", feedback_data)
     logger.info(f"[feedback] user={req.user_id} message={req.message_id} feedback={req.feedback}")
     return {"ok": True}
+
+
+# ── Family Companion (kid agent + handoff) ───────────────────────────
+
+class KidAgentConfigRequest(BaseModel):
+    user_id: str
+    kid_name: str
+    brief: str = ""                       # parent's free-text letter
+    expected_version: Optional[int] = None  # optimistic concurrency
+    enable: bool = False                  # set True from "Introduce them"
+
+
+class KidChatRequest(BaseModel):
+    user_id: str
+    kid_name: str
+    message: str
+    thread_id: str = "default"
+    kid_pin: Optional[str] = None  # selection convenience; not auth boundary
+
+
+class KidPinRequest(BaseModel):
+    user_id: str
+    kid_name: str
+    pin: str  # 4 digits, parent-set
+
+
+def _verify_kid_pin(user_id: str, kid_name: str, pin: Optional[str]) -> bool:
+    """
+    Returns True if no PIN is set, or the PIN matches. The auth boundary is
+    the parent session — this is just selection convenience for shared devices.
+    """
+    if pin is None:
+        # Allow unauthenticated kid mode for v0 closed beta. Will tighten for v1.
+        return True
+    pin_hash = storage_backend.get_kid_pin_hash(user_id, kid_name)
+    if pin_hash is None:
+        return True
+    try:
+        import bcrypt
+        return bcrypt.checkpw(pin.encode("utf-8"), pin_hash.encode("utf-8"))
+    except Exception as exc:
+        logger.error(f"[kid_auth] bcrypt check failed: {exc}")
+        return False
+
+
+@app.post("/kid-agent/config")
+def kid_agent_upsert(req: KidAgentConfigRequest, user_id: str = Depends(current_user)):
+    """Re-synthesize and persist a new KidAgentConfig version."""
+    authorize_user_match(authenticated=user_id, claimed=req.user_id)
+    _require_consent(user_id)
+    rate_limit_enforce(user_id, "config")
+    try:
+        config = kid_agent_service.upsert_kid_agent_config(
+            user_id=req.user_id,
+            kid_name=req.kid_name,
+            brief=req.brief,
+            expected_version=req.expected_version,
+            enable=req.enable,
+        )
+        return config
+    except ValueError as exc:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=409, content={"error": str(exc)})
+
+
+@app.get("/kid-agent/config")
+def kid_agent_get(user_id: str, kid_name: str, authenticated_user: str = Depends(current_user)):
+    """Fetch the latest config for a kid. Triggers auto-gen on first read."""
+    authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    _require_consent(user_id)
+    config = storage_backend.get_kid_agent_config(user_id, kid_name)
+    if config is None:
+        # Lazy bootstrap so the parent's first review screen has something to show.
+        _, config = kid_agent_service.get_kid_agent(user_id, kid_name)
+    return config
+
+
+@app.get("/kid-agent/list")
+def kid_agent_list(user_id: str, authenticated_user: str = Depends(current_user)):
+    """List all kid agents for this parent user."""
+    authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    return {"agents": storage_backend.list_kid_agents(user_id)}
+
+
+class KidAgentPreviewRequest(BaseModel):
+    user_id: str
+    kid_name: str
+    brief: str = ""
+
+
+@app.post("/kid-agent/preview")
+def kid_agent_preview(req: KidAgentPreviewRequest, user_id: str = Depends(current_user)):
+    """
+    Synthesize without saving. Returns the would-be invariants + summary +
+    3-message preview so the iOS letter editor can render live regenerations
+    without persisting drafts.
+    """
+    authorize_user_match(authenticated=user_id, claimed=req.user_id)
+    rate_limit_enforce(user_id, "config")
+
+    family = profiling_service.get_family_profile(req.user_id)
+    children = family.get("children") or {}
+    kid_profile = children.get(req.kid_name) or {"name": req.kid_name}
+    parent_summary = family.get("parent")
+    prior = storage_backend.get_kid_agent_config(req.user_id, req.kid_name)
+
+    result = kid_synthesize(
+        brief=req.brief,
+        kid_profile=kid_profile,
+        parent_profile_summary=parent_summary,
+        prior_config=prior,
+    )
+
+    # 3-message preview: synthetic kid prompt run through a draft agent.
+    # We do NOT instantiate a full LangGraph agent here (heavy + cached).
+    # The preview is "what the agent would say to a generic opener" — fast,
+    # cheap, and stable across edits. iOS shows this under the letter.
+    preview_messages = _generate_preview_messages(
+        kid_profile=kid_profile,
+        invariants=result.invariants,
+        system_prompt=result.system_prompt,
+    )
+
+    return {
+        "invariants": result.invariants,
+        "summary": result.summary,
+        "content_hash": result.content_hash,
+        "system_prompt_excerpt": result.system_prompt[:600] + "…",
+        "preview_messages": preview_messages,
+    }
+
+
+def _generate_preview_messages(*, kid_profile, invariants, system_prompt) -> list:
+    """
+    Three short opener replies the agent would produce, used by the letter
+    editor as live preview. Uses a single LLM call with a compact prompt to
+    keep latency low. Falls back to template lines on error.
+    """
+    from langchain_openai import ChatOpenAI
+    name = kid_profile.get("name") or "there"
+    display_name = invariants.get("agent_display_name") or "Friend"
+    try:
+        llm = ChatOpenAI(model=os.getenv("KID_PREVIEW_MODEL", "gpt-5.2"), temperature=0.4)
+        prompt = (
+            f"You are roleplaying as the kid agent '{display_name}'. Below is the system "
+            f"prompt that will run you in production. Generate THREE short example "
+            f"opening lines (1-2 sentences each) the kid '{name}' might see when they "
+            f"first open you. The lines should reflect the personality and respect every "
+            f"non-negotiable rule. Output ONLY the three lines, one per line, no numbering.\n\n"
+            f"=== SYSTEM PROMPT ===\n{system_prompt[:3500]}\n=== END ===\n"
+        )
+        out = llm.invoke(prompt).content
+        lines = [ln.strip() for ln in out.splitlines() if ln.strip()][:3]
+        if len(lines) == 3:
+            return lines
+    except Exception as exc:
+        logger.warning(f"[preview] generation failed: {exc}")
+    return [
+        f"Hi {name}! I'm {display_name}. What's on your mind today?",
+        "Hmm, that's a good one. Want to think about it together?",
+        "I heard your grown-up wants me to help with stuff like that.",
+    ]
+
+
+@app.post("/kid-auth/set-pin")
+def kid_set_pin(req: KidPinRequest, user_id: str = Depends(current_user)):
+    authorize_user_match(authenticated=user_id, claimed=req.user_id)
+    if not (req.pin.isdigit() and 3 <= len(req.pin) <= 8):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=400, content={"error": "PIN must be 3-8 digits"}
+        )
+    import bcrypt
+    pin_hash = bcrypt.hashpw(req.pin.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    storage_backend.set_kid_pin(req.user_id, req.kid_name, pin_hash)
+    return {"ok": True}
+
+
+async def generate_kid_stream(
+    user_id: str,
+    kid_name: str,
+    thread_id: str,
+    message: str,
+) -> AsyncGenerator[str, None]:
+    """
+    Streams the kid agent response with moderation gates.
+
+    Pipeline per turn:
+      1. Pre-input moderation -> on flag, log event, emit soft redirect (or crisis), return.
+      2. Append user message to kid_messages.
+      3. Stream tokens through StreamingModerator (chunk-buffered).
+      4. On output flag, emit replacement_message + log event.
+      5. On stream end, append assistant message; log moderation event if any.
+    """
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(f"[kid_chat] start user={user_id} kid={kid_name} msg={message[:120]}")
+
+    # Look up config (lazy-bootstraps a default if none exists).
+    agent, config = kid_agent_service.get_kid_agent(user_id, kid_name)
+    if not config.get("enabled"):
+        yield f"data: {json.dumps({'type': 'error', 'content': 'agent not yet enabled by parent'})}\n\n"
+        yield "data: [DONE]\n\n"
+        return
+
+    agent_id = config["id"]
+    invariants = config["invariants"]
+
+    # Crisis lock check — survives restarts, unlike the in-process kill set.
+    # If a previous turn tripped a crisis pattern, the agent is frozen until a
+    # parent calls /kid-agent/{agent_id}/revive.
+    lock = storage_backend.is_kid_agent_crisis_locked(agent_id)
+    if lock is not None:
+        frozen_msg = (
+            "Your grown-up needs to check in with you before we can chat again. "
+            "I told them — they'll come find you."
+        )
+        yield f"data: {json.dumps({'type': 'token', 'content': frozen_msg})}\n\n"
+        yield f"data: {json.dumps({'type': 'frozen', 'content': lock['category']})}\n\n"
+        yield "data: [DONE]\n\n"
+        return
+
+    # Resolve the kid's age band for the age classifier.
+    family = profiling_service.get_family_profile(user_id)
+    kid_profile = (family.get("children") or {}).get(kid_name) or {}
+    age_band = _kid_age_band(kid_profile.get("age"))
+
+    # Pre-input gate
+    pre = moderation.moderate_input(
+        user_id=user_id, kid_name=kid_name, agent_id=agent_id,
+        age_band=age_band, text=message,
+    )
+    if pre.flagged:
+        msg_id = storage_backend.append_kid_message(
+            agent_id=agent_id, thread_id=thread_id, role="user", content=message,
+            moderation_score=1.0, parent_flagged=True,
+        )
+        if pre.suggested_action == "crisis_route":
+            crisis_msg = (
+                "I'm really glad you told me. This is something your "
+                "grown-up needs to know — they want to help. I'm letting "
+                "them know now."
+            )
+            # Persist the lock BEFORE logging/alerting so even if downstream
+            # paths fail, the next turn from this kid is gated.
+            storage_backend.lock_kid_agent_for_crisis(
+                agent_id=agent_id, user_id=user_id, kid_name=kid_name,
+                category=pre.category, severity="crisis", reason=pre.reason,
+            )
+            moderation.kill_agent(agent_id)  # in-process for the current request
+            storage_backend.log_moderation_event(
+                user_id=user_id, kid_name=kid_name, severity="crisis",
+                category=pre.category, action="crisis_routed",
+                agent_id=agent_id, message_id=msg_id,
+                details={"reason": pre.reason},
+                parent_notified_at=None,  # TODO: real push notification hook (APNs)
+            )
+            telemetry.alert_crisis(
+                user_id=user_id, kid_name=kid_name, agent_id=agent_id,
+                excerpt=message,
+            )
+            for chunk in crisis_msg.split(". "):
+                yield f"data: {json.dumps({'type': 'token', 'content': chunk + '. '})}\n\n"
+            yield f"data: {json.dumps({'type': 'crisis', 'content': pre.category})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+        else:
+            storage_backend.log_moderation_event(
+                user_id=user_id, kid_name=kid_name, severity=pre.severity,
+                category=pre.category, action="blocked_input",
+                agent_id=agent_id, message_id=msg_id,
+                details={"reason": pre.reason},
+            )
+            telemetry.alert_moderation_event(
+                user_id=user_id, kid_name=kid_name, agent_id=agent_id,
+                severity=pre.severity, category=pre.category,
+                action="blocked_input", excerpt=message,
+            )
+            redirect = "Hmm, let's try a different question — your grown-up will see this chat."
+            yield f"data: {json.dumps({'type': 'token', 'content': redirect})}\n\n"
+            yield f"data: {json.dumps({'type': 'blocked', 'content': pre.category})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+    # Cleared — store the user turn.
+    user_msg_id = storage_backend.append_kid_message(
+        agent_id=agent_id, thread_id=thread_id, role="user", content=message,
+    )
+
+    memory_key = f"kid:{user_id}:{kid_name}:{thread_id}"
+    config_lg = {"configurable": {"thread_id": memory_key}}
+
+    sm = moderation.StreamingModerator(
+        user_id=user_id, kid_name=kid_name, agent_id=agent_id, age_band=age_band,
+    )
+    assistant_buffer = ""
+
+    try:
+        async for event in agent.astream_events(
+            {"messages": [HumanMessage(content=message)]},
+            config=config_lg,
+            version="v1",
+        ):
+            kind = event["event"]
+            if kind == "on_chat_model_stream":
+                content = event["data"]["chunk"].content
+                if not content:
+                    continue
+                assistant_buffer += content
+                for safe in sm.feed(content):
+                    yield f"data: {json.dumps({'type': 'token', 'content': safe})}\n\n"
+                if sm.state.value == "blocked":
+                    yield f"data: {json.dumps({'type': 'token', 'content': sm.replacement_message()})}\n\n"
+                    yield f"data: {json.dumps({'type': 'blocked', 'content': (sm.block_reason.category if sm.block_reason else 'unknown')})}\n\n"
+                    break
+            elif kind == "on_tool_start":
+                yield f"data: {json.dumps({'type': 'tool_start', 'tool': event['name']})}\n\n"
+            elif kind == "on_tool_end":
+                yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name']})}\n\n"
+
+        # End-of-stream flush (handles under-threshold completes that never tripped feed())
+        for chunk in sm.finalize():
+            yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
+
+        # Persist the assistant turn (or the blocked replacement)
+        if sm.state.value == "blocked" and sm.block_reason:
+            # If the model itself emitted crisis content, lock the agent and
+            # alert as crisis. log + alert paths are different for crisis vs
+            # routine output blocks.
+            if sm.block_reason.severity == "crisis":
+                storage_backend.lock_kid_agent_for_crisis(
+                    agent_id=agent_id, user_id=user_id, kid_name=kid_name,
+                    category=sm.block_reason.category, severity="crisis",
+                    reason=f"output: {sm.block_reason.reason}",
+                )
+                moderation.kill_agent(agent_id)
+                storage_backend.log_moderation_event(
+                    user_id=user_id, kid_name=kid_name, severity="crisis",
+                    category=sm.block_reason.category, action="crisis_routed",
+                    agent_id=agent_id, message_id=user_msg_id,
+                    details={"side": "output", "buffered_response": assistant_buffer[:500]},
+                    parent_notified_at=None,
+                )
+                telemetry.alert_crisis(
+                    user_id=user_id, kid_name=kid_name, agent_id=agent_id,
+                    excerpt=assistant_buffer[:240],
+                )
+            else:
+                storage_backend.log_moderation_event(
+                    user_id=user_id, kid_name=kid_name, severity=sm.block_reason.severity,
+                    category=sm.block_reason.category, action="blocked_output",
+                    agent_id=agent_id, message_id=user_msg_id,
+                    details={"buffered_response": assistant_buffer[:500]},
+                )
+                telemetry.alert_moderation_event(
+                    user_id=user_id, kid_name=kid_name, agent_id=agent_id,
+                    severity=sm.block_reason.severity, category=sm.block_reason.category,
+                    action="blocked_output", excerpt=assistant_buffer[:240],
+                )
+            storage_backend.append_kid_message(
+                agent_id=agent_id, thread_id=thread_id, role="assistant",
+                content=sm.replacement_message(), parent_flagged=True,
+            )
+        elif assistant_buffer:
+            storage_backend.append_kid_message(
+                agent_id=agent_id, thread_id=thread_id, role="assistant",
+                content=assistant_buffer,
+            )
+
+        yield "data: [DONE]\n\n"
+
+    except Exception as e:
+        logger.exception(f"[kid_chat] stream error: {e}")
+        yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+
+
+@app.post("/kid-chat")
+async def kid_chat_endpoint(request: KidChatRequest, user_id: str = Depends(current_user)):
+    authorize_user_match(authenticated=user_id, claimed=request.user_id)
+    _require_consent(user_id)
+    rate_limit_enforce(user_id, "chat")
+    if not _verify_kid_pin(request.user_id, request.kid_name, request.kid_pin):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=401, content={"error": "PIN check failed"})
+    return StreamingResponse(
+        generate_kid_stream(
+            user_id=request.user_id,
+            kid_name=request.kid_name,
+            thread_id=request.thread_id,
+            message=request.message,
+        ),
+        media_type="text/event-stream",
+    )
+
+
+@app.get("/kid-chat/transcripts")
+def kid_transcripts(user_id: str, kid_name: str, thread_id: str = "default", limit: int = 200,
+                    authenticated_user: str = Depends(current_user)):
+    """Parent reads the kid's history. Always available — by design."""
+    authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    config = storage_backend.get_kid_agent_config(user_id, kid_name)
+    if config is None:
+        return {"messages": [], "agent": None}
+    messages = storage_backend.get_kid_messages(config["id"], thread_id=thread_id, limit=limit)
+    return {"agent_id": config["id"], "messages": messages}
+
+
+@app.get("/kid-moderation/events")
+def kid_moderation_events(user_id: str, kid_name: Optional[str] = None, limit: int = 100,
+                           authenticated_user: str = Depends(current_user)):
+    """Parent (or oncall) reads moderation events for their family."""
+    authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    return {"events": storage_backend.get_moderation_events(user_id, kid_name=kid_name, limit=limit)}
+
+
+@app.delete("/family/{user_id}")
+def delete_family(user_id: str, authenticated_user: str = Depends(current_user)):
+    """
+    Honor the consent screen's "delete history at any time" promise. Cascades
+    across every kid-data table; writes one audit_events row recording the
+    delete (including row counts per table). The audit event is the only
+    thing that survives.
+
+    Note: this does NOT touch parquet snapshots in /app/data/*.parquet — they
+    will regenerate on next export and forget the deleted rows. It also does
+    NOT touch the in-memory LangGraph MemorySaver checkpointer (process-local;
+    will be discarded next restart). Both are documented in the audit details.
+    """
+    authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    counts = storage_backend.delete_family(user_id=user_id, actor=authenticated_user)
+    # Drop process-local kid agent caches so a fresh family_id doesn't reuse them.
+    try:
+        kid_agent_service.invalidate_user(user_id)
+    except Exception:
+        pass
+    return {"ok": True, "user_id": user_id, "deleted": counts}
+
+
+@app.get("/kid-agent/crisis-locks")
+def kid_agent_crisis_locks(user_id: str, authenticated_user: str = Depends(current_user)):
+    """Parent dashboard: which of my kids' agents are currently locked, and why."""
+    authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    return {"locks": storage_backend.list_active_crisis_locks(user_id)}
+
+
+@app.post("/kid-agent/{agent_id}/revive")
+def kid_agent_revive(agent_id: str, authenticated_user: str = Depends(current_user)):
+    """
+    Parent-only: clear a crisis lock so the kid can resume chatting.
+
+    Verifies the requesting parent owns the agent, NOT just that they're some
+    authenticated user — otherwise any token holder could revive any agent.
+    """
+    lock = storage_backend.is_kid_agent_crisis_locked(agent_id)
+    if lock is None:
+        raise HTTPException(status_code=404, detail="agent has no active crisis lock")
+    if lock["user_id"] != authenticated_user:
+        raise HTTPException(status_code=403, detail="only the owning parent can revive")
+    cleared = storage_backend.revive_kid_agent_from_crisis(
+        agent_id=agent_id, by=authenticated_user,
+    )
+    moderation.revive_agent(agent_id)  # clear the in-process flag too
+    storage_backend.set_kid_agent_enabled(agent_id, True)
+    return {"ok": cleared, "agent_id": agent_id, "kid_name": lock["kid_name"]}
+
+
+# ── Daily summaries (Phase 4) ────────────────────────────────────────
+
+class SummaryGenerateRequest(BaseModel):
+    user_id: str
+    kid_name: Optional[str] = None       # if absent, generate for every kid
+    date: Optional[str] = None           # 'YYYY-MM-DD'; defaults to today
+
+
+@app.post("/summary/generate")
+def summary_generate(req: SummaryGenerateRequest, user_id: str = Depends(current_user)):
+    """Generate (or regenerate) the daily summary for one kid or the whole family."""
+    authorize_user_match(authenticated=user_id, claimed=req.user_id)
+    if req.kid_name:
+        result = kid_summary.generate_for_kid(
+            user_id=req.user_id, kid_name=req.kid_name, date_iso=req.date,
+        )
+        return {"summaries": [result]}
+    results = kid_summary.generate_for_user_on_date(req.user_id, date_iso=req.date)
+    return {"summaries": results}
+
+
+@app.get("/summary/list")
+def summary_list(user_id: str, kid_name: Optional[str] = None, limit: int = 30,
+                 authenticated_user: str = Depends(current_user)):
+    authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    return {"summaries": storage_backend.list_daily_summaries(
+        user_id, kid_name=kid_name, limit=limit
+    )}
 
 
 # ── CMS CRUD Endpoints ────────────────────────────────────────────────

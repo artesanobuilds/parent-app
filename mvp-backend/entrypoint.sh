@@ -25,9 +25,17 @@ if [ -d /app/seed-data ]; then
     done
 fi
 
-# Remove stale duckdb so it bootstraps fresh from parquet files each deploy
-rm -f /app/data/*.duckdb /app/data/*.duckdb.wal
-echo "[entrypoint] Cleared duckdb, will bootstrap from parquet"
+# Keep the existing DuckDB on the volume — wiping it on every deploy destroyed
+# kid_messages, moderation_events, consent_records, auth_tokens (they aren't
+# in the parquet seed export). Fresh bootstrap only happens when the DB file
+# is actually missing (cold volume).
+if [ ! -f /app/data/mvp.duckdb ]; then
+    echo "[entrypoint] No existing DuckDB — will bootstrap from parquet on first request."
+else
+    echo "[entrypoint] Preserving DuckDB on volume."
+fi
+# Always clear stale write-ahead log; it's regenerated and shouldn't survive process exit
+rm -f /app/data/*.duckdb.wal
 echo "[entrypoint] Final: $(ls -la /app/data/*.parquet 2>&1)"
 
 exec uvicorn app.server:app --host 0.0.0.0 --port ${PORT:-8080}
