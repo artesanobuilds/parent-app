@@ -12,8 +12,16 @@ struct KidAgentService {
 
     private var session: URLSession { .shared }
 
+    /// Build a request and ensure a Bearer token is attached. Awaits issuance
+    /// the first time so we never fire requests without auth (fixes the .task
+    /// bootstrap race where the view's first refresh ran before SwayApp had
+    /// finished issuing a token).
     private func authedRequest(_ path: String, method: String = "GET",
-                               body: Data? = nil, query: [URLQueryItem] = []) -> URLRequest {
+                               body: Data? = nil, query: [URLQueryItem] = []) async throws -> URLRequest {
+        // Ensure we have a token. ensureToken is coalesced; concurrent callers
+        // share a single in-flight issuance.
+        _ = try? await AuthService.shared.ensureToken(for: userID, baseURL: baseURL)
+
         var components = URLComponents(
             url: baseURL.appendingPathComponent(path),
             resolvingAgainstBaseURL: false
@@ -31,14 +39,27 @@ struct KidAgentService {
         return request
     }
 
-    private func send<T: Decodable>(_ request: URLRequest, as: T.Type) async throws -> T {
+    private func send<T: Decodable>(_ request: URLRequest, as: T.Type,
+                                     retriedAfter401: Bool = false) async throws -> T {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw KidAgentServiceError.invalidResponse
         }
         switch http.statusCode {
         case 200..<300: break
-        case 401:       throw KidAgentServiceError.unauthorized
+        case 401:
+            // Token may have expired / been revoked since cache was warmed.
+            // Re-issue once and retry the same request before bailing out.
+            if !retriedAfter401 {
+                AuthService.shared.clear(for: userID)
+                _ = try? await AuthService.shared.ensureToken(for: userID, baseURL: baseURL)
+                var retry = request
+                for (k, v) in AuthService.shared.header(for: userID) {
+                    retry.setValue(v, forHTTPHeaderField: k)
+                }
+                return try await send(retry, as: T.self, retriedAfter401: true)
+            }
+            throw KidAgentServiceError.unauthorized
         case 403:
             // Differentiate consent vs. generic forbidden.
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -62,7 +83,7 @@ struct KidAgentService {
     // MARK: - Consent
 
     func consentStatus() async throws -> ConsentStatus {
-        let request = authedRequest("consent/status")
+        let request = try await authedRequest("consent/status")
         return try await send(request, as: ConsentStatus.self)
     }
 
@@ -74,7 +95,7 @@ struct KidAgentService {
             "kid_age_band": kidAgeBand,
             "agreement_version": agreementVersion,
         ])
-        let request = authedRequest("consent/submit", method: "POST", body: body)
+        let request = try await authedRequest("consent/submit", method: "POST", body: body)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw KidAgentServiceError.invalidResponse
@@ -111,7 +132,7 @@ struct KidAgentService {
             }
             var profile: Profile?
         }
-        let request = authedRequest("memory/\(userID)")
+        let request = try await authedRequest("memory/\(userID)")
         let resp = try await send(request, as: Memory.self)
         let kids = resp.profile?.children ?? [:]
         return kids
@@ -125,7 +146,7 @@ struct KidAgentService {
     /// List all kid agents for this parent.
     func list() async throws -> [KidAgentConfig] {
         struct Wrap: Codable { let agents: [KidAgentConfig] }
-        let request = authedRequest(
+        let request = try await authedRequest(
             "kid-agent/list",
             query: [URLQueryItem(name: "user_id", value: userID)]
         )
@@ -135,7 +156,7 @@ struct KidAgentService {
 
     /// Fetch the latest config for a kid (auto-bootstraps on first read).
     func config(forKid kidName: String) async throws -> KidAgentConfig {
-        let request = authedRequest("kid-agent/config", query: [
+        let request = try await authedRequest("kid-agent/config", query: [
             URLQueryItem(name: "user_id",  value: userID),
             URLQueryItem(name: "kid_name", value: kidName),
         ])
@@ -149,7 +170,7 @@ struct KidAgentService {
             "kid_name": kidName,
             "brief": brief,
         ])
-        let request = authedRequest("kid-agent/preview", method: "POST", body: body)
+        let request = try await authedRequest("kid-agent/preview", method: "POST", body: body)
         return try await send(request, as: KidAgentPreview.self)
     }
 
@@ -165,7 +186,7 @@ struct KidAgentService {
         ]
         if let expectedVersion { payload["expected_version"] = expectedVersion }
         let body = try JSONSerialization.data(withJSONObject: payload)
-        let request = authedRequest("kid-agent/config", method: "POST", body: body)
+        let request = try await authedRequest("kid-agent/config", method: "POST", body: body)
         return try await send(request, as: KidAgentConfig.self)
     }
 
@@ -186,7 +207,7 @@ struct KidAgentService {
                     ]
                     if let kidPin { payload["kid_pin"] = kidPin }
                     let body = try JSONSerialization.data(withJSONObject: payload)
-                    var request = authedRequest("kid-chat", method: "POST", body: body)
+                    var request = try await authedRequest("kid-chat", method: "POST", body: body)
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     request.timeoutInterval = 90
 
@@ -223,7 +244,7 @@ struct KidAgentService {
 
     func transcripts(kidName: String, threadID: String = "default") async throws -> [KidMessage] {
         struct Wrap: Codable { let messages: [KidMessage] }
-        let request = authedRequest("kid-chat/transcripts", query: [
+        let request = try await authedRequest("kid-chat/transcripts", query: [
             URLQueryItem(name: "user_id",   value: userID),
             URLQueryItem(name: "kid_name",  value: kidName),
             URLQueryItem(name: "thread_id", value: threadID),
@@ -237,7 +258,7 @@ struct KidAgentService {
             "kid_name": kidName,
             "pin": pin,
         ])
-        let request = authedRequest("kid-auth/set-pin", method: "POST", body: body)
+        let request = try await authedRequest("kid-auth/set-pin", method: "POST", body: body)
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw KidAgentServiceError.invalidResponse

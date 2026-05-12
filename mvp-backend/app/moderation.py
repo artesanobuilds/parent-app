@@ -48,8 +48,16 @@ AGE_CLASSIFIER_MODEL = os.getenv("KID_AGE_CLASSIFIER_MODEL", "gpt-5.2")
 CONSTITUTIONAL_MODEL = os.getenv("KID_CONSTITUTIONAL_MODEL", "gpt-5.2")
 
 # Streaming buffer: how many output chars to hold before letting any reach
-# the kid. Smaller = lower latency, higher leakage risk.
-OUTPUT_CHUNK_BUFFER_CHARS = int(os.getenv("KID_OUTPUT_BUFFER_CHARS", "120"))
+# the kid. Smaller = perceptible streaming; larger = more context for the
+# initial moderation call. The sliding-window keeps re-checking after the
+# gate clears, so the initial gate doesn't have to be wide.
+#
+# 40 chars catches every pattern in _CRISIS_PATTERNS (longest is ~32 chars)
+# and gives the age classifier a real phrase to judge. Anything below ~30
+# would force the classifier to guess. Anything above ~80 makes short
+# replies — most of what an agent says to a young kid — feel non-streaming
+# because the whole reply lands in finalize() instead of flowing through.
+OUTPUT_CHUNK_BUFFER_CHARS = int(os.getenv("KID_OUTPUT_BUFFER_CHARS", "40"))
 
 # After the initial gate clears, re-run heavy moderation (OpenAI + age) every
 # N additional chars. The cheap crisis regex always runs on every token append.

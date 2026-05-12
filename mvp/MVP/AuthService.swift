@@ -15,6 +15,11 @@ final class AuthService: ObservableObject {
     /// In-memory cache so we don't hit the keychain on every request.
     private var cache: [String: String] = [:]
 
+    /// Tracks an in-flight issuance per user so concurrent callers awaiting a
+    /// token coalesce onto a single network request instead of stampeding
+    /// /auth/issue-token (which is also rate-limited at 5/hour/IP).
+    private var pendingIssuance: [String: Task<String, Error>] = [:]
+
     private init() {}
 
     func token(for userID: String) -> String? {
@@ -51,6 +56,26 @@ final class AuthService: ObservableObject {
         cache[userID] = token
         Keychain.set(token, for: keychainAccount(userID: userID))
         return token
+    }
+
+    /// Returns a valid token for userID. Uses the cached one when present;
+    /// otherwise issues a new one. Concurrent callers coalesce onto a single
+    /// in-flight issuance via `pendingIssuance`.
+    ///
+    /// Use this from anything that needs to be authed BEFORE its first request
+    /// (e.g., KidsHomeSection.refresh()), to avoid the bootstrap race where a
+    /// view's .task fires before SwayApp.ensureAuthToken finishes.
+    func ensureToken(for userID: String, baseURL: URL) async throws -> String {
+        if let cached = token(for: userID) { return cached }
+        if let inflight = pendingIssuance[userID] {
+            return try await inflight.value
+        }
+        let task = Task { [weak self] () -> String in
+            defer { Task { @MainActor in self?.pendingIssuance[userID] = nil } }
+            return try await (self?.obtainToken(for: userID, baseURL: baseURL) ?? "")
+        }
+        pendingIssuance[userID] = task
+        return try await task.value
     }
 
     func clear(for userID: String) {
