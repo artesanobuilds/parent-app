@@ -25,58 +25,52 @@ if [ -z "$ADMIN_TOKEN" ]; then
 fi
 ADMIN_HEADER=(-H "X-Admin-Token: $ADMIN_TOKEN")
 
+# Prefer the repo venv python (it has duckdb + the app deps); fall back to
+# python3. Without this the rebuild fails with "No module named 'duckdb'".
+VENV_PY="$SCRIPT_DIR/../../.venv/bin/python"
+if [ -x "$VENV_PY" ]; then
+    PYTHON="$VENV_PY"
+else
+    PYTHON="python3"
+fi
+
 rebuild_local_db() {
     echo "  ⟳ Rebuilding local DuckDB from parquet files..."
-    python3 - "$DATA_DIR" <<'PYEOF'
+    "$PYTHON" - "$DATA_DIR" <<'PYEOF'
 import sys, json
 from pathlib import Path
 
 data_dir = Path(sys.argv[1])
 db_path = data_dir / "mvp.duckdb"
 
-# Remove stale db so it's rebuilt cleanly
-for f in data_dir.glob("*.duckdb"):
-    f.unlink()
-for f in data_dir.glob("*.duckdb.wal"):
+# Remove the stale DB so it's rebuilt cleanly from the freshly-synced parquets.
+for f in list(data_dir.glob("*.duckdb")) + list(data_dir.glob("*.duckdb.wal")):
     f.unlink()
 
-import duckdb
-con = duckdb.connect(str(db_path))
-
-# Import the storage module to get DDL definitions
+# Let DuckDBStorage do the whole job: full schema (DDL + CONTENT_DDL + KID_DDL),
+# versioned migrations, and a per-table INSERT-OR-IGNORE bootstrap of EVERY
+# parquet in data_dir (user_data, content, AND the kid/consent/audit/auth
+# tables). This keeps local dev in lockstep with prod instead of replicating a
+# hand-picked subset of the schema here (Vix Q6).
 sys.path.insert(0, str(data_dir.parent))
 from app.duckdb_storage import DuckDBStorage
 
-# Create tables using the class DDL
-con.execute(DuckDBStorage.DDL)
-for stmt in DuckDBStorage.CONTENT_DDL.strip().split(";"):
-    stmt = stmt.strip()
-    if stmt:
-        con.execute(stmt + ";")
-
-# Bootstrap from parquet files
-tables = {
-    "user_data": "mvp.parquet",
-    "categories": "categories.parquet",
-    "articles": "articles.parquet",
-    "community_posts": "community_posts.parquet",
-    "post_replies": "post_replies.parquet",
-}
+store = DuckDBStorage(db_path=str(db_path))
 
 summary = {}
-for table, filename in tables.items():
-    pq = data_dir / filename
-    if pq.exists():
-        con.execute(f"INSERT INTO {table} SELECT * FROM read_parquet('{pq}')")
-        count = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-        summary[table] = count
-        print(f"    ✓ {table}: {count} rows")
-    else:
-        summary[table] = 0
-        print(f"    · {table}: no parquet file")
+for table, _pq in DuckDBStorage.BOOTSTRAP_TABLES:
+    try:
+        count = store._con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+    except Exception:
+        count = 0
+    summary[table] = count
+    marker = "✓" if count else "·"
+    print(f"    {marker} {table}: {count} rows")
 
-con.close()
-# Write summary for audit log
+# Close the raw connection WITHOUT the exporting close() — we just built the DB
+# FROM these parquets; re-snapshotting them here is wasteful and could downgrade
+# a prod-ahead parquet to the local schema.
+store._con.close()
 json.dump(summary, open(str(data_dir / ".last-sync-summary.json"), "w"))
 PYEOF
     echo "  ✓ Local DuckDB rebuilt"
