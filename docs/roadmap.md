@@ -2,6 +2,19 @@
 
 Living list of next-up work. Order is a rough priority, not a commitment. Items move to `docs/history/NNN.md` when shipped.
 
+## iOS / SwiftUI backlog (2026-05-11 Vix review)
+
+Surgical fixes shipped in `7e33828` (HomeView config, streamTask cancel, ContentService HTTP status, NotificationCenter removal, @MainActor ServerConfiguration, etc.). Deferred from that review:
+
+- **`userID` is the parent's first name.** Onboarding stores the typed name as the identity used for tokens + profile, so two parents named "Miguel" collide on the same token and family data. This is the same auth-model gap the backend reviews flagged; it's a **v1 blocker**. Wire a real per-account identifier (UUID at first launch, then Apple Sign-In) end to end — iOS `userID`, `/auth/issue-token`, and every `authorize_user_match`.
+- **Split `OnboardingView.swift` (1390 lines, 16 `@State`).** Break into one step per `struct` driven by a shared `@Observable` (or `ObservableObject`) `OnboardingViewModel`. Largest single maintenance burden in the app; makes step testing possible and stops sibling-step re-renders on every keystroke.
+- **`@Observable` macro migration** for the view models (`KidsHomeViewModel`, `KidPickerViewModel`, `ReviewLetterViewModel`, `KidChatViewModel`, `ContentViewModel`). Removes `@Published`/`ObservableObject`, gives per-property invalidation. Confirm the iOS-17+ floor first (the app already uses iOS-17 APIs like `AVAudioApplication.requestRecordPermission`, so likely safe).
+- **Protocol-abstract the services** (`ContentService`, `KidAgentService`, `ChatService`) and inject them into view models so they're mockable in tests; today they're static/`@MainActor` structs called directly.
+- **De-dupe the SSE parser** — `ChatService.decodeToken` and `KidAgentService.decodeToken` plus the `data:`-line loop are near-identical; extract a shared `SSEParser`.
+- **`ChatView` vs `AgentView`** are near-duplicate chat UIs (`ContentView` still routes to `ChatView`). Decide whether `ChatView` is legacy and deletable, then collapse to one.
+- **Surface load errors in the UI.** `ContentViewModel.loadError` is now published but no view shows it; `KidsHomeSection.error` and the kid-picker load error are set but never read — users see blank sections on failure. Add error states with retry.
+- **MED/NIT cleanups:** `AgentView` content-card generation runs in `body` via `DispatchQueue.main.async` (move to `.task(id:)`); `bloomColor` keyword-sniffing duplicated in `KidAgentView` + `KidPickerView` (extract to `KidAgentInvariants`); `UIScreen.main.bounds` in `ChatView` (deprecated — use `GeometryReader`/`containerRelativeFrame`); inline `Binding<Bool>` alert pattern duplicated in `ChatView`/`AgentView` (use `.alert(item:)`); `ConsentView.submit` fire-and-forget `Task`; `OnboardingData.kids` anonymous tuple → a named `Sendable` struct; `ContentStore.swift` is now just route types (fold into a `Routes.swift` or keep intentionally).
+
 ## Onboarding & Profiling
 
 - **Verify the demographic enrichment in Xcode.** End-to-end run on simulator after CoreSimulator update: walk the new "About you" step filling everything, then again skipping every field. Confirm `/profile/seed` POST body is correct and that the coaching agent weaves the new fields into responses.
