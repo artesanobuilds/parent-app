@@ -7,3 +7,7 @@ healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
+# Give the lifespan shutdown handler time to export every table to parquet on
+# SIGTERM before Railway SIGKILLs the container (A3/A4). Default is ~10s, which
+# can truncate a large export mid-write.
+terminationGracePeriodSeconds = 30

@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -63,6 +64,24 @@ class _ThreadSafeConn:
                 # Statements without a result set (some DDL) — nothing to buffer.
                 rows = []
             return _BufferedResult(rows)
+
+    @contextmanager
+    def transaction(self):
+        """
+        Hold the connection lock across a BEGIN/COMMIT so a multi-statement
+        transaction is both atomic AND isolated — no other thread can execute
+        against the shared connection (and thus join the implicit DuckDB
+        transaction) while this block runs. RLock is reentrant, so the inner
+        execute() calls re-acquire it fine. Rolls back on any exception.
+        """
+        with self._lock:
+            self._con.execute("BEGIN TRANSACTION")
+            try:
+                yield self
+                self._con.execute("COMMIT")
+            except Exception:
+                self._con.execute("ROLLBACK")
+                raise
 
     def close(self) -> None:
         with self._lock:
@@ -290,6 +309,26 @@ class DuckDBStorage(StorageBackend):
         ON audit_events (user_id, created_at);
     """
 
+    # Every table that must survive a volume rebuild, mapped to its parquet
+    # snapshot filename. Used for both export (A2/A3) and bootstrap-merge (A2).
+    # auth_tokens is safe to export — only sha256 hashes are stored at rest.
+    BOOTSTRAP_TABLES = [
+        ("user_data", "mvp.parquet"),
+        ("categories", "categories.parquet"),
+        ("articles", "articles.parquet"),
+        ("community_posts", "community_posts.parquet"),
+        ("post_replies", "post_replies.parquet"),
+        ("kid_agent_configs", "kid_agent_configs.parquet"),
+        ("kid_messages", "kid_messages.parquet"),
+        ("kid_credentials", "kid_credentials.parquet"),
+        ("moderation_events", "moderation_events.parquet"),
+        ("kid_agent_crisis_locks", "kid_agent_crisis_locks.parquet"),
+        ("consent_records", "consent_records.parquet"),
+        ("daily_summaries", "daily_summaries.parquet"),
+        ("audit_events", "audit_events.parquet"),
+        ("auth_tokens", "auth_tokens.parquet"),
+    ]
+
     def __init__(self, db_path: Path | str | None = None) -> None:
         if db_path is None:
             db_path = Path(__file__).resolve().parent.parent / "data" / "mvp.duckdb"
@@ -309,40 +348,31 @@ class DuckDBStorage(StorageBackend):
             if stmt:
                 self._con.execute(stmt + ";")
 
-        # Idempotent in-place migrations for tables that pre-date a column.
-        # DuckDB returns BinderException on duplicate ADD COLUMN; swallow it.
-        for ddl in [
-            "ALTER TABLE auth_tokens ADD COLUMN expires_at TIMESTAMPTZ",
-            "ALTER TABLE auth_tokens ADD COLUMN last_used_at TIMESTAMPTZ",
-        ]:
+        # Versioned schema migrations (A1) — replaces the old bare-except ALTERs.
+        from app.migrations import run_migrations
+        run_migrations(self._con)
+
+        # Bootstrap every table from its parquet snapshot using INSERT OR IGNORE
+        # (A2). This is a per-table MERGE, not the old all-or-nothing count gate:
+        # rows already present (by primary key) are skipped, missing rows are
+        # added. Fixes both the no-backup-path gap for kid tables and the
+        # stranded-user bug where one existing row skipped the whole import.
+        # Path is a bound parameter (H-10); table names are a fixed allowlist.
+        for table, pq_name in self.BOOTSTRAP_TABLES:
+            pq = self.parquet_dir / pq_name
+            if not pq.exists():
+                continue
             try:
-                self._con.execute(ddl)
-            except Exception:
-                pass
-
-        # Bootstrap user_data from parquet if DB is empty. Path bound as a
-        # parameter, not f-string interpolated (H-10).
-        if self.parquet_path.exists():
-            count = self._con.execute("SELECT count(*) FROM user_data").fetchone()[0]
-            if count == 0:
-                logger.info(f"[duckdb] bootstrapping user_data from {self.parquet_path}")
                 self._con.execute(
-                    "INSERT INTO user_data SELECT * FROM read_parquet(?)",
-                    [str(self.parquet_path)],
+                    f"INSERT OR IGNORE INTO {table} SELECT * FROM read_parquet(?)",
+                    [str(pq)],
                 )
-
-        # Bootstrap content tables from parquet snapshots. Table name is from a
-        # fixed allowlist (not user input); the path is a bound parameter.
-        for table in ("categories", "articles", "community_posts", "post_replies"):
-            pq = self.parquet_dir / f"{table}.parquet"
-            if pq.exists():
-                count = self._con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-                if count == 0:
-                    logger.info(f"[duckdb] bootstrapping {table} from {pq}")
-                    self._con.execute(
-                        f"INSERT INTO {table} SELECT * FROM read_parquet(?)",
-                        [str(pq)],
-                    )
+                logger.info(f"[duckdb] bootstrap-merged {table} from {pq_name}")
+            except Exception as exc:
+                # A schema-mismatched snapshot (older column set) shouldn't take
+                # the whole boot down — log and continue. The live table keeps
+                # whatever it has.
+                logger.warning(f"[duckdb] bootstrap of {table} from {pq_name} skipped: {exc}")
 
         logger.info(f"[duckdb] opened {self.db_path}")
 
@@ -1067,48 +1097,53 @@ class DuckDBStorage(StorageBackend):
         """
         deleted: Dict[str, int] = {}
 
-        # kid_messages joins via agent_id, so collect agent_ids first and
-        # snapshot the pre-delete row count before running DELETEs.
-        agent_ids = [r[0] for r in self._con.execute(
-            "SELECT id FROM kid_agent_configs WHERE user_id = ?",
-            [user_id],
-        ).fetchall()]
-        if agent_ids:
-            placeholders = ",".join(["?"] * len(agent_ids))
-            deleted["kid_messages"] = self._con.execute(
-                f"SELECT count(*) FROM kid_messages WHERE agent_id IN ({placeholders})",
-                agent_ids,
-            ).fetchone()[0]
-            self._con.execute(
-                f"DELETE FROM kid_messages WHERE agent_id IN ({placeholders})",
-                agent_ids,
-            )
-        else:
-            deleted["kid_messages"] = 0
-
-        for table in [
-            "kid_agent_crisis_locks",
-            "kid_agent_configs",
-            "kid_credentials",
-            "moderation_events",
-            "auth_tokens",
-            "daily_summaries",
-            "consent_records",
-            "user_data",
-        ]:
-            pre = self._con.execute(
-                f"SELECT count(*) FROM {table} WHERE user_id = ?",
+        # Wrap the whole cascade in one transaction (A5) so a kill mid-delete
+        # can't leave a half-deleted family (e.g. user_data gone but consent +
+        # auth_tokens still present). The proxy holds the connection lock for
+        # the duration, so no other thread joins this transaction.
+        with self._con.transaction():
+            # kid_messages joins via agent_id, so collect agent_ids first and
+            # snapshot the pre-delete row count before running DELETEs.
+            agent_ids = [r[0] for r in self._con.execute(
+                "SELECT id FROM kid_agent_configs WHERE user_id = ?",
                 [user_id],
-            ).fetchone()[0]
-            self._con.execute(
-                f"DELETE FROM {table} WHERE user_id = ?", [user_id],
-            )
-            deleted[table] = pre
+            ).fetchall()]
+            if agent_ids:
+                placeholders = ",".join(["?"] * len(agent_ids))
+                deleted["kid_messages"] = self._con.execute(
+                    f"SELECT count(*) FROM kid_messages WHERE agent_id IN ({placeholders})",
+                    agent_ids,
+                ).fetchone()[0]
+                self._con.execute(
+                    f"DELETE FROM kid_messages WHERE agent_id IN ({placeholders})",
+                    agent_ids,
+                )
+            else:
+                deleted["kid_messages"] = 0
 
-        self.write_audit_event(
-            user_id=user_id, actor=actor,
-            action="family_deleted", details={"counts": deleted},
-        )
+            for table in [
+                "kid_agent_crisis_locks",
+                "kid_agent_configs",
+                "kid_credentials",
+                "moderation_events",
+                "auth_tokens",
+                "daily_summaries",
+                "consent_records",
+                "user_data",
+            ]:
+                pre = self._con.execute(
+                    f"SELECT count(*) FROM {table} WHERE user_id = ?",
+                    [user_id],
+                ).fetchone()[0]
+                self._con.execute(
+                    f"DELETE FROM {table} WHERE user_id = ?", [user_id],
+                )
+                deleted[table] = pre
+
+            self.write_audit_event(
+                user_id=user_id, actor=actor,
+                action="family_deleted", details={"counts": deleted},
+            )
         return {"counts": deleted, "agent_ids": agent_ids}
 
     # ── Crisis locks ─────────────────────────────────────────────────
@@ -1402,29 +1437,67 @@ class DuckDBStorage(StorageBackend):
 
     # ── Parquet export / import ───────────────────────────────────────
 
-    def export_parquet(self, path: Path | str | None = None) -> Path:
-        """Export the full user_data table to a parquet file."""
-        target = Path(path) if path else self.parquet_path
+    def _export_table_atomic(self, table: str, target: Path) -> None:
+        """
+        Export one table to parquet atomically (A3): COPY to a .tmp file, then
+        os.replace() into place. An interrupted COPY can only corrupt the .tmp,
+        never the live snapshot — and replace() is atomic on the same
+        filesystem, so a reader never sees a half-written file.
+        """
         target.parent.mkdir(parents=True, exist_ok=True)
-        self._con.execute(
-            f"COPY user_data TO '{target}' (FORMAT PARQUET, OVERWRITE_OR_IGNORE)"
-        )
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        try:
+            self._con.execute(
+                f"COPY {table} TO '{tmp}' (FORMAT PARQUET, OVERWRITE_OR_IGNORE)"
+            )
+            os.replace(tmp, target)
+        except Exception:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except Exception:
+                pass
+            raise
+
+    def export_parquet(self, path: Path | str | None = None) -> Path:
+        """Export the full user_data table to a parquet file (atomic)."""
+        target = Path(path) if path else self.parquet_path
+        self._export_table_atomic("user_data", target)
         logger.info(f"[duckdb] exported parquet → {target}")
         return target
 
     def export_content_parquet(self) -> None:
-        """Export content tables to separate parquet files."""
+        """Export content tables to separate parquet files (atomic)."""
         for table in ("categories", "articles", "community_posts", "post_replies"):
-            target = self.parquet_dir / f"{table}.parquet"
-            self._con.execute(
-                f"COPY {table} TO '{target}' (FORMAT PARQUET, OVERWRITE_OR_IGNORE)"
-            )
-            logger.info(f"[duckdb] exported {table} parquet → {target}")
+            self._export_table_atomic(table, self.parquet_dir / f"{table}.parquet")
+
+    def export_all_parquet(self) -> None:
+        """
+        Export every table in BOOTSTRAP_TABLES atomically (A2). This is the
+        full backup path — kid/consent/audit/auth tables included, so a volume
+        rebuild can recover them. user_data uses its conventional mvp.parquet
+        name. Failures on individual tables are logged but don't abort the rest.
+        """
+        for table, pq_name in self.BOOTSTRAP_TABLES:
+            target = self.parquet_dir / pq_name
+            try:
+                self._export_table_atomic(table, target)
+            except Exception as exc:
+                logger.error(f"[duckdb] export of {table} → {pq_name} failed: {exc}")
+
+    def ping(self) -> bool:
+        """Cheap liveness probe for the health check (A6): confirms the DB is
+        open and answering. Raises/returns False if the connection is dead."""
+        try:
+            row = self._con.execute("SELECT 1").fetchone()
+            return bool(row and row[0] == 1)
+        except Exception:
+            return False
 
     def close(self) -> None:
-        """Export to parquet and close the connection."""
+        """Export every table to parquet and close the connection."""
         try:
-            self.export_parquet()
+            self.export_all_parquet()
         except Exception as exc:
             logger.error(f"[duckdb] parquet export on close failed: {exc}")
         self._con.close()

@@ -34,8 +34,10 @@ if [ ! -f /app/data/mvp.duckdb ]; then
 else
     echo "[entrypoint] Preserving DuckDB on volume."
 fi
-# Always clear stale write-ahead log; it's regenerated and shouldn't survive process exit
-rm -f /app/data/*.duckdb.wal
+# Do NOT delete the WAL (A4). DuckDB replays it automatically on connect; the
+# WAL can hold committed transactions not yet checkpointed to the main file
+# (e.g. after an ungraceful previous shutdown). Deleting it here would discard
+# those committed writes.
 echo "[entrypoint] Final: $(ls -la /app/data/*.parquet 2>&1)"
 
 exec uvicorn app.server:app --host 0.0.0.0 --port ${PORT:-8080}

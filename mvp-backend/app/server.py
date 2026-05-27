@@ -1302,8 +1302,10 @@ def cms_export_parquet(_: None = Depends(require_admin_token)):
 def data_export(_: None = Depends(require_admin_token)):
     """Trigger parquet export and return checksums for sync detection. Admin-only."""
     import hashlib
-    content_service.export_content_parquet()
+    # Export EVERY table (A2) — including kid/consent/audit/auth — so the sync
+    # script and any volume-rebuild can recover them, not just user_data + content.
     persist_state()
+    storage_backend.export_all_parquet()
     data_dir = Path(__file__).resolve().parent.parent / "data"
     checksums = {}
     for pq in sorted(data_dir.glob("*.parquet")):
@@ -1328,6 +1330,10 @@ def data_download(filename: str, _: None = Depends(require_admin_token)):
 
 @app.get("/health")
 def health_check():
+    # DB-aware (A6): a 200 must mean the DuckDB file is open and answering, so a
+    # corrupt/absent DB fails the Railway deploy gate instead of taking traffic.
+    if not storage_backend.ping():
+        raise HTTPException(status_code=503, detail="database not ready")
     return {"status": "ok"}
 
 
