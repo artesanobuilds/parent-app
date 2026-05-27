@@ -70,6 +70,11 @@ Two paths to evaluate at end of beta. Decide based on which audience produced th
 - Parent has full transcript access — non-negotiable, surfaced as a feature.
 - Crisis keywords (self-harm, abuse, suicide) trigger immediate parent notification + crisis resources displayed to kid + chat freeze.
 
+## Held for mobile coordination (from 2026-05-11 Vix review)
+
+- **Lock `/content/community/new` + `/content/community/{post_id}/replies` server-side.** Vix found these accept an arbitrary `user_id`/`author_name` with no auth (impersonation + spam). The iOS `ContentService` now attaches a Bearer token to both calls (shipped), but the **server-side `Depends(current_user)` + `authorize_user_match` is deliberately NOT deployed yet** — turning it on now would 401 every TestFlight 1.3 user (same trap as `/profile/seed`). Add the server lock in the same release as the next TestFlight build that includes the auth-sending `ContentService`.
+- **Set `ADMIN_TOKEN` on Railway.** `/data/export`, `/data/download`, and all `/cms/*` mutations are now gated behind an `X-Admin-Token` header (fail-closed: they return 503 until `ADMIN_TOKEN` is set). After deploy, set `ADMIN_TOKEN` via `railway variables set` and put the same value in `MVP_ADMIN_TOKEN` locally for `sync-data.sh`. Until then, prod data sync is intentionally disabled.
+
 ## Family Companion v0 — pre-beta blockers (from 2026-05-07 critic review)
 
 Findings doc: `docs/code-review-findings.md`. Items already shipped this session are removed; these are what's left before any family touches the build.

@@ -15,6 +15,16 @@ AUDIT_LOG="$DATA_DIR/.sync-audit.log"
 REMOTE_URL="${MVP_REMOTE_URL:-https://mvp-backend-production-8678.up.railway.app}"
 INTERVAL=1800  # 30 minutes
 
+# /data/export and /data/download are admin-gated. Supply the operator secret
+# (must match the server's ADMIN_TOKEN). Without it the server returns 401/503.
+ADMIN_TOKEN="${MVP_ADMIN_TOKEN:-}"
+if [ -z "$ADMIN_TOKEN" ]; then
+    echo "✗ MVP_ADMIN_TOKEN not set. These endpoints are admin-gated now."
+    echo "  export MVP_ADMIN_TOKEN=<same value as the server's ADMIN_TOKEN> and re-run."
+    exit 1
+fi
+ADMIN_HEADER=(-H "X-Admin-Token: $ADMIN_TOKEN")
+
 rebuild_local_db() {
     echo "  ⟳ Rebuilding local DuckDB from parquet files..."
     python3 - "$DATA_DIR" <<'PYEOF'
@@ -100,7 +110,7 @@ sync_once() {
     echo "[$(date '+%H:%M:%S')] Checking remote for changes..."
 
     # Ask the server to export fresh parquets and return checksums
-    response=$(curl -sf "$REMOTE_URL/data/export" 2>/dev/null) || {
+    response=$(curl -sf "${ADMIN_HEADER[@]}" "$REMOTE_URL/data/export" 2>/dev/null) || {
         echo "  ✗ Could not reach $REMOTE_URL/data/export"
         return 1
     }
@@ -139,7 +149,7 @@ print('yes' if new != old else 'no')
 
         if [ "$file_changed" = "yes" ]; then
             echo "    ↓ $file (changed)"
-            curl -sf "$REMOTE_URL/data/download/$file" -o "$DATA_DIR/$file.tmp" && \
+            curl -sf "${ADMIN_HEADER[@]}" "$REMOTE_URL/data/download/$file" -o "$DATA_DIR/$file.tmp" && \
                 mv "$DATA_DIR/$file.tmp" "$DATA_DIR/$file"
             changed_files="$changed_files $file"
         else

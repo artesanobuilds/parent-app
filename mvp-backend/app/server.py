@@ -5,8 +5,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator, Dict, List, Any, Optional
 
-from fastapi import FastAPI, Request, Depends
-from fastapi.responses import StreamingResponse, FileResponse
+import hmac
+from fastapi import FastAPI, Request, Depends, Header, HTTPException
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -71,6 +72,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def require_admin_token(x_admin_token: Optional[str] = Header(default=None)) -> None:
+    """
+    Operator-only gate for data export / CMS mutation endpoints. These serve or
+    mutate the FULL dataset, so per-user auth (current_user) is insufficient —
+    any client can mint a user token via /auth/issue-token. Requires a shared
+    ADMIN_TOKEN secret instead. Fails closed when ADMIN_TOKEN is unset.
+    """
+    expected = os.getenv("ADMIN_TOKEN")
+    if not expected:
+        raise HTTPException(status_code=503, detail="admin endpoints disabled (ADMIN_TOKEN not set)")
+    if not x_admin_token or not hmac.compare_digest(x_admin_token, expected):
+        raise HTTPException(status_code=401, detail="invalid or missing admin token")
+
 
 class ChatRequest(BaseModel):
     message: str
@@ -928,6 +944,48 @@ async def generate_kid_stream(
         user_id=user_id, kid_name=kid_name, agent_id=agent_id, age_band=age_band,
     )
     assistant_buffer = ""
+    block_handled = False  # ensures lock/log/alert runs exactly once
+
+    def _apply_block_side_effects() -> None:
+        """Lock (on crisis) + log + alert for a blocked output. Must run BEFORE
+        the replacement message is yielded so the agent is frozen before the
+        kid can send another turn (B-7). Idempotent via block_handled."""
+        nonlocal block_handled
+        if block_handled or not sm.block_reason:
+            return
+        block_handled = True
+        if sm.block_reason.severity == "crisis":
+            # Freeze first — persist the lock and kill the in-process agent
+            # before anything goes back on the wire.
+            storage_backend.lock_kid_agent_for_crisis(
+                agent_id=agent_id, user_id=user_id, kid_name=kid_name,
+                category=sm.block_reason.category, severity="crisis",
+                reason=f"output: {sm.block_reason.reason}",
+            )
+            moderation.kill_agent(agent_id)
+            storage_backend.log_moderation_event(
+                user_id=user_id, kid_name=kid_name, severity="crisis",
+                category=sm.block_reason.category, action="crisis_routed",
+                agent_id=agent_id, message_id=user_msg_id,
+                details={"side": "output"},
+                parent_notified_at=None,  # TODO: real push notification hook (APNs)
+            )
+            telemetry.alert_crisis(
+                user_id=user_id, kid_name=kid_name, agent_id=agent_id,
+                excerpt="[redacted-crisis-output]",
+            )
+        else:
+            storage_backend.log_moderation_event(
+                user_id=user_id, kid_name=kid_name, severity=sm.block_reason.severity,
+                category=sm.block_reason.category, action="blocked_output",
+                agent_id=agent_id, message_id=user_msg_id,
+                details={"reason": sm.block_reason.reason},
+            )
+            telemetry.alert_moderation_event(
+                user_id=user_id, kid_name=kid_name, agent_id=agent_id,
+                severity=sm.block_reason.severity, category=sm.block_reason.category,
+                action="blocked_output", excerpt="[redacted-blocked-output]",
+            )
 
     try:
         async for event in agent.astream_events(
@@ -944,6 +1002,8 @@ async def generate_kid_stream(
                 for safe in sm.feed(content):
                     yield f"data: {json.dumps({'type': 'token', 'content': safe})}\n\n"
                 if sm.state.value == "blocked":
+                    # Lock/kill BEFORE the replacement reaches the kid (B-7).
+                    _apply_block_side_effects()
                     yield f"data: {json.dumps({'type': 'token', 'content': sm.replacement_message()})}\n\n"
                     yield f"data: {json.dumps({'type': 'blocked', 'content': (sm.block_reason.category if sm.block_reason else 'unknown')})}\n\n"
                     break
@@ -952,60 +1012,36 @@ async def generate_kid_stream(
             elif kind == "on_tool_end":
                 yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name']})}\n\n"
 
-        # End-of-stream flush (handles under-threshold completes that never tripped feed())
+        # End-of-stream flush. finalize() may flag late (under-threshold or
+        # whole-output recheck) — handle that BEFORE [DONE].
         for chunk in sm.finalize():
             yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
 
-        # Persist the assistant turn (or the blocked replacement)
         if sm.state.value == "blocked" and sm.block_reason:
-            # If the model itself emitted crisis content, lock the agent and
-            # alert as crisis. log + alert paths are different for crisis vs
-            # routine output blocks.
-            if sm.block_reason.severity == "crisis":
-                storage_backend.lock_kid_agent_for_crisis(
-                    agent_id=agent_id, user_id=user_id, kid_name=kid_name,
-                    category=sm.block_reason.category, severity="crisis",
-                    reason=f"output: {sm.block_reason.reason}",
-                )
-                moderation.kill_agent(agent_id)
-                storage_backend.log_moderation_event(
-                    user_id=user_id, kid_name=kid_name, severity="crisis",
-                    category=sm.block_reason.category, action="crisis_routed",
-                    agent_id=agent_id, message_id=user_msg_id,
-                    details={"side": "output", "buffered_response": assistant_buffer[:500]},
-                    parent_notified_at=None,
-                )
-                telemetry.alert_crisis(
-                    user_id=user_id, kid_name=kid_name, agent_id=agent_id,
-                    excerpt=assistant_buffer[:240],
-                )
-            else:
-                storage_backend.log_moderation_event(
-                    user_id=user_id, kid_name=kid_name, severity=sm.block_reason.severity,
-                    category=sm.block_reason.category, action="blocked_output",
-                    agent_id=agent_id, message_id=user_msg_id,
-                    details={"buffered_response": assistant_buffer[:500]},
-                )
-                telemetry.alert_moderation_event(
-                    user_id=user_id, kid_name=kid_name, agent_id=agent_id,
-                    severity=sm.block_reason.severity, category=sm.block_reason.category,
-                    action="blocked_output", excerpt=assistant_buffer[:240],
-                )
+            # Covers both the mid-stream break (already handled, idempotent) and
+            # the late finalize() flag. Lock/log/alert, then emit a retract so
+            # the client replaces anything already shown.
+            already = block_handled
+            _apply_block_side_effects()
+            if not already:
+                yield f"data: {json.dumps({'type': 'retract', 'content': sm.replacement_message()})}\n\n"
+            # Persist the replacement, NEVER the raw (possibly harmful) buffer (H-3).
             storage_backend.append_kid_message(
                 agent_id=agent_id, thread_id=thread_id, role="assistant",
                 content=sm.replacement_message(), parent_flagged=True,
             )
         elif assistant_buffer:
+            # Clean output — safe to persist what was actually streamed.
             storage_backend.append_kid_message(
                 agent_id=agent_id, thread_id=thread_id, role="assistant",
-                content=assistant_buffer,
+                content=sm.assembled_output or assistant_buffer,
             )
 
         yield "data: [DONE]\n\n"
 
     except Exception as e:
-        logger.exception(f"[kid_chat] stream error: {e}")
-        yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+        logger.exception("[kid_chat] stream error")
+        yield f"data: {json.dumps({'type': 'error', 'content': 'Something went wrong. Please try again.'})}\n\n"
 
 
 @app.post("/kid-chat")
@@ -1131,12 +1167,12 @@ def summary_list(user_id: str, kid_name: Optional[str] = None, limit: int = 30,
 # ── CMS CRUD Endpoints ────────────────────────────────────────────────
 
 @app.post("/cms/articles")
-def cms_create_article(req: ArticleCreateRequest):
+def cms_create_article(req: ArticleCreateRequest, _: None = Depends(require_admin_token)):
     return content_service.create_article(req.model_dump())
 
 
 @app.put("/cms/articles/{article_id}")
-def cms_update_article(article_id: str, req: ArticleUpdateRequest):
+def cms_update_article(article_id: str, req: ArticleUpdateRequest, _: None = Depends(require_admin_token)):
     data = {k: v for k, v in req.model_dump().items() if v is not None}
     result = content_service.update_article(article_id, data)
     if result is None:
@@ -1146,7 +1182,7 @@ def cms_update_article(article_id: str, req: ArticleUpdateRequest):
 
 
 @app.delete("/cms/articles/{article_id}")
-def cms_delete_article(article_id: str):
+def cms_delete_article(article_id: str, _: None = Depends(require_admin_token)):
     if not content_service.delete_article(article_id):
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"error": "Article not found"})
@@ -1163,12 +1199,12 @@ def cms_get_community_post(post_id: str):
 
 
 @app.post("/cms/community-posts")
-def cms_create_community_post(req: CommunityPostCreateRequest):
+def cms_create_community_post(req: CommunityPostCreateRequest, _: None = Depends(require_admin_token)):
     return content_service.create_community_post(req.model_dump())
 
 
 @app.put("/cms/community-posts/{post_id}")
-def cms_update_community_post(post_id: str, req: CommunityPostUpdateRequest):
+def cms_update_community_post(post_id: str, req: CommunityPostUpdateRequest, _: None = Depends(require_admin_token)):
     data = {k: v for k, v in req.model_dump().items() if v is not None}
     result = content_service.update_community_post(post_id, data)
     if result is None:
@@ -1178,7 +1214,7 @@ def cms_update_community_post(post_id: str, req: CommunityPostUpdateRequest):
 
 
 @app.delete("/cms/community-posts/{post_id}")
-def cms_delete_community_post(post_id: str):
+def cms_delete_community_post(post_id: str, _: None = Depends(require_admin_token)):
     if not content_service.delete_community_post(post_id):
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"error": "Post not found"})
@@ -1186,12 +1222,12 @@ def cms_delete_community_post(post_id: str):
 
 
 @app.post("/cms/categories")
-def cms_create_category(req: CategoryCreateRequest):
+def cms_create_category(req: CategoryCreateRequest, _: None = Depends(require_admin_token)):
     return content_service.create_category(req.model_dump())
 
 
 @app.put("/cms/categories/{category_id}")
-def cms_update_category(category_id: str, req: CategoryUpdateRequest):
+def cms_update_category(category_id: str, req: CategoryUpdateRequest, _: None = Depends(require_admin_token)):
     data = {k: v for k, v in req.model_dump().items() if v is not None}
     result = content_service.update_category(category_id, data)
     if result is None:
@@ -1201,7 +1237,7 @@ def cms_update_category(category_id: str, req: CategoryUpdateRequest):
 
 
 @app.delete("/cms/categories/{category_id}")
-def cms_delete_category(category_id: str):
+def cms_delete_category(category_id: str, _: None = Depends(require_admin_token)):
     if not content_service.delete_category(category_id):
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"error": "Category not found"})
@@ -1214,14 +1250,14 @@ def cms_stats():
 
 
 @app.post("/cms/export-parquet")
-def cms_export_parquet():
+def cms_export_parquet(_: None = Depends(require_admin_token)):
     content_service.export_content_parquet()
     return {"exported": True}
 
 
 @app.get("/data/export")
-def data_export():
-    """Trigger parquet export and return checksums for sync detection."""
+def data_export(_: None = Depends(require_admin_token)):
+    """Trigger parquet export and return checksums for sync detection. Admin-only."""
     import hashlib
     content_service.export_content_parquet()
     persist_state()
@@ -1233,15 +1269,16 @@ def data_export():
 
 
 @app.get("/data/download/{filename}")
-def data_download(filename: str):
-    """Download a parquet file from the data directory."""
+def data_download(filename: str, _: None = Depends(require_admin_token)):
+    """Download a parquet file from the data directory. Admin-only."""
     if not filename.endswith(".parquet"):
-        from fastapi.responses import JSONResponse
         return JSONResponse(status_code=400, content={"error": "Only .parquet files"})
-    data_dir = Path(__file__).resolve().parent.parent / "data"
-    file_path = data_dir / filename
+    data_dir = (Path(__file__).resolve().parent.parent / "data").resolve()
+    # Resolve and confirm the path stays inside data_dir (block ../ traversal).
+    file_path = (data_dir / filename).resolve()
+    if not str(file_path).startswith(str(data_dir) + os.sep):
+        return JSONResponse(status_code=400, content={"error": "invalid path"})
     if not file_path.is_file():
-        from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"error": "File not found"})
     return FileResponse(file_path, media_type="application/octet-stream", filename=filename)
 

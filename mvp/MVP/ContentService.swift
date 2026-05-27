@@ -96,6 +96,7 @@ enum ContentService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (k, v) in await authHeader(userID: userId, baseURL: baseURL) { request.setValue(v, forHTTPHeaderField: k) }
         let payload: [String: String] = ["user_id": userId, "author_name": authorName, "body": body]
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let (data, _) = try await URLSession.shared.data(for: request)
@@ -107,6 +108,7 @@ enum ContentService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (k, v) in await authHeader(userID: userId, baseURL: baseURL) { request.setValue(v, forHTTPHeaderField: k) }
         let payload: [String: String] = [
             "category": category,
             "title": title,
@@ -117,6 +119,15 @@ enum ContentService {
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let (data, _) = try await URLSession.shared.data(for: request)
         return try JSONDecoder().decode(APICommunityPost.self, from: data)
+    }
+
+    /// Ensure a Bearer token for userID and return the Authorization header.
+    /// Empty if issuance fails (old backend ignores it; the new backend will
+    /// 401 once the community-write lock ships, surfacing the issue).
+    @MainActor
+    private static func authHeader(userID: String, baseURL: URL) async -> [String: String] {
+        _ = try? await AuthService.shared.ensureToken(for: userID, baseURL: baseURL)
+        return AuthService.shared.header(for: userID)
     }
 
     static func fetchCommunityPosts(baseURL: URL, category: String? = nil) async throws -> [APICommunityPost] {
