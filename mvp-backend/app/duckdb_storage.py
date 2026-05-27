@@ -9,10 +9,64 @@ Drop-in replacement for LocalFileStorage — same StorageBackend interface.
 import json
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 import duckdb
+
+
+class _BufferedResult:
+    """Holds eagerly-fetched rows so callers can chain .fetchone()/.fetchall()
+    after the connection lock has been released."""
+
+    __slots__ = ("_rows", "_i")
+
+    def __init__(self, rows: List[Any]):
+        self._rows = rows
+        self._i = 0
+
+    def fetchone(self):
+        if self._i < len(self._rows):
+            row = self._rows[self._i]
+            self._i += 1
+            return row
+        return None
+
+    def fetchall(self):
+        rest = self._rows[self._i:]
+        self._i = len(self._rows)
+        return rest
+
+
+class _ThreadSafeConn:
+    """
+    Serializes access to a DuckDB connection (B-8). DuckDB connections are not
+    thread-safe, and FastAPI runs sync routes in a threadpool while async routes
+    run on the event loop — concurrent execute()s on one connection can corrupt
+    state or interleave writes. Every execute holds an RLock across execute +
+    eager fetch, returning a buffered result so the lock is released before the
+    caller chains .fetchone()/.fetchall(). The connection is only ever used via
+    .execute()/.close() in this module, so this proxy is a complete surface.
+    """
+
+    def __init__(self, con: "duckdb.DuckDBPyConnection"):
+        self._con = con
+        self._lock = threading.RLock()
+
+    def execute(self, sql: str, params: Optional[list] = None) -> _BufferedResult:
+        with self._lock:
+            rel = self._con.execute(sql, params) if params is not None else self._con.execute(sql)
+            try:
+                rows = rel.fetchall()
+            except Exception:
+                # Statements without a result set (some DDL) — nothing to buffer.
+                rows = []
+            return _BufferedResult(rows)
+
+    def close(self) -> None:
+        with self._lock:
+            self._con.close()
 
 from app.storage import StorageBackend
 
@@ -105,6 +159,12 @@ class DuckDBStorage(StorageBackend):
     );
 
     CREATE INDEX IF NOT EXISTS idx_kid_agent_configs_user_kid
+        ON kid_agent_configs (user_id, kid_name, version);
+
+    -- One row per (user, kid, version). DB-level guard against the check+insert
+    -- TOCTOU race in save_kid_agent_config (B-9): two concurrent writers that
+    -- read the same max(version) can't both land the same next version.
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_kid_agent_configs_version
         ON kid_agent_configs (user_id, kid_name, version);
 
     CREATE TABLE IF NOT EXISTS kid_messages (
@@ -238,7 +298,7 @@ class DuckDBStorage(StorageBackend):
         self.parquet_dir = self.db_path.parent
         self.parquet_path = self.db_path.with_suffix(".parquet")
 
-        self._con = duckdb.connect(str(self.db_path))
+        self._con = _ThreadSafeConn(duckdb.connect(str(self.db_path)))
         self._con.execute(self.DDL)
         for stmt in self.CONTENT_DDL.strip().split(";"):
             stmt = stmt.strip()
@@ -260,16 +320,19 @@ class DuckDBStorage(StorageBackend):
             except Exception:
                 pass
 
-        # Bootstrap user_data from parquet if DB is empty
+        # Bootstrap user_data from parquet if DB is empty. Path bound as a
+        # parameter, not f-string interpolated (H-10).
         if self.parquet_path.exists():
             count = self._con.execute("SELECT count(*) FROM user_data").fetchone()[0]
             if count == 0:
                 logger.info(f"[duckdb] bootstrapping user_data from {self.parquet_path}")
                 self._con.execute(
-                    f"INSERT INTO user_data SELECT * FROM read_parquet('{self.parquet_path}')"
+                    "INSERT INTO user_data SELECT * FROM read_parquet(?)",
+                    [str(self.parquet_path)],
                 )
 
-        # Bootstrap content tables from parquet snapshots
+        # Bootstrap content tables from parquet snapshots. Table name is from a
+        # fixed allowlist (not user input); the path is a bound parameter.
         for table in ("categories", "articles", "community_posts", "post_replies"):
             pq = self.parquet_dir / f"{table}.parquet"
             if pq.exists():
@@ -277,7 +340,8 @@ class DuckDBStorage(StorageBackend):
                 if count == 0:
                     logger.info(f"[duckdb] bootstrapping {table} from {pq}")
                     self._con.execute(
-                        f"INSERT INTO {table} SELECT * FROM read_parquet('{pq}')"
+                        f"INSERT INTO {table} SELECT * FROM read_parquet(?)",
+                        [str(pq)],
                     )
 
         logger.info(f"[duckdb] opened {self.db_path}")
@@ -683,18 +747,27 @@ class DuckDBStorage(StorageBackend):
         config_id = str(uuid.uuid4())
         invariants_json = json.dumps(invariants, ensure_ascii=False)
 
-        self._con.execute(
-            """
-            INSERT INTO kid_agent_configs (
-                id, user_id, kid_name, version, invariants_json,
-                free_text_brief, system_prompt, content_hash, model, enabled, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
-            """,
-            [
-                config_id, user_id, kid_name, new_version, invariants_json,
-                free_text_brief, system_prompt, content_hash, model, enabled,
-            ],
-        )
+        try:
+            self._con.execute(
+                """
+                INSERT INTO kid_agent_configs (
+                    id, user_id, kid_name, version, invariants_json,
+                    free_text_brief, system_prompt, content_hash, model, enabled, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                """,
+                [
+                    config_id, user_id, kid_name, new_version, invariants_json,
+                    free_text_brief, system_prompt, content_hash, model, enabled,
+                ],
+            )
+        except duckdb.ConstraintException as exc:
+            # uq_kid_agent_configs_version: a concurrent writer already landed
+            # this version. Surface as a version conflict (mapped to 409) — the
+            # DB-level guard for the check+insert TOCTOU race (B-9).
+            raise ValueError(
+                f"version conflict: v{new_version} for {user_id}/{kid_name} was "
+                f"written concurrently; retry with the latest version"
+            ) from exc
         logger.info(f"[duckdb] saved kid_agent_config v{new_version} for {user_id}/{kid_name}")
         return self.get_kid_agent_config(user_id, kid_name)
 
@@ -977,11 +1050,12 @@ class DuckDBStorage(StorageBackend):
         )
         return event_id
 
-    def delete_family(self, *, user_id: str, actor: str) -> Dict[str, int]:
+    def delete_family(self, *, user_id: str, actor: str) -> Dict[str, Any]:
         """
         Cascade-delete every row keyed to user_id across all tables that hold
-        family data. Returns a dict of table → row count deleted. Always writes
-        an audit_events row LAST so the delete itself is logged.
+        family data. Returns {"counts": {table: rows}, "agent_ids": [...]} —
+        the caller uses agent_ids to abort in-flight streams (H-5). Always
+        writes an audit_events row LAST so the delete itself is logged.
 
         Tables touched (every one that references user_id):
             user_data, kid_agent_configs, kid_messages (via agent_id),
@@ -1035,17 +1109,7 @@ class DuckDBStorage(StorageBackend):
             user_id=user_id, actor=actor,
             action="family_deleted", details={"counts": deleted},
         )
-        return deleted
-        """Bulk revoke (used by family delete cascade). Returns row count affected."""
-        self._con.execute(
-            "UPDATE auth_tokens SET revoked_at = now() "
-            "WHERE user_id = ? AND revoked_at IS NULL",
-            [user_id],
-        )
-        return self._con.execute(
-            "SELECT count(*) FROM auth_tokens WHERE user_id = ? AND revoked_at IS NOT NULL",
-            [user_id],
-        ).fetchone()[0]
+        return {"counts": deleted, "agent_ids": agent_ids}
 
     # ── Crisis locks ─────────────────────────────────────────────────
 

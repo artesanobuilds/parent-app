@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import AsyncGenerator, Dict, List, Any, Optional
 
 import hmac
-from fastapi import FastAPI, Request, Depends, Header, HTTPException
+from fastapi import FastAPI, Request, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -72,6 +72,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# When behind a trusted reverse proxy (Railway), request.client.host is the
+# proxy IP, so per-IP rate limiting collapses to one shared bucket. Read the
+# real client from X-Forwarded-For ONLY when TRUST_PROXY is enabled, else fall
+# back to the socket peer. TRUST_PROXY must only be set when a proxy you control
+# actually sets XFF, otherwise clients can spoof it.
+_TRUST_PROXY = os.getenv("TRUST_PROXY", "0").lower() in ("1", "true", "yes")
+
+
+def client_ip_for(http_request: Request) -> str:
+    if _TRUST_PROXY:
+        xff = http_request.headers.get("x-forwarded-for", "")
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    return http_request.client.host if http_request.client else "unknown"
 
 
 def require_admin_token(x_admin_token: Optional[str] = Header(default=None)) -> None:
@@ -367,8 +384,7 @@ def auth_issue_token_endpoint(request: AuthIssueRequest, http_request: Request):
     Rate-limited per source IP to slow token-issuance flooding (the only
     closed-beta-safe knob until App Attest / Sign-In lands).
     """
-    client_ip = http_request.client.host if http_request.client else "unknown"
-    rate_limit_enforce(client_ip, "auth")
+    rate_limit_enforce(client_ip_for(http_request), "auth")
     token = auth_issue_token(request.user_id)
     return {"token": token, "user_id": request.user_id}
 
@@ -677,15 +693,20 @@ class KidPinRequest(BaseModel):
 
 def _verify_kid_pin(user_id: str, kid_name: str, pin: Optional[str]) -> bool:
     """
-    Returns True if no PIN is set, or the PIN matches. The auth boundary is
-    the parent session — this is just selection convenience for shared devices.
+    Default-closed PIN check (H-2). The truth table:
+      - no PIN configured for this kid  -> allow (selection convenience)
+      - PIN configured, none supplied   -> DENY (was: silently allowed)
+      - PIN configured, supplied        -> bcrypt verify
+
+    The parent session is still the primary auth boundary; this prevents one
+    child on a shared device from opening another child's companion once a
+    parent has set a PIN.
     """
-    if pin is None:
-        # Allow unauthenticated kid mode for v0 closed beta. Will tighten for v1.
-        return True
     pin_hash = storage_backend.get_kid_pin_hash(user_id, kid_name)
     if pin_hash is None:
-        return True
+        return True  # no PIN configured — allow
+    if pin is None:
+        return False  # PIN required but not supplied
     try:
         import bcrypt
         return bcrypt.checkpw(pin.encode("utf-8"), pin_hash.encode("utf-8"))
@@ -730,6 +751,7 @@ def kid_agent_get(user_id: str, kid_name: str, authenticated_user: str = Depends
 def kid_agent_list(user_id: str, authenticated_user: str = Depends(current_user)):
     """List all kid agents for this parent user."""
     authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    _require_consent(user_id)
     return {"agents": storage_backend.list_kid_agents(user_id)}
 
 
@@ -747,6 +769,7 @@ def kid_agent_preview(req: KidAgentPreviewRequest, user_id: str = Depends(curren
     without persisting drafts.
     """
     authorize_user_match(authenticated=user_id, claimed=req.user_id)
+    _require_consent(user_id)
     rate_limit_enforce(user_id, "config")
 
     family = profiling_service.get_family_profile(req.user_id)
@@ -1064,7 +1087,8 @@ async def kid_chat_endpoint(request: KidChatRequest, user_id: str = Depends(curr
 
 
 @app.get("/kid-chat/transcripts")
-def kid_transcripts(user_id: str, kid_name: str, thread_id: str = "default", limit: int = 200,
+def kid_transcripts(user_id: str, kid_name: str, thread_id: str = "default",
+                    limit: int = Query(default=200, ge=1, le=1000),
                     authenticated_user: str = Depends(current_user)):
     """Parent reads the kid's history. Always available — by design."""
     authorize_user_match(authenticated=authenticated_user, claimed=user_id)
@@ -1076,7 +1100,8 @@ def kid_transcripts(user_id: str, kid_name: str, thread_id: str = "default", lim
 
 
 @app.get("/kid-moderation/events")
-def kid_moderation_events(user_id: str, kid_name: Optional[str] = None, limit: int = 100,
+def kid_moderation_events(user_id: str, kid_name: Optional[str] = None,
+                           limit: int = Query(default=100, ge=1, le=1000),
                            authenticated_user: str = Depends(current_user)):
     """Parent (or oncall) reads moderation events for their family."""
     authorize_user_match(authenticated=authenticated_user, claimed=user_id)
@@ -1097,7 +1122,13 @@ def delete_family(user_id: str, authenticated_user: str = Depends(current_user))
     will be discarded next restart). Both are documented in the audit details.
     """
     authorize_user_match(authenticated=authenticated_user, claimed=user_id)
-    counts = storage_backend.delete_family(user_id=user_id, actor=authenticated_user)
+    result = storage_backend.delete_family(user_id=user_id, actor=authenticated_user)
+    counts = result.get("counts", {})
+    # Abort any in-flight kid streams for the deleted agents (H-5): the kill
+    # flag is checked by the moderation gate, so a streaming response can't
+    # keep serving a family that no longer exists.
+    for agent_id in result.get("agent_ids", []):
+        moderation.kill_agent(agent_id)
     # Drop process-local kid agent caches so a fresh family_id doesn't reuse them.
     try:
         kid_agent_service.invalidate_user(user_id)
@@ -1110,6 +1141,7 @@ def delete_family(user_id: str, authenticated_user: str = Depends(current_user))
 def kid_agent_crisis_locks(user_id: str, authenticated_user: str = Depends(current_user)):
     """Parent dashboard: which of my kids' agents are currently locked, and why."""
     authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    _require_consent(user_id)
     return {"locks": storage_backend.list_active_crisis_locks(user_id)}
 
 
@@ -1126,11 +1158,22 @@ def kid_agent_revive(agent_id: str, authenticated_user: str = Depends(current_us
         raise HTTPException(status_code=404, detail="agent has no active crisis lock")
     if lock["user_id"] != authenticated_user:
         raise HTTPException(status_code=403, detail="only the owning parent can revive")
+    _require_consent(authenticated_user)
     cleared = storage_backend.revive_kid_agent_from_crisis(
         agent_id=agent_id, by=authenticated_user,
     )
     moderation.revive_agent(agent_id)  # clear the in-process flag too
-    storage_backend.set_kid_agent_enabled(agent_id, True)
+    # Only re-enable if we actually cleared an active lock (H-6); never flip
+    # enabled=True as a side effect of a no-op revive.
+    if cleared:
+        storage_backend.set_kid_agent_enabled(agent_id, True)
+    # Safety-relevant parent action — always audit it.
+    storage_backend.write_audit_event(
+        user_id=lock["user_id"], actor=authenticated_user,
+        action="crisis_revive",
+        details={"agent_id": agent_id, "kid_name": lock["kid_name"],
+                 "category": lock.get("category"), "cleared": cleared},
+    )
     return {"ok": cleared, "agent_id": agent_id, "kid_name": lock["kid_name"]}
 
 
