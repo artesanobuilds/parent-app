@@ -63,11 +63,56 @@ struct APIReply: Codable, Identifiable, Hashable {
 
 // MARK: - Content Service
 
+enum ContentServiceError: LocalizedError {
+    case httpError(Int)
+    case invalidResponse
+
+    var errorDescription: String? {
+        switch self {
+        case .httpError(let code): return "The server returned status \(code)."
+        case .invalidResponse:     return "The server response was not valid."
+        }
+    }
+}
+
 enum ContentService {
+
+    // MARK: Request helpers (centralized HTTP-status validation)
+
+    /// Validate that a response is a 2xx HTTPURLResponse. Without this a 404 /
+    /// 500 surfaces as a confusing DecodingError instead of an HTTP error.
+    private static func validate(_ response: URLResponse) throws {
+        guard let http = response as? HTTPURLResponse else {
+            throw ContentServiceError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw ContentServiceError.httpError(http.statusCode)
+        }
+    }
+
+    private static func getDecoded<T: Decodable>(_ url: URL) async throws -> T {
+        let (data, response) = try await URLSession.shared.data(from: url)
+        try validate(response)
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    private static func sendDecoded<T: Decodable>(_ request: URLRequest) async throws -> T {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    /// Ensure a Bearer token for userID and return the Authorization header.
+    @MainActor
+    private static func authHeader(userID: String, baseURL: URL) async -> [String: String] {
+        _ = try? await AuthService.shared.ensureToken(for: userID, baseURL: baseURL)
+        return AuthService.shared.header(for: userID)
+    }
+
+    // MARK: Reads
+
     static func fetchCategories(baseURL: URL) async throws -> [APICategory] {
-        let url = baseURL.appendingPathComponent("content/categories")
-        let (data, _) = try await URLSession.shared.data(from: url)
-        return try JSONDecoder().decode([APICategory].self, from: data)
+        try await getDecoded(baseURL.appendingPathComponent("content/categories"))
     }
 
     static func fetchArticles(baseURL: URL, category: String? = nil) async throws -> [APIArticle] {
@@ -75,21 +120,28 @@ enum ContentService {
         if let category = category {
             components.queryItems = [URLQueryItem(name: "category", value: category)]
         }
-        let (data, _) = try await URLSession.shared.data(from: components.url!)
-        return try JSONDecoder().decode([APIArticle].self, from: data)
+        guard let url = components.url else { throw ContentServiceError.invalidResponse }
+        return try await getDecoded(url)
     }
 
     static func fetchArticle(baseURL: URL, id: String) async throws -> APIArticle {
-        let url = baseURL.appendingPathComponent("content/articles/\(id)")
-        let (data, _) = try await URLSession.shared.data(from: url)
-        return try JSONDecoder().decode(APIArticle.self, from: data)
+        try await getDecoded(baseURL.appendingPathComponent("content/articles/\(id)"))
     }
 
     static func fetchReplies(baseURL: URL, postId: String) async throws -> [APIReply] {
-        let url = baseURL.appendingPathComponent("content/community/\(postId)/replies")
-        let (data, _) = try await URLSession.shared.data(from: url)
-        return try JSONDecoder().decode([APIReply].self, from: data)
+        try await getDecoded(baseURL.appendingPathComponent("content/community/\(postId)/replies"))
     }
+
+    static func fetchCommunityPosts(baseURL: URL, category: String? = nil) async throws -> [APICommunityPost] {
+        var components = URLComponents(url: baseURL.appendingPathComponent("content/community"), resolvingAgainstBaseURL: false)!
+        if let category = category {
+            components.queryItems = [URLQueryItem(name: "category", value: category)]
+        }
+        guard let url = components.url else { throw ContentServiceError.invalidResponse }
+        return try await getDecoded(url)
+    }
+
+    // MARK: Writes
 
     static func createReply(baseURL: URL, postId: String, userId: String, authorName: String, body: String) async throws -> APIReply {
         let url = baseURL.appendingPathComponent("content/community/\(postId)/replies")
@@ -97,10 +149,9 @@ enum ContentService {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         for (k, v) in await authHeader(userID: userId, baseURL: baseURL) { request.setValue(v, forHTTPHeaderField: k) }
-        let payload: [String: String] = ["user_id": userId, "author_name": authorName, "body": body]
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (data, _) = try await URLSession.shared.data(for: request)
-        return try JSONDecoder().decode(APIReply.self, from: data)
+        request.httpBody = try JSONSerialization.data(withJSONObject:
+            ["user_id": userId, "author_name": authorName, "body": body])
+        return try await sendDecoded(request)
     }
 
     static func createCommunityPost(baseURL: URL, category: String, title: String, preview: String, userId: String, authorName: String) async throws -> APICommunityPost {
@@ -109,33 +160,10 @@ enum ContentService {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         for (k, v) in await authHeader(userID: userId, baseURL: baseURL) { request.setValue(v, forHTTPHeaderField: k) }
-        let payload: [String: String] = [
-            "category": category,
-            "title": title,
-            "preview": preview,
-            "user_id": userId,
-            "author_name": authorName
-        ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (data, _) = try await URLSession.shared.data(for: request)
-        return try JSONDecoder().decode(APICommunityPost.self, from: data)
-    }
-
-    /// Ensure a Bearer token for userID and return the Authorization header.
-    /// Empty if issuance fails (old backend ignores it; the new backend will
-    /// 401 once the community-write lock ships, surfacing the issue).
-    @MainActor
-    private static func authHeader(userID: String, baseURL: URL) async -> [String: String] {
-        _ = try? await AuthService.shared.ensureToken(for: userID, baseURL: baseURL)
-        return AuthService.shared.header(for: userID)
-    }
-
-    static func fetchCommunityPosts(baseURL: URL, category: String? = nil) async throws -> [APICommunityPost] {
-        var components = URLComponents(url: baseURL.appendingPathComponent("content/community"), resolvingAgainstBaseURL: false)!
-        if let category = category {
-            components.queryItems = [URLQueryItem(name: "category", value: category)]
-        }
-        let (data, _) = try await URLSession.shared.data(from: components.url!)
-        return try JSONDecoder().decode([APICommunityPost].self, from: data)
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "category": category, "title": title, "preview": preview,
+            "user_id": userId, "author_name": authorName,
+        ])
+        return try await sendDecoded(request)
     }
 }

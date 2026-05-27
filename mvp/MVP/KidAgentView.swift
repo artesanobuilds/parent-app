@@ -243,7 +243,7 @@ final class KidChatViewModel: ObservableObject {
     let userID: String
     let baseURL: URL
     let kid: KidAgentConfig
-    private var service: KidAgentService { KidAgentService(baseURL: baseURL, userID: userID) }
+    private let service: KidAgentService
 
     @Published var messages: [KidChatMessage] = []
     @Published var isStreaming: Bool = false
@@ -254,6 +254,7 @@ final class KidChatViewModel: ObservableObject {
 
     init(userID: String, baseURL: URL, kid: KidAgentConfig) {
         self.userID = userID; self.baseURL = baseURL; self.kid = kid
+        self.service = KidAgentService(baseURL: baseURL, userID: userID)
     }
 
     func loadHistory() async {
@@ -276,6 +277,10 @@ final class KidChatViewModel: ObservableObject {
     }
 
     func send(_ text: String) async {
+        // Cancel any in-flight stream before starting a new one, so a double-send
+        // can't leave two tasks racing on `messages`.
+        streamTask?.cancel()
+
         let userMsg = KidChatMessage(role: .user, content: text)
         messages.append(userMsg)
         let placeholder = KidChatMessage(role: .assistant, content: "")

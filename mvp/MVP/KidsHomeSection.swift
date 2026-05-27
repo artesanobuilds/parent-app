@@ -8,7 +8,6 @@ struct KidsHomeSection: View {
     let baseURL: URL
 
     @StateObject private var vm: KidsHomeViewModel
-    @State private var path: [KidNavigation] = []
 
     init(userID: String, baseURL: URL) {
         self.userID = userID
@@ -148,7 +147,7 @@ final class KidsHomeViewModel: ObservableObject {
 
     let userID: String
     let baseURL: URL
-    private var service: KidAgentService { KidAgentService(baseURL: baseURL, userID: userID) }
+    private let service: KidAgentService
 
     @Published var kids: [KidEntry] = []
     @Published var isLoading = false
@@ -157,6 +156,7 @@ final class KidsHomeViewModel: ObservableObject {
     init(userID: String, baseURL: URL) {
         self.userID = userID
         self.baseURL = baseURL
+        self.service = KidAgentService(baseURL: baseURL, userID: userID)
     }
 
     func refresh() async {

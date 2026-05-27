@@ -22,12 +22,13 @@ struct KidAgentService {
         // share a single in-flight issuance.
         _ = try? await AuthService.shared.ensureToken(for: userID, baseURL: baseURL)
 
-        var components = URLComponents(
+        guard var components = URLComponents(
             url: baseURL.appendingPathComponent(path),
             resolvingAgainstBaseURL: false
-        )!
+        ) else { throw KidAgentServiceError.invalidURL }
         if !query.isEmpty { components.queryItems = query }
-        var request = URLRequest(url: components.url!)
+        guard let url = components.url else { throw KidAgentServiceError.invalidURL }
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -76,7 +77,9 @@ struct KidAgentService {
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
-            throw KidAgentServiceError.invalidResponse
+            // Preserve the DecodingError (key path + context) for diagnosis
+            // instead of flattening to a generic invalidResponse.
+            throw KidAgentServiceError.underlying(error)
         }
     }
 

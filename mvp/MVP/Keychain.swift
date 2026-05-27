@@ -20,7 +20,12 @@ enum Keychain {
         var addQuery = baseQuery
         addQuery[kSecValueData as String] = data
         addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(addQuery as CFDictionary, nil)
+        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        if status != errSecSuccess {
+            // Don't crash, but make a failed token persist visible — otherwise
+            // the user silently re-auths every launch.
+            print("[Keychain] SecItemAdd failed for \(account): OSStatus \(status)")
+        }
     }
 
     static func get(_ account: String) -> String? {

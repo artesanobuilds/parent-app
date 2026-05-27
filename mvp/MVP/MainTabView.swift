@@ -3,7 +3,7 @@ import SwiftUI
 struct MainTabView: View {
     let username: String
 
-    @StateObject private var configuration = ServerConfiguration()
+    @StateObject private var configuration: ServerConfiguration  // set in init (viewModel depends on it)
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var contentVM = ContentViewModel()
     @State private var selectedTab: Tab = .home

@@ -3,6 +3,7 @@ import SwiftUI
 struct HomeView: View {
     let username: String
     @EnvironmentObject private var contentVM: ContentViewModel
+    @EnvironmentObject private var configuration: ServerConfiguration
     @Environment(\.triggerKidHandoff) private var triggerKidHandoff
 
     var body: some View {
@@ -21,7 +22,7 @@ struct HomeView: View {
                             featuredCard
                                 .padding(.horizontal)
 
-                            if let baseURL = ServerConfiguration().baseURL, !username.isEmpty {
+                            if let baseURL = configuration.baseURL, !username.isEmpty {
                                 KidsHomeSection(userID: username, baseURL: baseURL)
                                     .padding(.horizontal)
                             }

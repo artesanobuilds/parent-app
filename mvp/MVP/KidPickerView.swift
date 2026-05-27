@@ -62,7 +62,9 @@ struct KidPickerView: View {
 
             ForEach(vm.kids, id: \.kidName) { kid in
                 Button {
-                    vm.tap(kid)
+                    // Disabled kids can't be tapped (.disabled below); call the
+                    // selection closure directly — no NotificationCenter detour.
+                    onSelected(kid)
                 } label: {
                     HStack(spacing: 14) {
                         Circle()
@@ -174,31 +176,4 @@ final class KidPickerViewModel: ObservableObject {
         }
     }
 
-    func tap(_ kid: KidAgentConfig) {
-        // For v0: skip PIN prompt unless explicitly set. The picker route is
-        // already gated by the parent's authenticated session.
-        if !kid.enabled { return }
-        pinPromptFor = nil
-        // If the parent has set a PIN we'd present pinPromptFor here; v0
-        // defers to the parent session as auth boundary.
-        // We surface the picker -> reviewer/streamer choice in KidAgentView.
-        proceed(kid)
-    }
-
-    private func proceed(_ kid: KidAgentConfig) {
-        // KidPickerView's onSelected closure is captured at view init — call
-        // it via a published flag would require restructuring. Instead, we
-        // forward by mutating pinPromptFor (no PIN UI shown) and let the view
-        // call onSelected when it picks up the change.
-        // Simpler path: emit via Notification.
-        NotificationCenter.default.post(
-            name: .kidPickerSelected,
-            object: nil,
-            userInfo: ["config": kid]
-        )
-    }
-}
-
-extension Notification.Name {
-    static let kidPickerSelected = Notification.Name("kidPickerSelected")
 }

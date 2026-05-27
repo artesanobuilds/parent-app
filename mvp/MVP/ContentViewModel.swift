@@ -7,8 +7,9 @@ final class ContentViewModel: ObservableObject {
     @Published var communityPosts: [APICommunityPost] = []
     @Published var isLoading = false
     @Published var repliesCache: [String: [APIReply]] = [:]
-    var userId: String = ""
-    var baseURL: URL?
+    @Published var loadError: String?
+    @Published var userId: String = ""
+    @Published var baseURL: URL?
 
     /// Cache for full article content (keyed by article id).
     private var articleCache: [String: APIArticle] = [:]
@@ -18,30 +19,33 @@ final class ContentViewModel: ObservableObject {
     func loadAllContent(baseURL: URL) async {
         guard categories.isEmpty else { return }  // already loaded
         isLoading = true
+        loadError = nil
         defer { isLoading = false }
 
+        var failures: [String] = []
         do {
-            let c = try await ContentService.fetchCategories(baseURL: baseURL)
-            categories = c
-            print("[ContentViewModel] loaded \(c.count) categories")
+            categories = try await ContentService.fetchCategories(baseURL: baseURL)
         } catch {
             print("[ContentViewModel] fetchCategories failed: \(error)")
+            failures.append("categories")
         }
 
         do {
-            let a = try await ContentService.fetchArticles(baseURL: baseURL)
-            libraryItems = a
-            print("[ContentViewModel] loaded \(a.count) articles")
+            libraryItems = try await ContentService.fetchArticles(baseURL: baseURL)
         } catch {
             print("[ContentViewModel] fetchArticles failed: \(error)")
+            failures.append("articles")
         }
 
         do {
-            let p = try await ContentService.fetchCommunityPosts(baseURL: baseURL)
-            communityPosts = p
-            print("[ContentViewModel] loaded \(p.count) posts")
+            communityPosts = try await ContentService.fetchCommunityPosts(baseURL: baseURL)
         } catch {
             print("[ContentViewModel] fetchCommunityPosts failed: \(error)")
+            failures.append("community posts")
+        }
+
+        if !failures.isEmpty {
+            loadError = "Couldn't load \(failures.joined(separator: ", ")). Pull to refresh or check your connection."
         }
     }
 

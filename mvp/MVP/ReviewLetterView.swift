@@ -268,7 +268,7 @@ final class ReviewLetterViewModel: ObservableObject {
     let userID: String
     let kidName: String
     let baseURL: URL
-    private var service: KidAgentService { KidAgentService(baseURL: baseURL, userID: userID) }
+    private let service: KidAgentService
 
     @Published var config: KidAgentConfig?
     @Published var invariants: KidAgentInvariants = .empty
@@ -305,6 +305,7 @@ final class ReviewLetterViewModel: ObservableObject {
         self.userID = userID
         self.kidName = kidName
         self.baseURL = baseURL
+        self.service = KidAgentService(baseURL: baseURL, userID: userID)
     }
 
     func load() async {

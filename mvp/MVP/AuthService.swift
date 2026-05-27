@@ -8,7 +8,7 @@ import Foundation
 ///  2. `header(for:)` returns the Authorization dict for outbound requests.
 ///  3. Force-fetch (e.g., 401 retry) by calling `obtainToken(...)` again.
 @MainActor
-final class AuthService: ObservableObject {
+final class AuthService {
 
     static let shared = AuthService()
 

@@ -42,13 +42,6 @@ struct HandoffCurtain<Content: View>: View {
                             presented = false
                         }
                     )
-                    .onReceive(
-                        NotificationCenter.default.publisher(for: .kidPickerSelected)
-                    ) { note in
-                        if let kid = note.userInfo?["config"] as? KidAgentConfig {
-                            self.selectedKid = kid
-                        }
-                    }
                 }
             }
             .preferredColorScheme(.dark)

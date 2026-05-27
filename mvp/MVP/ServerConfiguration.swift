@@ -1,6 +1,9 @@
 import Foundation
 
 /// Persists and validates the backend configuration the chat feature needs.
+/// @MainActor: @Published mutations must run on the main thread for safe
+/// SwiftUI observation, and every construction site is a View/init context.
+@MainActor
 final class ServerConfiguration: ObservableObject {
 
     /// Production URL — update this once you deploy to Railway.

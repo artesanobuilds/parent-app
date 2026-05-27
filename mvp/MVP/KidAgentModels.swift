@@ -1,7 +1,7 @@
 import Foundation
 
 /// Mirrors the backend `KidAgentConfig` returned by `/kid-agent/config`.
-struct KidAgentConfig: Codable, Identifiable, Equatable {
+struct KidAgentConfig: Codable, Identifiable, Equatable, Sendable {
     let id: String
     let userID: String
     let kidName: String
@@ -27,7 +27,7 @@ struct KidAgentConfig: Codable, Identifiable, Equatable {
 
 /// Mirrors backend `SynthesizedInvariants`. Plain dicts/arrays for tools so we
 /// can be loose about future tool keys.
-struct KidAgentInvariants: Codable, Equatable {
+struct KidAgentInvariants: Codable, Equatable, Sendable {
     var agentDisplayName: String
     var personalityDescription: String
     var interestsSummary: String
@@ -96,6 +96,7 @@ enum KidAgentServiceError: LocalizedError {
     case consentRequired(version: String)
     case versionConflict
     case invalidResponse
+    case invalidURL
     case status(Int)
     case underlying(Error)
 
@@ -105,6 +106,7 @@ enum KidAgentServiceError: LocalizedError {
         case .consentRequired(let v):      return "Consent required (version \(v))."
         case .versionConflict:             return "Someone else updated this agent — please refresh."
         case .invalidResponse:             return "The server response was not valid."
+        case .invalidURL:                  return "The server URL is misconfigured."
         case .status(let code):            return "Server returned status \(code)."
         case .underlying(let err):         return err.localizedDescription
         }
