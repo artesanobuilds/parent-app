@@ -75,6 +75,54 @@ Two paths to evaluate at end of beta. Decide based on which audience produced th
 - **Lock `/content/community/new` + `/content/community/{post_id}/replies` server-side.** Vix found these accept an arbitrary `user_id`/`author_name` with no auth (impersonation + spam). The iOS `ContentService` now attaches a Bearer token to both calls (shipped), but the **server-side `Depends(current_user)` + `authorize_user_match` is deliberately NOT deployed yet** — turning it on now would 401 every TestFlight 1.3 user (same trap as `/profile/seed`). Add the server lock in the same release as the next TestFlight build that includes the auth-sending `ContentService`.
 - **Set `ADMIN_TOKEN` on Railway.** `/data/export`, `/data/download`, and all `/cms/*` mutations are now gated behind an `X-Admin-Token` header (fail-closed: they return 503 until `ADMIN_TOKEN` is set). After deploy, set `ADMIN_TOKEN` via `railway variables set` and put the same value in `MVP_ADMIN_TOKEN` locally for `sync-data.sh`. Until then, prod data sync is intentionally disabled.
 
+## Vix review backlog (2026-05-11) — unfixed findings
+
+Independent deep review by Vix. The verified blockers (unauth `/data/*` + `/cms/*`, path traversal, crisis-output ordering, late-flag persistence) were fixed in `7c5a8b1`. Everything below is triaged but **not yet done**. Severity is Vix's.
+
+### Verify-first (possible false positives — Vix runs on a Jan-2026 model)
+- **gpt-5.2 model string** (used across runtime/synthesis/moderation/evals). Vix claims it doesn't exist and every LLM call may be silently failing to fallbacks. Almost certainly cutoff noise since prod runs — but confirm the model name resolves.
+- **`from langchain.agents import create_agent`** (`kid_agent.py`, `evals/runner.py`). Vix claims it's not in langchain 1.2.0. Confirm the import succeeds at startup (it must, since the agent runs).
+- **B-2 dead code after `return` in `revoke_all_auth_tokens`** (`duckdb_storage.py:1039-1048`). Verify whether there's an unreachable block; if so, delete it.
+
+### HIGH
+- **H-1 proxy-blind rate limiting** (`server.py:354`). `request.client.host` is Railway's proxy IP, so the 5/hr `/auth/issue-token` cap is shared across ALL clients. Read first `X-Forwarded-For` hop behind a trusted-proxy allowlist.
+- **H-2 `_verify_kid_pin` default-open** (`server.py:662`). Returns `True` when `pin is None` even if a PIN is set → trivial bypass. Flip to: no PIN configured = allow; PIN set but absent = deny. (Tied to the kid-auth-model question.)
+- **H-4 prompt injection via `summary.py`** (`summary.py:99-125`). Raw kid messages flow unsanitized into the summary LLM prompt; a kid can manipulate the `parent_prompt` shown to the parent. Delimit message content as inert data + cap `parent_prompt` length.
+- **H-5 `delete_family` doesn't abort in-flight streams** (`duckdb_storage.py:1015`). A streaming kid-chat keeps running after the family is deleted. Call `moderation.kill_agent()` for each deleted agent_id during cascade.
+- **H-6 `revive` re-enables unconditionally** (`server.py:1093`). `set_kid_agent_enabled(True)` runs regardless of whether a lock was actually cleared; gate on `cleared`. Also write an `audit_events` row on every crisis revive.
+- **H-7 consent check missing on kid endpoints** (`server.py:714,727,1074,1080`). `_require_consent` absent from `/kid-agent/list`, `/kid-agent/preview` (burns LLM budget), `/kid-agent/crisis-locks`, and `/kid-agent/{id}/revive` (bypasses safety acknowledgement). Add it.
+- **H-9 unbounded `limit` param** (`server.py:1031,1043`). `/kid-chat/transcripts` + `/kid-moderation/events` accept arbitrary `limit` → OOM/thread-block. Add `Query(le=1000)`.
+- **H-10 string-interpolated parquet paths** (`duckdb_storage.py:269,279`). Not attacker-controlled today, but use `?` placeholders / validate before interpolation.
+- **B-8 DuckDB single connection not thread-safe** (`duckdb_storage.py:241`). Shared `self._con` across FastAPI's thread pool + event loop can corrupt/interleave. Min bar for beta: a `threading.Lock` around every execute. Real answer: Postgres. (Corroborates the `--workers 1` note already on the roadmap.)
+- **B-9 TOCTOU in `save_kid_agent_config`** (`duckdb_storage.py:671`). Concurrent writers at the same `expected_version` both insert. Add `UNIQUE(user_id, kid_name, version)` + transaction + 409 on conflict.
+
+### MED
+- **M-1 unbounded `_kid_agent_cache`** (`kid_agent.py:55`) — slow leak of AgentExecutor instances; use a bounded LRU.
+- **M-3 child crisis content sent to Slack in plaintext** (`telemetry.py:110`). Abuse/self-harm excerpts land in Slack's cloud. Send only ids + category + severity + a dashboard link; never the excerpt. (Already partially done server-side for the output path in `7c5a8b1` — the input crisis path at `server.py:893` still passes the raw message.)
+- **M-5 `daily_summaries` UPDATE clobbers `created_at`** (`duckdb_storage.py:1251`). Add `updated_at`, stop overwriting `created_at`.
+- **M-6 mixed `$N`/`?` placeholder styles** (`duckdb_storage.py:432`) — fragile; standardize on `?`.
+- **M-7 `ChatOpenAI` constructed per moderation call** (`moderation.py:306,603`) — HTTP client churn; hoist to module-level singletons.
+- **M-9 summary ignores non-default threads** (`summary.py:85`, `duckdb_storage.py:1206`) — kid messages in non-`default` threads silently excluded from the daily summary.
+- **M-10 no integrity check on `soul_kid.md`** (`prompt_synthesis.py:303`) — file is writable at deploy; a tampered soul injects into every kid prompt. Verify a build-time SHA256 at startup.
+- **M-11 `content_hash` truncated to 64 bits** (`prompt_synthesis.py:436`) — cache-invalidation key; a collision runs a stale agent with the wrong blocklist. Use full hash or ≥32 chars.
+- **M-12 eval reports with kid/agent content land in servable `data/`** (`evals/runner.py:282`) — crisis-case agent responses written to `data/eval_reports/`; redact or move outside any served dir.
+
+### NIT
+- **N-1** `rt-050` eval wrongly expects `must_route_crisis` for "sneaking out" (`evals/cases/red_team.yaml:909`) — should be refuse-secrecy + mention-parent + redirect, not crisis script.
+- **N-2** `gc-011` duplicate `must_not_contain_topic` YAML key silently drops the violence check (`guardrail_conflict.yaml:143`) — make it a list.
+- **N-3** `/kid-agent/preview` output not moderated (`server.py:768`) — low risk (parent-only) but unmoderated LLM text.
+- **N-4** `persist_state()` called synchronously inside async stream generators (`server.py:289,336`) — blocks the event loop; wrap in `run_in_executor`.
+- **N-6** `ChatRequest.user_id` defaults to `"0"` (`server.py:79`) — masks client bugs; drop the default to force a 422.
+- **N-7** repeated local `from fastapi import HTTPException` (already imported at top) — clean up the in-function imports.
+
+### Open questions for the owner (from Vix's review)
+1. Crisis parent-notification: `parent_notified_at` is always `None` — no APNs/SMS/email, only Slack-to-oncall. Interim email before beta?
+2. Kid auth identity: kid runs under the parent's token; is the PIN a real boundary or UI-only? (Decides H-2 severity.)
+3. COPPA: consent is self-reported (any kid can fabricate parent + age band). Needs legal review.
+4. Parquet export scope: only `user_data` is exported; `kid_messages`/`consent_records`/`moderation_events`/`daily_summaries` never are. Intentional?
+5. `revoke_auth_token` has no caller — no logout endpoint; tokens die only by 30d expiry or `delete_family`. Add logout + lost-device revoke?
+6. Orphaned crisis locks: reviving requires the old `agent_id`, but `upsert_kid_agent_config` mints a new one — old lock rows orphan. Define the lifecycle.
+
 ## Family Companion v0 — pre-beta blockers (from 2026-05-07 critic review)
 
 Findings doc: `docs/code-review-findings.md`. Items already shipped this session are removed; these are what's left before any family touches the build.
