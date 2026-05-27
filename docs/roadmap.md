@@ -84,7 +84,8 @@ Independent deep review by Vix. The verified blockers (unauth `/data/*` + `/cms/
 - **`from langchain.agents import create_agent`** (`kid_agent.py`, `evals/runner.py`). Vix claims it's not in langchain 1.2.0. Confirm the import succeeds at startup (it must, since the agent runs).
 - **B-2 dead code after `return` in `revoke_all_auth_tokens`** (`duckdb_storage.py:1039-1048`). Verify whether there's an unreachable block; if so, delete it.
 
-### HIGH
+### HIGH — ✅ all fixed in `2b336a8` (2026-05-11)
+(B-2 dead code also removed in the same commit. Kept below for the record.)
 - **H-1 proxy-blind rate limiting** (`server.py:354`). `request.client.host` is Railway's proxy IP, so the 5/hr `/auth/issue-token` cap is shared across ALL clients. Read first `X-Forwarded-For` hop behind a trusted-proxy allowlist.
 - **H-2 `_verify_kid_pin` default-open** (`server.py:662`). Returns `True` when `pin is None` even if a PIN is set → trivial bypass. Flip to: no PIN configured = allow; PIN set but absent = deny. (Tied to the kid-auth-model question.)
 - **H-4 prompt injection via `summary.py`** (`summary.py:99-125`). Raw kid messages flow unsanitized into the summary LLM prompt; a kid can manipulate the `parent_prompt` shown to the parent. Delimit message content as inert data + cap `parent_prompt` length.
