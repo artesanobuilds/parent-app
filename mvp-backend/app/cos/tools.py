@@ -488,6 +488,62 @@ def _make_plan_snapshot_tool(user_id: str):
     return GetPlanSnapshot
 
 
+def _make_compare_activities_tool(user_id: str):
+    @tool
+    def CompareActivities() -> str:
+        """Tabulate the SHORTLIST (activities still being considered — status
+        exploring/interested/pending/waitlisted) side-by-side to help the parent
+        DECIDE: price, age-eligibility, week, location/hours, and which options
+        COMPETE (same kid + same week ⇒ they can't pick both).
+
+        Call this when the parent wants to choose between camps, triage their
+        options, or "help me decide". Use the result to walk the tradeoffs, then
+        record decisions with TrackActivity (status "confirmed"/"signed_up" for
+        picks, "declined" for the rest) including a decision_rationale.
+        """
+        storage = _storage()
+        try:
+            tracked = storage.list_tracked_activities(user_id)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[cos_tool] CompareActivities failed: %s", exc)
+            return f"Could not read the shortlist: {exc}"
+
+        cmp = planning.compare_activities(tracked, kids=_kids_for(user_id))
+        rows = cmp["items"]
+        if not rows:
+            return (
+                "The shortlist is empty — nothing in 'exploring' or other "
+                "undecided states to compare yet. Pin some candidates first."
+            )
+
+        out: list[str] = [
+            f"Shortlist ({cmp['count']} option(s) to decide; "
+            f"${cmp['total_if_all_selected']:g} if all chosen):"
+        ]
+        for r in rows:
+            who = f" [{r['kid_name']}]" if r.get("kid_name") else ""
+            price = (
+                f" ${r['price_amount']:g} ({r.get('price_status')})"
+                if r.get("price_amount") is not None
+                else " price TBD"
+            )
+            week = f" wk {r['week_start']}" if r.get("week_start") else ""
+            where = f" @ {r['location']}" if r.get("location") else ""
+            elig = "" if r.get("eligible") else f" ⚠ {r.get('eligibility_reason')}"
+            competes = (
+                f" — competes with: {', '.join(r['competes_with'])}"
+                if r.get("competes_with")
+                else ""
+            )
+            out.append(
+                f"  - {r.get('name')}{who} ({r.get('status')}){price}{week}{where}"
+                f"{elig}{competes} (id={r.get('id')})"
+            )
+        return "\n".join(out)
+
+    return CompareActivities
+
+
 # --------------------------------------------------------------------------- #
 # Eligibility check
 # --------------------------------------------------------------------------- #
@@ -568,6 +624,7 @@ def build_cos_tools(user_id: str) -> list:
         _make_update_todo_tool(user_id),
         _make_search_activities_tool(user_id),
         _make_plan_snapshot_tool(user_id),
+        _make_compare_activities_tool(user_id),
         _make_check_eligibility_tool(user_id),
         _make_draft_email_tool(user_id),
     ]

@@ -485,6 +485,23 @@ def plan_summary(weeks: Optional[str] = None, user_id: str = Depends(current_use
     )
 
 
+@router.get("/plan/compare")
+def plan_compare(user_id: str = Depends(current_user)):
+    """R2: tabulate the shortlist (undecided activities) for a decision —
+    price, eligibility, week, and which options compete (same kid + same week).
+    Surfaces the same data the COS `CompareActivities` tool uses."""
+    from app.profiling import profiling_service
+
+    storage = _storage()
+    fam = profiling_service.get_family_profile(user_id) or {}
+    kids: List[Dict[str, Any]] = []
+    for name, prof in (fam.get("children") or {}).items():
+        prof = prof or {}
+        kids.append({"name": prof.get("name") or name, "age": prof.get("age")})
+
+    return planning.compare_activities(storage.list_tracked_activities(user_id), kids=kids)
+
+
 # --------------------------------------------------------------------------- #
 # Draft email (human-in-the-loop — NEVER sends)
 # --------------------------------------------------------------------------- #

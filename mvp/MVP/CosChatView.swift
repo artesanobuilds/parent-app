@@ -7,11 +7,17 @@ import MarkdownUI
 struct CosChatView: View {
     @StateObject private var viewModel: CosChatViewModel
     @State private var messageText: String = ""
+    @State private var didSendInitial = false
 
-    init(configuration: ServerConfiguration, userID: String) {
+    /// When set, this prompt is auto-sent once on open (e.g. the Exploring
+    /// section's "Help me decide" entry seeds a triage request).
+    private let initialPrompt: String?
+
+    init(configuration: ServerConfiguration, userID: String, initialPrompt: String? = nil) {
         let vm = CosChatViewModel(configuration: configuration)
         vm.setUserID(userID)
         _viewModel = StateObject(wrappedValue: vm)
+        self.initialPrompt = initialPrompt
     }
 
     var body: some View {
@@ -26,6 +32,12 @@ struct CosChatView: View {
         // clears the bar while keeping the gap below the field ~symmetric with
         // the gap above it (divider line).
         .padding(.bottom, .hearth800)
+        .onAppear {
+            guard let prompt = initialPrompt, !didSendInitial,
+                  !viewModel.isSending, !viewModel.isUserIDMissing else { return }
+            didSendInitial = true
+            viewModel.send(prompt)
+        }
         .navigationTitle("Chief of Staff")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.bgCanvas, for: .navigationBar)

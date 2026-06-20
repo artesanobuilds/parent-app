@@ -22,9 +22,20 @@ __all__ = [
     "coverage_gaps",
     "uncovered_weeks",
     "build_plan_summary",
+    "compare_activities",
 ]
 
 _COVERING_KINDS = {"camp", "class", "program"}
+
+# Statuses that mean "still on the shortlist / not yet settled" — what the
+# decision/triage mode (R2) compares.
+_UNDECIDED_STATUSES = {
+    "exploring",
+    "interested",
+    "pending_eligibility",
+    "waitlisted",
+    "reference",
+}
 
 
 def cost_summary(tracked: list[dict]) -> dict:
@@ -265,6 +276,104 @@ def uncovered_weeks(
     return result
 
 
+def compare_activities(
+    tracked: list[dict],
+    kids: Optional[list[dict]] = None,
+) -> dict:
+    """Tabulate the shortlist's tradeoffs to support a decision (R2).
+
+    Considers the *undecided* tracked items (status in ``_UNDECIDED_STATUSES`` —
+    exploring/interested/pending/waitlisted/reference). For each it returns a row
+    with the dimensions a parent weighs when settling: price, age-eligibility,
+    week, location, hours — plus ``competes_with``: the names of other shortlisted
+    items for the SAME kid + SAME week (a kid usually does one camp per week, so
+    these are mutually-exclusive choices). Reuses ``check_eligibility``.
+
+    ``tracked`` dicts carry the storage shape (``name``, ``kid_name``, ``status``,
+    ``provider``, ``price_amount``, ``price_status``, ``week_start``,
+    ``pending_reason``, and a ``details`` dict that may hold ``age_min``/
+    ``age_max``/``hours``/``location``/``dates``). ``kids`` is ``[{"name","age"}]``.
+
+    Returns ``{"items": [...], "count", "total_if_all_selected", "by_kid"}``.
+    Deterministic and pure.
+    """
+    kids = kids or []
+    kid_age = {
+        _safe_lower(k.get("name")): k.get("age")
+        for k in kids
+        if k.get("name") is not None
+    }
+
+    items = [
+        t for t in (tracked or []) if (t.get("status") or "") in _UNDECIDED_STATUSES
+    ]
+
+    rows: list[dict] = []
+    for it in items:
+        details = it.get("details") or {}
+        kid_name = it.get("kid_name")
+        week = it.get("week_start") or _first(details.get("dates"))
+
+        # Age-eligibility: an explicit pending flag wins; otherwise compute from
+        # the item's age bounds vs. the kid's age when both are known.
+        if it.get("status") == "pending_eligibility" or it.get("pending_reason"):
+            eligible = False
+            reason = it.get("pending_reason") or "needs eligibility confirmation"
+        else:
+            age = kid_age.get(_safe_lower(kid_name))
+            age_min, age_max = details.get("age_min"), details.get("age_max")
+            if age is not None and (age_min is not None or age_max is not None):
+                verdict = check_eligibility(
+                    {"name": it.get("name"), "age_min": age_min, "age_max": age_max},
+                    {"name": kid_name, "age": age},
+                )
+                eligible, reason = verdict["eligible"], verdict["reason"]
+            else:
+                eligible, reason = True, "no age constraints to check"
+
+        rows.append(
+            {
+                "id": it.get("id"),
+                "name": it.get("name"),
+                "kid_name": kid_name,
+                "provider": it.get("provider"),
+                "status": it.get("status"),
+                "week_start": week,
+                "location": details.get("location") or it.get("location_text"),
+                "hours": details.get("hours"),
+                "price_amount": it.get("price_amount"),
+                "price_status": it.get("price_status"),
+                "eligible": eligible,
+                "eligibility_reason": reason,
+                "competes_with": [],  # filled below
+            }
+        )
+
+    # Same kid + same week ⇒ competing (mutually-exclusive) choices.
+    for i, a in enumerate(rows):
+        if not (a["kid_name"] and a["week_start"]):
+            continue
+        for j, b in enumerate(rows):
+            if i == j:
+                continue
+            if a["kid_name"] == b["kid_name"] and a["week_start"] == b["week_start"]:
+                a["competes_with"].append(b["name"])
+
+    total_if_all = sum(
+        float(r["price_amount"]) for r in rows if r["price_amount"] is not None
+    )
+    by_kid: dict[Optional[str], int] = {}
+    for r in rows:
+        by_kid[r["kid_name"]] = by_kid.get(r["kid_name"], 0) + 1
+
+    return {
+        "items": rows,
+        "count": len(rows),
+        "total_if_all_selected": total_if_all,
+        "by_kid": by_kid,
+    }
+
+
 def build_plan_summary(
     *,
     tracked: list[dict],
@@ -304,6 +413,18 @@ _WEEKDAY_NAMES = [
     "Saturday",
     "Sunday",
 ]
+
+
+def _safe_lower(value: Any) -> Optional[str]:
+    """Lowercase a string for case-insensitive name matching; None-safe."""
+    return value.lower() if isinstance(value, str) else None
+
+
+def _first(seq: Any) -> Optional[Any]:
+    """First element of a list-like, else None."""
+    if isinstance(seq, (list, tuple)) and seq:
+        return seq[0]
+    return None
 
 
 def _fmt_num(value: Any) -> str:

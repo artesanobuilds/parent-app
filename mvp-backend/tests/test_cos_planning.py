@@ -16,11 +16,43 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.cos.planning import (  # noqa: E402
     build_plan_summary,
     check_eligibility,
+    compare_activities,
     cost_summary,
     coverage_gaps,
     detect_time_conflicts,
     uncovered_weeks,
 )
+
+
+def test_compare_activities_shortlist_eligibility_and_competition():
+    kids = [{"name": "Ceiba", "age": 8}, {"name": "Alkina", "age": 4}]
+    tracked = [
+        # Two options for the SAME kid + SAME week → they compete.
+        {"id": "a", "name": "Art Camp", "kid_name": "Ceiba", "status": "exploring",
+         "week_start": "2026-07-06", "price_amount": 280.0, "price_status": "confirmed",
+         "details": {"location": "Healdsburg", "hours": "9-3"}},
+        {"id": "b", "name": "Soccer Camp", "kid_name": "Ceiba", "status": "exploring",
+         "week_start": "2026-07-06", "price_amount": 200.0, "price_status": "tbd",
+         "details": {}},
+        # Under-age via details age bounds → flagged not eligible.
+        {"id": "c", "name": "Big Kids Camp", "kid_name": "Alkina", "status": "exploring",
+         "week_start": "2026-07-13", "details": {"age_min": 5.0}},
+        # Already decided → excluded from the shortlist comparison.
+        {"id": "d", "name": "Locked In", "kid_name": "Ceiba", "status": "confirmed"},
+    ]
+    out = compare_activities(tracked, kids=kids)
+
+    assert out["count"] == 3  # the confirmed one is excluded
+    assert out["total_if_all_selected"] == 480.0  # 280 + 200 (c has no price)
+    rows = {r["id"]: r for r in out["items"]}
+    # Same kid + same week compete with each other.
+    assert rows["a"]["competes_with"] == ["Soccer Camp"]
+    assert rows["b"]["competes_with"] == ["Art Camp"]
+    assert rows["c"]["competes_with"] == []
+    # Alkina (4) is under Big Kids Camp's floor of 5.
+    assert rows["c"]["eligible"] is False
+    assert "Alkina" in rows["c"]["eligibility_reason"]
+    assert rows["a"]["eligible"] is True
 
 
 def test_cost_summary_mixes_confirmed_tbd_none_and_declined():

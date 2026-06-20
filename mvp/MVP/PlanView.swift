@@ -290,6 +290,23 @@ struct PlanView: View {
                 ForEach(items) { activity in
                     exploringRow(activity)
                 }
+                NavigationLink {
+                    CosChatView(
+                        configuration: configuration,
+                        userID: userID,
+                        initialPrompt: "Help me decide between the camps on my shortlist. Walk me through the tradeoffs (cost, eligibility, schedule conflicts, coverage) and recommend picks per kid."
+                    )
+                } label: {
+                    Label("Help me decide", systemImage: "arrow.left.arrow.right")
+                        .font(.hearthBodyMD.weight(.semibold))
+                        .foregroundColor(.inkOnPhotoLight)
+                        .padding(.horizontal, .hearth500)
+                        .padding(.vertical, .hearth400)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.accentDefault)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
             }
         }
     }
