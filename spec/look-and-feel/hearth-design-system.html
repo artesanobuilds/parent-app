@@ -1,0 +1,2457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hearth — Design System for parent-app</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..900&family=Inter:wght@400..700&family=JetBrains+Mono:wght@400..600&display=swap" rel="stylesheet">
+  <style>
+    /* ─────────────────────────────────────────────
+       Hearth tokens — verbatim from DESIGN.tokens.md
+       ───────────────────────────────────────────── */
+    :root {
+      /* Color — primitives */
+      --neutral-cream-50:  #FAF7F2;
+      --neutral-cream-100: #F3F0EB;
+      --neutral-cream-200: #E9E4DC;
+      --neutral-ink-900:   #1A1A1A;
+      --neutral-ink-700:   #2D2D2D;
+      --neutral-ink-500:   #6F6A60;
+      --neutral-ink-300:   #8A8275;
+      --neutral-paper:     #FFFFFF;
+      --brand-olive-700:   #3A4A2A;
+      --brand-olive-500:   #4F5D3A;
+      --brand-olive-100:   #E8EBDC;
+      --photo-saffron:     #E8A33C;
+      --photo-rose:        #B86A60;
+      --photo-royal:       #2E3A5F;
+      --photo-forest:      #2D3F2C;
+      --status-success:    #3D6B3D;
+      --status-warning:    #8A6420;
+      --status-error:      #A03A3A;
+      --status-info:       #2E3A5F;
+      --status-error-tint:   #F6E4E4;
+      --status-warning-tint: #F5EAD2;
+      --status-success-tint: #DCE7DC;
+
+      /* Color — semantic */
+      --bg-canvas:   var(--neutral-cream-100);
+      --bg-elevated: var(--neutral-paper);
+      --bg-sober:    var(--neutral-cream-50);
+      --ink-primary: var(--neutral-ink-900);
+      --ink-secondary: var(--neutral-ink-700);
+      --ink-muted:   var(--neutral-ink-500);
+      --ink-placeholder: var(--neutral-ink-300);
+      --ink-on-photo-dark: var(--neutral-ink-900);
+      --ink-on-photo-light: var(--neutral-paper);
+      --border-hairline: var(--neutral-cream-200);
+      --border-strong:   var(--neutral-ink-300);
+      --accent-default:  var(--brand-olive-500);
+      --accent-press:    var(--brand-olive-700);
+      --accent-tint:     var(--brand-olive-100);
+      --focus-ring-on-light: var(--brand-olive-500);
+      --focus-ring-on-photo: var(--neutral-paper);
+
+      /* Spacing — 9-step scale */
+      --spacing-0:    0;
+      --spacing-300:  8px;
+      --spacing-400:  12px;
+      --spacing-500:  16px;
+      --spacing-600:  20px;
+      --spacing-700:  24px;
+      --spacing-800:  32px;
+      --spacing-900:  40px;
+      --spacing-1000: 56px;
+
+      /* Shape */
+      --shape-none: 0;
+      --shape-sm:   4px;
+      --shape-md:   12px;
+      --shape-lg:   20px;
+      --shape-xl:   28px;
+      --shape-pill: 999px;
+
+      /* Motion */
+      --motion-instant: 0ms;
+      --motion-fast:    120ms;
+      --motion-base:    200ms;
+      --motion-slow:    320ms;
+
+      /* Elevation */
+      --elevation-0: none;
+      --elevation-2: 0 4px 12px rgba(26,26,26,0.08);
+      --elevation-3: 0 12px 32px rgba(26,26,26,0.12);
+
+      /* Fonts */
+      --font-display: 'Fraunces', Georgia, serif;
+      --font-sans:    'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      --font-mono:    'JetBrains Mono', ui-monospace, "SF Mono", monospace;
+    }
+
+    /* ─────────────────────────────────────────────
+       Base reset + page chrome
+       ───────────────────────────────────────────── */
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after {
+        animation-duration: 0ms !important;
+        transition-duration: 0ms !important;
+      }
+    }
+    body {
+      margin: 0;
+      background: var(--bg-canvas);
+      color: var(--ink-primary);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 22px;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    a { color: var(--ink-primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre, .mono { font-family: var(--font-mono); }
+    pre {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-md);
+      padding: var(--spacing-500);
+      font-size: 12px;
+      line-height: 18px;
+      overflow-x: auto;
+      color: var(--ink-secondary);
+    }
+
+    /* ─────────────────────────────────────────────
+       Focus rings — token-driven, on-light default
+       ───────────────────────────────────────────── */
+    :where(button, a, [role="button"], [tabindex]:not([tabindex="-1"]), summary):focus-visible {
+      outline: 2px solid var(--focus-ring-on-light);
+      outline-offset: 2px;
+      border-radius: inherit;
+    }
+    .on-photo :where(button, a, [role="button"], summary):focus-visible {
+      outline-color: var(--focus-ring-on-photo);
+    }
+
+    /* ─────────────────────────────────────────────
+       Sticky top nav
+       ───────────────────────────────────────────── */
+    .topnav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(243, 240, 235, 0.92);
+      backdrop-filter: saturate(140%) blur(10px);
+      -webkit-backdrop-filter: saturate(140%) blur(10px);
+      border-bottom: 1px solid var(--border-hairline);
+    }
+    .topnav-inner {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: var(--spacing-500) var(--spacing-700);
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-700);
+      flex-wrap: wrap;
+    }
+    .wordmark {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 22px;
+      letter-spacing: -0.01em;
+      color: var(--ink-primary);
+    }
+    .wordmark .dot { color: var(--accent-default); }
+    .topnav-links {
+      display: flex;
+      gap: var(--spacing-500);
+      flex-wrap: wrap;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      font-family: var(--font-sans);
+      font-size: 11px;
+      line-height: 14px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .topnav-links a { color: var(--ink-secondary); padding: var(--spacing-300) 0; display: inline-block; }
+    .topnav-links a:hover { color: var(--ink-primary); text-decoration: none; }
+
+    /* ─────────────────────────────────────────────
+       Layout primitives
+       ───────────────────────────────────────────── */
+    .page {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: var(--spacing-700);
+    }
+    section {
+      padding: var(--spacing-1000) 0;
+      border-top: 1px solid var(--border-hairline);
+    }
+    section:first-of-type { border-top: none; }
+    .section-eyebrow {
+      font-family: var(--font-sans);
+      font-size: 11px;
+      line-height: 14px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      margin: 0 0 var(--spacing-400) 0;
+    }
+    h1, h2, h3, h4 { margin: 0; }
+    h1 {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 56px;
+      line-height: 60px;
+      letter-spacing: -0.01em;
+      color: var(--ink-primary);
+    }
+    h2 {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 40px;
+      line-height: 44px;
+      letter-spacing: -0.01em;
+      color: var(--ink-primary);
+      margin-bottom: var(--spacing-700);
+    }
+    h3 {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 28px;
+      line-height: 32px;
+      color: var(--ink-primary);
+      margin-bottom: var(--spacing-500);
+    }
+    h4 {
+      font-family: var(--font-sans);
+      font-weight: 600;
+      font-size: 20px;
+      line-height: 24px;
+      color: var(--ink-primary);
+    }
+    p { margin: 0 0 var(--spacing-500) 0; color: var(--ink-secondary); }
+    p.body-lg { font-size: 17px; line-height: 26px; color: var(--ink-secondary); }
+    .caption-mono { font-family: var(--font-mono); font-size: 12px; line-height: 16px; color: var(--ink-muted); }
+    .label-tag {
+      font-family: var(--font-sans);
+      font-size: 11px;
+      line-height: 14px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    /* ─────────────────────────────────────────────
+       Hero
+       ───────────────────────────────────────────── */
+    .hero {
+      padding: var(--spacing-1000) 0 var(--spacing-800);
+    }
+    .hero h1 { max-width: 900px; }
+    .hero-sub {
+      font-size: 17px;
+      line-height: 26px;
+      color: var(--ink-secondary);
+      max-width: 720px;
+      margin-top: var(--spacing-600);
+    }
+    .meta-row {
+      display: flex;
+      gap: var(--spacing-700);
+      flex-wrap: wrap;
+      margin-top: var(--spacing-700);
+      padding: var(--spacing-400) 0;
+      border-top: 1px solid var(--border-hairline);
+      border-bottom: 1px solid var(--border-hairline);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 16px;
+      color: var(--ink-muted);
+    }
+    .meta-row span strong { color: var(--ink-secondary); font-weight: 600; }
+
+    /* ─────────────────────────────────────────────
+       Generic card grid
+       ───────────────────────────────────────────── */
+    .grid {
+      display: grid;
+      gap: var(--spacing-500);
+    }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .grid-auto-260 { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+    .grid-auto-200 { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+    @media (max-width: 900px) {
+      .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 600px) {
+      .grid-3, .grid-2, .grid-4 { grid-template-columns: 1fr; }
+      .page { padding: var(--spacing-500); }
+      h1 { font-size: 40px; line-height: 44px; }
+      h2 { font-size: 28px; line-height: 32px; }
+    }
+
+    .card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-lg);
+      padding: var(--spacing-600);
+    }
+    .card h4 { margin-bottom: var(--spacing-400); }
+    .card p { color: var(--ink-secondary); margin: 0; font-size: 15px; line-height: 22px; }
+    .card .caption-mono { display: block; margin-bottom: var(--spacing-400); }
+
+    /* ─────────────────────────────────────────────
+       Layer architecture stack
+       ───────────────────────────────────────────── */
+    .layer-stack { display: flex; flex-direction: column; gap: var(--spacing-400); }
+    .layer-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-lg);
+      padding: var(--spacing-600);
+      position: relative;
+    }
+    .layer-card[data-layer="1"] { background: var(--accent-tint); }
+    .layer-card[data-layer="2"] { background: var(--status-warning-tint); }
+    .layer-card[data-layer="3"] { background: var(--bg-elevated); }
+    .layer-card[data-layer="4"] { background: var(--status-success-tint); }
+    .layer-card[data-layer="5"] { background: var(--bg-elevated); border: 1px dashed var(--border-strong); }
+    .layer-card h4 { margin-bottom: var(--spacing-300); }
+    .layer-tag {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: var(--shape-sm);
+      background: var(--bg-elevated);
+      color: var(--ink-secondary);
+      border: 1px solid var(--border-hairline);
+      margin-right: var(--spacing-300);
+    }
+    .layer-card details { margin-top: var(--spacing-400); }
+    .layer-card summary {
+      cursor: pointer;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink-secondary);
+      padding: var(--spacing-300) 0;
+    }
+    .layer-card summary:hover { color: var(--ink-primary); }
+    .layer-card .file-list {
+      margin: var(--spacing-300) 0 0;
+      padding-left: var(--spacing-500);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 18px;
+      color: var(--ink-secondary);
+    }
+    .layer-card .file-list li { list-style: '— '; }
+
+    /* ─────────────────────────────────────────────
+       Tokens — color swatches
+       ───────────────────────────────────────────── */
+    .tokens-group { margin-bottom: var(--spacing-900); }
+    .tokens-group h3 { font-family: var(--font-display); font-weight: 600; font-size: 20px; line-height: 24px; margin-bottom: var(--spacing-500); color: var(--ink-primary); }
+    .swatch-grid {
+      display: grid;
+      gap: var(--spacing-400);
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    }
+    .swatch {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-md);
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform var(--motion-fast) ease-out;
+    }
+    .swatch:hover { transform: translateY(-1px); }
+    .swatch .chip {
+      height: 80px;
+      width: 100%;
+      display: block;
+    }
+    .swatch .meta {
+      padding: var(--spacing-400);
+    }
+    .swatch .token-name {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 16px;
+      color: var(--ink-primary);
+      font-weight: 500;
+      word-break: break-all;
+    }
+    .swatch .hex {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 14px;
+      color: var(--ink-muted);
+      margin-top: 2px;
+    }
+    .swatch .note {
+      font-size: 11px;
+      line-height: 14px;
+      color: var(--ink-muted);
+      margin-top: var(--spacing-300);
+    }
+    /* swatch border for very-light chips so they remain visible */
+    .swatch .chip-border { border-bottom: 1px solid var(--border-hairline); }
+
+    /* ─────────────────────────────────────────────
+       Tokens — typography samples
+       ───────────────────────────────────────────── */
+    .type-row {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: var(--spacing-600);
+      align-items: baseline;
+      padding: var(--spacing-500) 0;
+      border-bottom: 1px solid var(--border-hairline);
+    }
+    .type-row:last-child { border-bottom: none; }
+    .type-sample.display-xl { font-family: var(--font-display); font-weight: 700; font-size: 56px; line-height: 60px; letter-spacing: -0.01em; }
+    .type-sample.display-lg { font-family: var(--font-display); font-weight: 700; font-size: 40px; line-height: 44px; letter-spacing: -0.01em; }
+    .type-sample.display-md { font-family: var(--font-display); font-weight: 600; font-size: 28px; line-height: 32px; }
+    .type-sample.title-lg   { font-family: var(--font-sans); font-weight: 600; font-size: 20px; line-height: 24px; }
+    .type-sample.title-md   { font-family: var(--font-sans); font-weight: 600; font-size: 16px; line-height: 22px; }
+    .type-sample.body-lg    { font-family: var(--font-sans); font-weight: 400; font-size: 17px; line-height: 26px; }
+    .type-sample.body-md    { font-family: var(--font-sans); font-weight: 400; font-size: 15px; line-height: 22px; }
+    .type-sample.body-sm    { font-family: var(--font-sans); font-weight: 400; font-size: 13px; line-height: 18px; }
+    .type-sample.label      { font-family: var(--font-sans); font-weight: 600; font-size: 11px; line-height: 14px; letter-spacing: 0.06em; text-transform: uppercase; }
+    .type-sample.caption-mono-sample { font-family: var(--font-mono); font-weight: 400; font-size: 12px; line-height: 16px; }
+    .type-meta { font-family: var(--font-mono); font-size: 12px; line-height: 18px; color: var(--ink-muted); }
+    .type-meta .name { color: var(--ink-primary); font-weight: 500; }
+    @media (max-width: 700px) {
+      .type-row { grid-template-columns: 1fr; }
+      .type-sample.display-xl { font-size: 40px; line-height: 44px; }
+      .type-sample.display-lg { font-size: 28px; line-height: 32px; }
+    }
+
+    /* ─────────────────────────────────────────────
+       Tokens — spacing bars
+       ───────────────────────────────────────────── */
+    .spacing-row {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: var(--spacing-500);
+      align-items: center;
+      padding: var(--spacing-300) 0;
+    }
+    .spacing-row .label-cell {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink-secondary);
+    }
+    .spacing-row .label-cell .v { color: var(--ink-muted); }
+    .spacing-bar {
+      height: 16px;
+      background: var(--accent-default);
+      border-radius: var(--shape-sm);
+      min-width: 1px;
+    }
+
+    /* ─────────────────────────────────────────────
+       Tokens — shape samples
+       ───────────────────────────────────────────── */
+    .shape-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--spacing-500); }
+    .shape-sample {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      padding: var(--spacing-500);
+      text-align: center;
+    }
+    .shape-block {
+      width: 80px;
+      height: 80px;
+      background: var(--accent-tint);
+      margin: 0 auto var(--spacing-300);
+      border: 1px solid var(--accent-default);
+    }
+    .shape-sample .label-tag { color: var(--ink-muted); }
+
+    /* ─────────────────────────────────────────────
+       Motion / Elevation lists
+       ───────────────────────────────────────────── */
+    .pill-list { display: grid; gap: var(--spacing-400); grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+    .pill-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-md);
+      padding: var(--spacing-500);
+    }
+    .pill-card .token-name { font-family: var(--font-mono); font-size: 12px; color: var(--ink-primary); font-weight: 500; }
+    .pill-card .note { color: var(--ink-muted); font-size: 13px; line-height: 18px; margin-top: var(--spacing-300); }
+    .elevation-demo {
+      height: 60px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-md);
+      margin-top: var(--spacing-400);
+    }
+    .elevation-demo.e2 { box-shadow: var(--elevation-2); border-color: transparent; }
+    .elevation-demo.e3 { box-shadow: var(--elevation-3); border-color: transparent; }
+
+    /* ─────────────────────────────────────────────
+       Components — Buttons
+       ───────────────────────────────────────────── */
+    .btn {
+      font-family: var(--font-sans);
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      border-radius: var(--shape-md);
+      transition: background var(--motion-fast) ease-out, transform var(--motion-fast) ease-out;
+      display: inline-flex;
+      align-items: center;
+      gap: var(--spacing-300);
+    }
+    .btn:active:not(:disabled) { transform: scale(0.98); }
+    .btn:disabled { cursor: not-allowed; opacity: 1; }
+
+    .btn-primary {
+      background: var(--accent-default);
+      color: var(--ink-on-photo-light);
+      border-color: var(--accent-default);
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-press); border-color: var(--accent-press); }
+    .btn-primary:disabled { background: var(--border-hairline); border-color: var(--border-hairline); color: var(--ink-muted); }
+
+    .btn-secondary {
+      background: var(--bg-elevated);
+      color: var(--ink-primary);
+      border-color: var(--border-hairline);
+    }
+    .btn-secondary:hover:not(:disabled) { background: var(--neutral-cream-50); border-color: var(--border-strong); }
+    .btn-secondary.danger {
+      color: var(--status-error);
+      border-color: var(--status-error);
+    }
+    .btn-secondary.danger:hover:not(:disabled) {
+      background: var(--status-error-tint);
+    }
+
+    .btn-quiet {
+      background: transparent;
+      color: var(--accent-default);
+      border-color: transparent;
+    }
+    .btn-quiet:hover:not(:disabled) { color: var(--accent-press); text-decoration: underline; }
+
+    .btn-sm { height: 32px; padding: 0 var(--spacing-400); font-size: 11px; line-height: 14px; letter-spacing: 0.06em; text-transform: uppercase; }
+    .btn-md { height: 40px; padding: 0 var(--spacing-500); font-size: 16px; line-height: 22px; }
+    .btn-lg { height: 48px; padding: 0 var(--spacing-600); font-size: 16px; line-height: 22px; }
+
+    .component-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-lg);
+      padding: var(--spacing-600);
+    }
+    .component-card .demo {
+      padding: var(--spacing-600);
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-md);
+      margin-bottom: var(--spacing-500);
+    }
+    .component-card .demo.on-sober { background: var(--bg-sober); }
+    .component-card .demo .row {
+      display: flex;
+      gap: var(--spacing-400);
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: var(--spacing-400);
+    }
+    .component-card .demo .row:last-child { margin-bottom: 0; }
+    .component-card > h4 { margin-bottom: var(--spacing-400); }
+    .component-card .spec-summary {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      cursor: pointer;
+      color: var(--ink-secondary);
+      padding: var(--spacing-300) 0;
+    }
+    .component-card .spec-summary:hover { color: var(--ink-primary); }
+    .component-card .spec-body {
+      font-family: var(--font-sans);
+      font-size: 13px;
+      line-height: 18px;
+      color: var(--ink-secondary);
+      padding-top: var(--spacing-400);
+      border-top: 1px solid var(--border-hairline);
+      margin-top: var(--spacing-300);
+    }
+    .component-card .spec-body ul { margin: 0; padding-left: var(--spacing-500); }
+    .component-card .spec-body li { margin-bottom: var(--spacing-300); }
+    .component-card .spec-body code { font-family: var(--font-mono); font-size: 11px; background: var(--accent-tint); padding: 0 4px; border-radius: var(--shape-sm); }
+
+    /* ─────────────────────────────────────────────
+       Components — Forms
+       ───────────────────────────────────────────── */
+    .form-field { display: block; margin-bottom: var(--spacing-500); }
+    .form-field label.label-tag { color: var(--ink-secondary); display: block; margin-bottom: var(--spacing-300); }
+    .form-field input[type="text"],
+    .form-field input[type="email"],
+    .form-field textarea,
+    .form-field select {
+      width: 100%;
+      height: 44px;
+      padding: 0 var(--spacing-500);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-md);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 22px;
+      color: var(--ink-primary);
+      transition: border-color var(--motion-fast) ease-out;
+    }
+    .form-field textarea { height: auto; padding: var(--spacing-400) var(--spacing-500); resize: vertical; min-height: 88px; }
+    .form-field input::placeholder, .form-field textarea::placeholder { color: var(--ink-placeholder); }
+    .form-field input:focus, .form-field textarea:focus, .form-field select:focus {
+      outline: 2px solid var(--focus-ring-on-light);
+      outline-offset: 2px;
+      border-color: var(--accent-default);
+    }
+    .form-field.error input { border-color: var(--status-error); border-width: 2px; }
+    .form-field .helper { font-family: var(--font-sans); font-size: 13px; line-height: 18px; color: var(--ink-muted); margin-top: var(--spacing-300); }
+    .form-field.error .helper { color: var(--status-error); }
+    .form-field.disabled input { background: var(--border-hairline); color: var(--ink-placeholder); cursor: not-allowed; }
+
+    /* ─────────────────────────────────────────────
+       Components — Cards (article/category/post/sober)
+       ───────────────────────────────────────────── */
+    .article-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-lg);
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform var(--motion-fast) ease-out;
+    }
+    .article-card:hover { transform: translateY(-1px); }
+    .article-card .hero {
+      aspect-ratio: 4 / 5;
+      background: var(--photo-rose);
+      position: relative;
+      display: flex;
+      align-items: flex-end;
+      padding: var(--spacing-500);
+    }
+    .article-card .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 50% 40%, rgba(255,255,255,0.08), rgba(0,0,0,0.18));
+    }
+    .article-card .meta {
+      padding: var(--spacing-500);
+    }
+    .article-card h5 {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 20px;
+      line-height: 24px;
+      color: var(--ink-primary);
+      margin: 0 0 var(--spacing-300);
+    }
+    .article-card .byline {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 16px;
+      color: var(--ink-muted);
+    }
+
+    .category-tile {
+      aspect-ratio: 1;
+      border-radius: var(--shape-lg);
+      padding: var(--spacing-500);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      cursor: pointer;
+      position: relative;
+      transition: transform var(--motion-fast) ease-out;
+    }
+    .category-tile:hover { transform: translateY(-1px); }
+    .category-tile.saffron { background: var(--photo-saffron); color: var(--ink-on-photo-dark); }
+    .category-tile.rose    { background: var(--photo-rose);    color: var(--ink-on-photo-dark); }
+    .category-tile.royal   { background: var(--photo-royal);   color: var(--ink-on-photo-light); }
+    .category-tile.forest  { background: var(--photo-forest);  color: var(--ink-on-photo-light); }
+    .category-tile .subject {
+      font-size: 56px;
+      text-align: center;
+      align-self: center;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .category-tile .label-tag { font-weight: 700; }
+
+    .post-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-lg);
+      padding: var(--spacing-600);
+    }
+    .post-card .author-row {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-400);
+      margin-bottom: var(--spacing-400);
+    }
+    .post-card .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--accent-tint);
+      flex-shrink: 0;
+    }
+    .post-card .author-name { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--ink-primary); }
+    .post-card .post-meta { font-family: var(--font-mono); font-size: 12px; color: var(--ink-muted); }
+    .post-card .body { color: var(--ink-secondary); font-size: 15px; line-height: 22px; margin-bottom: var(--spacing-400); }
+    .post-card .actions { display: flex; gap: var(--spacing-400); }
+
+    .sober-card {
+      background: var(--bg-sober);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-lg);
+      padding: var(--spacing-600);
+    }
+    .sober-card h5 {
+      font-family: var(--font-sans);
+      font-weight: 600;
+      font-size: 16px;
+      line-height: 22px;
+      color: var(--ink-primary);
+      margin: 0 0 var(--spacing-300);
+    }
+    .sober-card p { font-size: 15px; line-height: 22px; color: var(--ink-secondary); margin: 0 0 var(--spacing-500); }
+
+    /* ─────────────────────────────────────────────
+       Components — Chips
+       ───────────────────────────────────────────── */
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--spacing-300);
+      font-family: var(--font-sans);
+      font-weight: 600;
+      font-size: 11px;
+      line-height: 14px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      height: 32px;
+      padding: 0 var(--spacing-500);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: background var(--motion-fast) ease-out;
+    }
+    .chip-tag {
+      background: var(--accent-tint);
+      color: var(--ink-primary);
+      border-radius: var(--shape-sm);
+      cursor: default;
+    }
+    .chip-filter {
+      background: var(--bg-elevated);
+      color: var(--ink-secondary);
+      border-color: var(--border-hairline);
+      border-radius: var(--shape-pill);
+    }
+    .chip-filter:hover { background: var(--accent-tint); border-color: var(--accent-default); }
+    .chip-filter.active {
+      background: var(--ink-primary);
+      color: var(--ink-on-photo-light);
+      border-color: var(--ink-primary);
+    }
+    .chip-category {
+      background: var(--bg-elevated);
+      color: var(--ink-primary);
+      border-color: var(--border-hairline);
+      border-radius: var(--shape-pill);
+    }
+    .chip-category:hover { background: var(--accent-tint); border-color: var(--accent-default); }
+    .chip .count { font-family: var(--font-mono); color: var(--ink-muted); letter-spacing: 0; text-transform: none; font-size: 12px; }
+    .chip-filter.active .count { color: rgba(255,255,255,0.7); }
+
+    /* ─────────────────────────────────────────────
+       Components — Empty / Loading / Error
+       ───────────────────────────────────────────── */
+    .empty-block {
+      padding: var(--spacing-800) var(--spacing-600);
+      text-align: center;
+    }
+    .empty-block .icon { font-size: 32px; color: var(--ink-muted); margin-bottom: var(--spacing-500); }
+    .empty-block h5 {
+      font-family: var(--font-sans);
+      font-weight: 600;
+      font-size: 20px;
+      line-height: 24px;
+      color: var(--ink-primary);
+      margin: 0 0 var(--spacing-300);
+    }
+    .empty-block p { color: var(--ink-secondary); font-size: 15px; line-height: 22px; margin: 0 0 var(--spacing-500); max-width: 360px; margin-left: auto; margin-right: auto; }
+    .empty-block.error .icon { color: var(--status-error); }
+    .skeleton {
+      background: var(--border-hairline);
+      border-radius: var(--shape-sm);
+      height: 16px;
+      margin-bottom: var(--spacing-300);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    .skeleton.tall { height: 200px; aspect-ratio: 4 / 5; margin-bottom: var(--spacing-500); }
+    .skeleton.title { height: 24px; width: 60%; }
+    .skeleton.line  { height: 16px; }
+    .skeleton.w85   { width: 85%; }
+    .skeleton.w70   { width: 70%; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: 0.55; }
+    }
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 2px solid var(--border-hairline);
+      border-top-color: var(--accent-default);
+      animation: spin var(--motion-slow) linear infinite;
+      margin: 0 auto;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ─────────────────────────────────────────────
+       Components — Nav (mini tab bar)
+       ───────────────────────────────────────────── */
+    .tab-bar {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      background: var(--bg-elevated);
+      border-top: 1px solid var(--border-hairline);
+      border-radius: var(--shape-md);
+      padding: var(--spacing-400) 0;
+      position: relative;
+    }
+    .tab-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      font-family: var(--font-sans);
+      font-size: 11px;
+      line-height: 14px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: lowercase;
+      color: var(--ink-muted);
+      cursor: pointer;
+      padding: var(--spacing-300);
+    }
+    .tab-item .icon { font-size: 22px; }
+    .tab-item.active { color: var(--ink-primary); }
+    .tab-item.center {
+      background: var(--accent-default);
+      color: var(--ink-on-photo-light);
+      border-radius: var(--shape-pill);
+      align-self: center;
+      padding: var(--spacing-400) var(--spacing-500);
+      transform: translateY(-8px);
+    }
+    .tab-item.center .icon { font-size: 18px; }
+
+    /* ─────────────────────────────────────────────
+       Surfaces (iOS / CMS columns)
+       ───────────────────────────────────────────── */
+    .surface-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-600); }
+    @media (max-width: 800px) { .surface-cols { grid-template-columns: 1fr; } }
+    .surface-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-lg);
+      padding: var(--spacing-600);
+    }
+    .surface-card h3 { margin-bottom: var(--spacing-400); }
+    .surface-card .platform-tag {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ink-muted);
+      margin-bottom: var(--spacing-500);
+      display: block;
+    }
+    .surface-card pre { font-size: 12px; }
+
+    /* ─────────────────────────────────────────────
+       Photography section
+       ───────────────────────────────────────────── */
+    .photo-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-lg);
+      padding: var(--spacing-600);
+    }
+    .photo-card .badge {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ink-muted);
+      margin-bottom: var(--spacing-400);
+    }
+    .photo-card h4 { margin-bottom: var(--spacing-400); }
+    .crisis-banner {
+      background: var(--status-warning-tint);
+      border-left: 4px solid var(--status-warning);
+      padding: var(--spacing-500);
+      border-radius: var(--shape-sm);
+      margin-top: var(--spacing-600);
+    }
+    .crisis-banner p { margin: 0; color: var(--ink-primary); font-size: 14px; line-height: 20px; }
+    .crisis-banner strong { font-weight: 700; }
+    .forbidden-list {
+      columns: 2;
+      column-gap: var(--spacing-600);
+      margin: var(--spacing-500) 0 0;
+      padding-left: var(--spacing-500);
+      font-size: 14px;
+      line-height: 20px;
+      color: var(--ink-secondary);
+    }
+    @media (max-width: 600px) { .forbidden-list { columns: 1; } }
+    .forbidden-list li { margin-bottom: var(--spacing-300); break-inside: avoid; }
+
+    .photo-tile-preview {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: var(--spacing-400);
+      margin: var(--spacing-600) 0;
+    }
+    @media (max-width: 700px) { .photo-tile-preview { grid-template-columns: repeat(2, 1fr); } }
+    .photo-tile-preview .tile {
+      aspect-ratio: 1;
+      border-radius: var(--shape-md);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: var(--spacing-300);
+      padding: var(--spacing-500);
+    }
+    .photo-tile-preview .tile .subject { font-size: 40px; }
+    .photo-tile-preview .tile .name { font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
+    .photo-tile-preview .tile .desc { font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; text-align: center; }
+    .photo-tile-preview .saffron { background: var(--photo-saffron); color: var(--ink-on-photo-dark); }
+    .photo-tile-preview .rose    { background: var(--photo-rose);    color: var(--ink-on-photo-dark); }
+    .photo-tile-preview .royal   { background: var(--photo-royal);   color: var(--ink-on-photo-light); }
+    .photo-tile-preview .forest  { background: var(--photo-forest);  color: var(--ink-on-photo-light); }
+
+    /* ─────────────────────────────────────────────
+       Voice — good/bad side-by-side
+       ───────────────────────────────────────────── */
+    .voice-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--spacing-500);
+      padding: var(--spacing-500) 0;
+      border-bottom: 1px solid var(--border-hairline);
+    }
+    .voice-row:last-child { border-bottom: none; }
+    @media (max-width: 700px) { .voice-row { grid-template-columns: 1fr; } }
+    .voice-cell {
+      padding: var(--spacing-500);
+      border-radius: var(--shape-md);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+    }
+    .voice-cell.good { border-left: 4px solid var(--status-success); }
+    .voice-cell.bad  { border-left: 4px solid var(--status-error); }
+    .voice-cell .header { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-muted); margin-bottom: var(--spacing-300); }
+    .voice-cell .copy { color: var(--ink-primary); font-size: 15px; line-height: 22px; }
+    .voice-cell .ctx { font-family: var(--font-mono); font-size: 11px; color: var(--ink-muted); margin-top: var(--spacing-300); }
+
+    /* ─────────────────────────────────────────────
+       Logo direction cards
+       ───────────────────────────────────────────── */
+    .logo-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-lg);
+      overflow: hidden;
+    }
+    .logo-card .preview {
+      background: var(--bg-canvas);
+      padding: var(--spacing-1000) var(--spacing-600);
+      text-align: center;
+      border-bottom: 1px solid var(--border-hairline);
+    }
+    .logo-card .preview .mark {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 48px;
+      letter-spacing: -0.02em;
+      color: var(--ink-primary);
+    }
+    .logo-card .preview .lowercase {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-size: 48px;
+      letter-spacing: 0em;
+      color: var(--ink-primary);
+      text-transform: none;
+    }
+    .logo-card .preview .dot { color: var(--accent-default); }
+    .logo-card .preview .glyph {
+      display: inline-block;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 2px solid var(--ink-primary);
+      vertical-align: middle;
+      margin-right: 12px;
+      position: relative;
+    }
+    .logo-card .preview .glyph::after {
+      content: "";
+      position: absolute;
+      width: 8px;
+      height: 14px;
+      background: var(--ink-primary);
+      border-radius: 4px 4px 50% 50%;
+      top: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+    .logo-card .body { padding: var(--spacing-600); }
+
+    /* ─────────────────────────────────────────────
+       AI loading rules card
+       ───────────────────────────────────────────── */
+    .loading-rules {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-lg);
+      padding: var(--spacing-700);
+    }
+    .loading-rules h3 { margin-bottom: var(--spacing-500); }
+    .loading-rules .block { margin-bottom: var(--spacing-700); }
+    .loading-rules .block:last-child { margin-bottom: 0; }
+    .loading-rules .block-eyebrow {
+      font-family: var(--font-sans);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent-default);
+      margin-bottom: var(--spacing-400);
+    }
+    .loading-rules ul {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 20px;
+      color: var(--ink-secondary);
+      margin: 0;
+      padding-left: var(--spacing-500);
+    }
+    .loading-rules li { margin-bottom: var(--spacing-300); }
+    .loading-rules li .when {
+      font-family: var(--font-sans);
+      font-size: 13px;
+      color: var(--ink-muted);
+      font-style: italic;
+      margin-left: var(--spacing-300);
+    }
+
+    /* ─────────────────────────────────────────────
+       Toast
+       ───────────────────────────────────────────── */
+    .toast {
+      position: fixed;
+      bottom: var(--spacing-700);
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--ink-primary);
+      color: var(--bg-canvas);
+      padding: var(--spacing-400) var(--spacing-600);
+      border-radius: var(--shape-pill);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      box-shadow: var(--elevation-3);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity var(--motion-base) ease-out, transform var(--motion-base) ease-out;
+      z-index: 200;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ─────────────────────────────────────────────
+       Footer
+       ───────────────────────────────────────────── */
+    footer {
+      padding: var(--spacing-1000) 0 var(--spacing-800);
+      border-top: 1px solid var(--border-hairline);
+      margin-top: var(--spacing-1000);
+    }
+    footer .meta-row { border: none; padding: 0; margin: 0; }
+    footer .wordmark { margin-bottom: var(--spacing-500); }
+
+    /* ─────────────────────────────────────────────
+       Principle cards (HEARTH)
+       ───────────────────────────────────────────── */
+    .principle-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--shape-lg);
+      padding: var(--spacing-600);
+      display: flex;
+      flex-direction: column;
+    }
+    .principle-card .letter {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 56px;
+      line-height: 1;
+      color: var(--accent-default);
+      margin-bottom: var(--spacing-400);
+    }
+    .principle-card h4 { margin-bottom: var(--spacing-300); }
+    .principle-card p { color: var(--ink-secondary); font-size: 14px; line-height: 20px; margin: 0; }
+
+    /* small util */
+    .hr-sub { border: none; border-top: 1px solid var(--border-hairline); margin: var(--spacing-600) 0; }
+    .stack-400 > * + * { margin-top: var(--spacing-400); }
+    .stack-500 > * + * { margin-top: var(--spacing-500); }
+    .stack-600 > * + * { margin-top: var(--spacing-600); }
+  </style>
+</head>
+<body>
+
+  <!-- ─────────────── TOP NAV ─────────────── -->
+  <nav class="topnav" aria-label="Section navigation">
+    <div class="topnav-inner">
+      <a class="wordmark" href="#top" aria-label="Hearth">Hearth<span class="dot">.</span></a>
+      <ul class="topnav-links">
+        <li><a href="#principles">Principles</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#tokens">Tokens</a></li>
+        <li><a href="#components">Components</a></li>
+        <li><a href="#surfaces">Surfaces</a></li>
+        <li><a href="#photography">Photography</a></li>
+        <li><a href="#voice">Voice</a></li>
+        <li><a href="#logo">Logo</a></li>
+        <li><a href="#loading">Loading rules</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- ─────────────── HERO ─────────────── -->
+  <div id="top" class="page">
+    <section class="hero" style="border-top: none;">
+      <p class="section-eyebrow">design system · parent-app</p>
+      <h1>Hearth — Design System for parent-app.</h1>
+      <p class="hero-sub">
+        Cream canvas, ink text, olive accent, photo tiles. A steady hand on the shoulder of an overwhelmed parent — editorial weight, quiet chrome, real photography, sober where it counts. Architecture borrowed from SonderMind's Iris 2.0; the brand language is ours.
+      </p>
+      <div class="meta-row">
+        <span><strong>version:</strong> 1.0.0</span>
+        <span><strong>status:</strong> ✅ active</span>
+        <span><strong>owner:</strong> Miguel</span>
+        <span><strong>last_updated:</strong> 2026-05-31</span>
+      </div>
+    </section>
+
+    <!-- ─────────────── PRINCIPLES ─────────────── -->
+    <section id="principles">
+      <p class="section-eyebrow">section 01</p>
+      <h2>HEARTH principles.</h2>
+      <p class="body-lg" style="max-width: 720px;">Every Hearth output must satisfy all six. If a generation satisfies five, it is not Hearth.</p>
+      <div class="grid grid-3" style="margin-top: var(--spacing-700);">
+        <div class="principle-card">
+          <span class="letter">H</span>
+          <h4>Held</h4>
+          <p>A steady hand on the shoulder of a tired parent. Visual weight reduces stress, never adds to it. Generous whitespace, one clear next action, no decorative motion that demands attention.</p>
+        </div>
+        <div class="principle-card">
+          <span class="letter">E</span>
+          <h4>Editorial</h4>
+          <p>Content first; chrome quiet; photography earns its space. Fraunces carries headlines, Inter carries reading and UI, JetBrains Mono is metadata only. Magazine spreads, not UI widgets.</p>
+        </div>
+        <div class="principle-card">
+          <span class="letter">A</span>
+          <h4>Adaptive</h4>
+          <p>44pt touch min, respects reduced-motion, designed to invert cleanly in dark mode (Phase 2). WCAG 2.1 AA on every shipped token pair. Cognitive accessibility is non-negotiable.</p>
+        </div>
+        <div class="principle-card">
+          <span class="letter">R</span>
+          <h4>Real</h4>
+          <p>No stock illustrations, no chirpy mascots, no "Sarah, mom of two!" Photography looks like the actual parents who use the app — varied bodies, ages, skin tones, photographed in their actual rooms.</p>
+        </div>
+        <div class="principle-card">
+          <span class="letter">T</span>
+          <h4>Trustworthy</h4>
+          <p>Kid-agent, crisis-lock, and safety surfaces use sober variants. No playful animations, no saturated photo tiles, no decorative serif in chrome. When a parent is scared, the app gets quieter.</p>
+        </div>
+        <div class="principle-card">
+          <span class="letter">H</span>
+          <h4>Hearth</h4>
+          <p>Gathering place: warmth without saccharin. Cream not white, olive not mint, ink not pure black on most surfaces. The name is the brief — a hearth is warm, central, communal, slow.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────── ARCHITECTURE ─────────────── -->
+    <section id="architecture">
+      <p class="section-eyebrow">section 02</p>
+      <h2>Layer architecture.</h2>
+      <p class="body-lg" style="max-width: 720px;">Five layers, top-down. Lower layers govern upper layers. A spec that contradicts a lower layer is wrong — not the other way around.</p>
+
+      <div class="layer-stack" style="margin-top: var(--spacing-700);">
+        <div class="layer-card" data-layer="1">
+          <span class="layer-tag">L1</span>
+          <h4>Tokens — the allowlist.</h4>
+          <p>The only place hex values, font names, spacing numbers, radii, and shadows live. Code resolves to a token name; if the value isn't named here, it doesn't exist in Hearth.</p>
+          <details>
+            <summary>files</summary>
+            <ul class="file-list">
+              <li>spec/look-and-feel/DESIGN.tokens.md</li>
+            </ul>
+          </details>
+        </div>
+        <div class="layer-card" data-layer="2">
+          <span class="layer-tag">L2</span>
+          <h4>System prompt — the rules.</h4>
+          <p>HEARTH principles, voice and photography summaries, generation rules, shared state patterns (focus / error / loading / empty). Loaded into every Hearth-routed session, in tandem with L1.</p>
+          <details>
+            <summary>files</summary>
+            <ul class="file-list">
+              <li>spec/look-and-feel/DESIGN.md</li>
+              <li>spec/look-and-feel/voice.md (referenced)</li>
+              <li>spec/look-and-feel/photography.md (referenced)</li>
+            </ul>
+          </details>
+        </div>
+        <div class="layer-card" data-layer="3">
+          <span class="layer-tag">L3</span>
+          <h4>Components — the primitives.</h4>
+          <p>Each component spec lists variants, states, sizes, rules, render-check compositions, and the tokens it consumes. Loaded only when the task touches that component family.</p>
+          <details>
+            <summary>files</summary>
+            <ul class="file-list">
+              <li>components/buttons.md</li>
+              <li>components/forms.md</li>
+              <li>components/cards.md</li>
+              <li>components/article.md</li>
+              <li>components/nav.md</li>
+              <li>components/chip.md</li>
+              <li>components/empty.md</li>
+              <li>components/sheet.md</li>
+            </ul>
+          </details>
+        </div>
+        <div class="layer-card" data-layer="4">
+          <span class="layer-tag">L4</span>
+          <h4>Surfaces — the platforms.</h4>
+          <p>iOS (SwiftUI) and CMS (React + Tailwind) translations. Token-to-accessor mapping, density rules, motion budgets, focus conventions per platform. Loaded only when emitting code for that platform.</p>
+          <details>
+            <summary>files</summary>
+            <ul class="file-list">
+              <li>surfaces/ios.md — SwiftUI mapping</li>
+              <li>surfaces/cms.md — Tailwind + React mapping</li>
+            </ul>
+          </details>
+        </div>
+        <div class="layer-card" data-layer="5">
+          <span class="layer-tag">L5</span>
+          <h4>Brand — the wordmark and the moodboard.</h4>
+          <p>Logo directions, Midjourney prompt library, photography casting/lighting/composition direction. Loaded when touching brand assets, photo briefs, or the wordmark.</p>
+          <details>
+            <summary>files</summary>
+            <ul class="file-list">
+              <li>logo.md</li>
+              <li>midjourney-prompts.md</li>
+              <li>photography.md</li>
+              <li>logo/wordmark.svg, mark.svg, icon-1024.png, launch.svg</li>
+            </ul>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────── TOKENS ─────────────── -->
+    <section id="tokens">
+      <p class="section-eyebrow">section 03</p>
+      <h2>Tokens — interactive explorer.</h2>
+      <p class="body-lg" style="max-width: 720px;">Click a swatch to copy its token name. Shift-click to copy the hex. Token names are the allowlist — every other Hearth file resolves to one of these.</p>
+
+      <!-- ── Color: Neutral ── -->
+      <div class="tokens-group" style="margin-top: var(--spacing-700);">
+        <h3>Color · neutrals</h3>
+        <div class="swatch-grid">
+          <div class="swatch copyable" data-token="neutral/cream-50" data-hex="#FAF7F2">
+            <div class="chip chip-border" style="background:#FAF7F2"></div>
+            <div class="meta">
+              <div class="token-name">neutral/cream-50</div>
+              <div class="hex">#FAF7F2</div>
+              <div class="note">page bg (light)</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="neutral/cream-100" data-hex="#F3F0EB">
+            <div class="chip chip-border" style="background:#F3F0EB"></div>
+            <div class="meta">
+              <div class="token-name">neutral/cream-100</div>
+              <div class="hex">#F3F0EB</div>
+              <div class="note">canvas (default)</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="neutral/cream-200" data-hex="#E9E4DC">
+            <div class="chip" style="background:#E9E4DC"></div>
+            <div class="meta">
+              <div class="token-name">neutral/cream-200</div>
+              <div class="hex">#E9E4DC</div>
+              <div class="note">subtle hairline / disabled fill</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="neutral/paper" data-hex="#FFFFFF">
+            <div class="chip chip-border" style="background:#FFFFFF"></div>
+            <div class="meta">
+              <div class="token-name">neutral/paper</div>
+              <div class="hex">#FFFFFF</div>
+              <div class="note">elevated card bg</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="neutral/ink-900" data-hex="#1A1A1A">
+            <div class="chip" style="background:#1A1A1A"></div>
+            <div class="meta">
+              <div class="token-name">neutral/ink-900</div>
+              <div class="hex">#1A1A1A</div>
+              <div class="note">primary text on cream</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="neutral/ink-700" data-hex="#2D2D2D">
+            <div class="chip" style="background:#2D2D2D"></div>
+            <div class="meta">
+              <div class="token-name">neutral/ink-700</div>
+              <div class="hex">#2D2D2D</div>
+              <div class="note">softer primary text on cream</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="neutral/ink-500" data-hex="#6F6A60">
+            <div class="chip" style="background:#6F6A60"></div>
+            <div class="meta">
+              <div class="token-name">neutral/ink-500</div>
+              <div class="hex">#6F6A60</div>
+              <div class="note">muted text (warm gray)</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="neutral/ink-300" data-hex="#8A8275">
+            <div class="chip" style="background:#8A8275"></div>
+            <div class="meta">
+              <div class="token-name">neutral/ink-300</div>
+              <div class="hex">#8A8275</div>
+              <div class="note">tertiary / placeholder (≥3:1 on cream)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Color: Brand ── -->
+      <div class="tokens-group">
+        <h3>Color · brand (olive)</h3>
+        <div class="swatch-grid">
+          <div class="swatch copyable" data-token="brand/olive-700" data-hex="#3A4A2A">
+            <div class="chip" style="background:#3A4A2A"></div>
+            <div class="meta">
+              <div class="token-name">brand/olive-700</div>
+              <div class="hex">#3A4A2A</div>
+              <div class="note">accent press / dense use</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="brand/olive-500" data-hex="#4F5D3A">
+            <div class="chip" style="background:#4F5D3A"></div>
+            <div class="meta">
+              <div class="token-name">brand/olive-500</div>
+              <div class="hex">#4F5D3A</div>
+              <div class="note">accent default (CTAs) · 6.24:1 AA</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="brand/olive-100" data-hex="#E8EBDC">
+            <div class="chip" style="background:#E8EBDC"></div>
+            <div class="meta">
+              <div class="token-name">brand/olive-100</div>
+              <div class="hex">#E8EBDC</div>
+              <div class="note">accent tint (chip bg)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Color: Photo (4 tiles) ── -->
+      <div class="tokens-group">
+        <h3>Color · photo tiles (4 only — saffron, rose, royal, forest)</h3>
+        <div class="swatch-grid">
+          <div class="swatch copyable" data-token="photo/saffron" data-hex="#E8A33C">
+            <div class="chip" style="background:#E8A33C"></div>
+            <div class="meta">
+              <div class="token-name">photo/saffron</div>
+              <div class="hex">#E8A33C</div>
+              <div class="note">energy / play · warm tile · pair with ink/onPhoto-dark</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="photo/rose" data-hex="#B86A60">
+            <div class="chip" style="background:#B86A60"></div>
+            <div class="meta">
+              <div class="token-name">photo/rose</div>
+              <div class="hex">#B86A60</div>
+              <div class="note">care / tenderness · warm tile · pair with ink/onPhoto-dark</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="photo/royal" data-hex="#2E3A5F">
+            <div class="chip" style="background:#2E3A5F"></div>
+            <div class="meta">
+              <div class="token-name">photo/royal</div>
+              <div class="hex">#2E3A5F</div>
+              <div class="note">focus / learning · dark tile · pair with ink/onPhoto-light</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="photo/forest" data-hex="#2D3F2C">
+            <div class="chip" style="background:#2D3F2C"></div>
+            <div class="meta">
+              <div class="token-name">photo/forest</div>
+              <div class="hex">#2D3F2C</div>
+              <div class="note">nature / outdoors · dark tile · pair with ink/onPhoto-light</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Color: Status ── -->
+      <div class="tokens-group">
+        <h3>Color · status</h3>
+        <div class="swatch-grid">
+          <div class="swatch copyable" data-token="status/success" data-hex="#3D6B3D">
+            <div class="chip" style="background:#3D6B3D"></div>
+            <div class="meta">
+              <div class="token-name">status/success</div>
+              <div class="hex">#3D6B3D</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="status/warning" data-hex="#8A6420">
+            <div class="chip" style="background:#8A6420"></div>
+            <div class="meta">
+              <div class="token-name">status/warning</div>
+              <div class="hex">#8A6420</div>
+              <div class="note">≥4.5:1 on cream</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="status/error" data-hex="#A03A3A">
+            <div class="chip" style="background:#A03A3A"></div>
+            <div class="meta">
+              <div class="token-name">status/error</div>
+              <div class="hex">#A03A3A</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="status/info" data-hex="#2E3A5F">
+            <div class="chip" style="background:#2E3A5F"></div>
+            <div class="meta">
+              <div class="token-name">status/info</div>
+              <div class="hex">#2E3A5F</div>
+              <div class="note">shares hex with photo/royal — intentional</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="status/error-tint" data-hex="#F6E4E4">
+            <div class="chip" style="background:#F6E4E4"></div>
+            <div class="meta">
+              <div class="token-name">status/error-tint</div>
+              <div class="hex">#F6E4E4</div>
+              <div class="note">error inline bg / toast (≥12:1)</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="status/warning-tint" data-hex="#F5EAD2">
+            <div class="chip" style="background:#F5EAD2"></div>
+            <div class="meta">
+              <div class="token-name">status/warning-tint</div>
+              <div class="hex">#F5EAD2</div>
+            </div>
+          </div>
+          <div class="swatch copyable" data-token="status/success-tint" data-hex="#DCE7DC">
+            <div class="chip" style="background:#DCE7DC"></div>
+            <div class="meta">
+              <div class="token-name">status/success-tint</div>
+              <div class="hex">#DCE7DC</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Color: Semantic (the names code uses) ── -->
+      <div class="tokens-group">
+        <h3>Color · semantic (the names code uses)</h3>
+        <p class="caption-mono" style="margin-bottom: var(--spacing-500);">These are the consumable names. Components reference these exclusively.</p>
+        <div class="swatch-grid">
+          <div class="swatch copyable" data-token="bg/canvas" data-hex="#F3F0EB">
+            <div class="chip chip-border" style="background:#F3F0EB"></div>
+            <div class="meta"><div class="token-name">bg/canvas</div><div class="hex">→ neutral/cream-100</div></div>
+          </div>
+          <div class="swatch copyable" data-token="bg/elevated" data-hex="#FFFFFF">
+            <div class="chip chip-border" style="background:#FFFFFF"></div>
+            <div class="meta"><div class="token-name">bg/elevated</div><div class="hex">→ neutral/paper</div></div>
+          </div>
+          <div class="swatch copyable" data-token="bg/sober" data-hex="#FAF7F2">
+            <div class="chip chip-border" style="background:#FAF7F2"></div>
+            <div class="meta"><div class="token-name">bg/sober</div><div class="hex">→ neutral/cream-50</div></div>
+          </div>
+          <div class="swatch copyable" data-token="ink/primary" data-hex="#1A1A1A">
+            <div class="chip" style="background:#1A1A1A"></div>
+            <div class="meta"><div class="token-name">ink/primary</div><div class="hex">→ neutral/ink-900</div></div>
+          </div>
+          <div class="swatch copyable" data-token="ink/secondary" data-hex="#2D2D2D">
+            <div class="chip" style="background:#2D2D2D"></div>
+            <div class="meta"><div class="token-name">ink/secondary</div><div class="hex">→ neutral/ink-700</div></div>
+          </div>
+          <div class="swatch copyable" data-token="ink/muted" data-hex="#6F6A60">
+            <div class="chip" style="background:#6F6A60"></div>
+            <div class="meta"><div class="token-name">ink/muted</div><div class="hex">→ neutral/ink-500</div></div>
+          </div>
+          <div class="swatch copyable" data-token="ink/placeholder" data-hex="#8A8275">
+            <div class="chip" style="background:#8A8275"></div>
+            <div class="meta"><div class="token-name">ink/placeholder</div><div class="hex">→ neutral/ink-300</div></div>
+          </div>
+          <div class="swatch copyable" data-token="ink/onPhoto-dark" data-hex="#1A1A1A">
+            <div class="chip" style="background:#1A1A1A"></div>
+            <div class="meta"><div class="token-name">ink/onPhoto-dark</div><div class="hex">→ neutral/ink-900</div><div class="note">on saffron / rose tiles (warm)</div></div>
+          </div>
+          <div class="swatch copyable" data-token="ink/onPhoto-light" data-hex="#FFFFFF">
+            <div class="chip chip-border" style="background:#FFFFFF"></div>
+            <div class="meta"><div class="token-name">ink/onPhoto-light</div><div class="hex">→ neutral/paper</div><div class="note">on royal / forest tiles (dark)</div></div>
+          </div>
+          <div class="swatch copyable" data-token="border/hairline" data-hex="#E9E4DC">
+            <div class="chip" style="background:#E9E4DC"></div>
+            <div class="meta"><div class="token-name">border/hairline</div><div class="hex">→ neutral/cream-200</div></div>
+          </div>
+          <div class="swatch copyable" data-token="border/strong" data-hex="#8A8275">
+            <div class="chip" style="background:#8A8275"></div>
+            <div class="meta"><div class="token-name">border/strong</div><div class="hex">→ neutral/ink-300</div></div>
+          </div>
+          <div class="swatch copyable" data-token="accent/default" data-hex="#4F5D3A">
+            <div class="chip" style="background:#4F5D3A"></div>
+            <div class="meta"><div class="token-name">accent/default</div><div class="hex">→ brand/olive-500</div></div>
+          </div>
+          <div class="swatch copyable" data-token="accent/press" data-hex="#3A4A2A">
+            <div class="chip" style="background:#3A4A2A"></div>
+            <div class="meta"><div class="token-name">accent/press</div><div class="hex">→ brand/olive-700</div></div>
+          </div>
+          <div class="swatch copyable" data-token="accent/tint" data-hex="#E8EBDC">
+            <div class="chip" style="background:#E8EBDC"></div>
+            <div class="meta"><div class="token-name">accent/tint</div><div class="hex">→ brand/olive-100</div></div>
+          </div>
+          <div class="swatch copyable" data-token="focus/ring-on-light" data-hex="#4F5D3A">
+            <div class="chip" style="background:#4F5D3A"></div>
+            <div class="meta"><div class="token-name">focus/ring-on-light</div><div class="hex">2pt outset · 6.24:1 AA</div></div>
+          </div>
+          <div class="swatch copyable" data-token="focus/ring-on-photo" data-hex="#FFFFFF">
+            <div class="chip chip-border" style="background:#FFFFFF"></div>
+            <div class="meta"><div class="token-name">focus/ring-on-photo</div><div class="hex">2pt outset · ≥4.8:1</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Typography ── -->
+      <div class="tokens-group">
+        <h3>Typography · live scale</h3>
+        <p class="caption-mono" style="margin-bottom: var(--spacing-500);">Three families. Fraunces for display, Inter for body + UI, JetBrains Mono for metadata. No fourth family.</p>
+        <div>
+          <div class="type-row">
+            <div class="type-sample display-xl">A steady hand.</div>
+            <div class="type-meta">
+              <div class="name">type/display-xl</div>
+              <div>Fraunces · 56 / 60 · -1% · 700</div>
+              <div>hero headline (iPhone) · 80/84 on CMS</div>
+            </div>
+          </div>
+          <div class="type-row">
+            <div class="type-sample display-lg">The Year We Stopped Negotiating Bedtime</div>
+            <div class="type-meta">
+              <div class="name">type/display-lg</div>
+              <div>Fraunces · 40 / 44 · -1% · 700</div>
+              <div>screen title</div>
+            </div>
+          </div>
+          <div class="type-row">
+            <div class="type-sample display-md">Picture books for tired evenings.</div>
+            <div class="type-meta">
+              <div class="name">type/display-md</div>
+              <div>Fraunces · 28 / 32 · 0% · 600</div>
+              <div>section header</div>
+            </div>
+          </div>
+          <div class="type-row">
+            <div class="type-sample title-lg">Saved this morning</div>
+            <div class="type-meta">
+              <div class="name">type/title-lg</div>
+              <div>Inter · 20 / 24 · 0% · 600</div>
+              <div>card title</div>
+            </div>
+          </div>
+          <div class="type-row">
+            <div class="type-sample title-md">your kid's first name</div>
+            <div class="type-meta">
+              <div class="name">type/title-md</div>
+              <div>Inter · 16 / 22 · 0% · 600</div>
+              <div>inline header</div>
+            </div>
+          </div>
+          <div class="type-row">
+            <div class="type-sample body-lg">She'd been negotiating for an hour by the time I sat down on the floor next to her, knees crossed, the book closed in my lap. The trick, eventually, wasn't a better argument — it was waiting.</div>
+            <div class="type-meta">
+              <div class="name">type/body-lg</div>
+              <div>Inter · 17 / 26 · 0% · 400</div>
+              <div>reading body (articles)</div>
+            </div>
+          </div>
+          <div class="type-row">
+            <div class="type-sample body-md">Pull down to refresh. Saved articles still work; the rest is waiting on a connection.</div>
+            <div class="type-meta">
+              <div class="name">type/body-md</div>
+              <div>Inter · 15 / 22 · 0% · 400</div>
+              <div>UI body (default)</div>
+            </div>
+          </div>
+          <div class="type-row">
+            <div class="type-sample body-sm">helps us match articles to your kid's stage.</div>
+            <div class="type-meta">
+              <div class="name">type/body-sm</div>
+              <div>Inter · 13 / 18 · 0% · 400</div>
+              <div>secondary text</div>
+            </div>
+          </div>
+          <div class="type-row">
+            <div class="type-sample label">picture books · 24</div>
+            <div class="type-meta">
+              <div class="name">type/label</div>
+              <div>Inter · 11 / 14 · +6% · 600</div>
+              <div>UPPERCASE nav labels, tag chips</div>
+            </div>
+          </div>
+          <div class="type-row">
+            <div class="type-sample caption-mono-sample">by hearth editorial · 6 min · may 31, 2026</div>
+            <div class="type-meta">
+              <div class="name">type/caption-mono</div>
+              <div>JetBrains Mono · 12 / 16 · 0% · 400</div>
+              <div>byline, read-time, dates, metadata</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Spacing ── -->
+      <div class="tokens-group">
+        <h3>Spacing · 9 steps</h3>
+        <p class="caption-mono" style="margin-bottom: var(--spacing-500);">Geometric scale. Cut from 13 to 9 in the critic round. No hairline-gap step, no aspirational hero steps — compose with multiples.</p>
+        <div>
+          <div class="spacing-row"><div class="label-cell">spacing/0 <span class="v">0</span></div><div class="spacing-bar" style="width:0;"></div></div>
+          <div class="spacing-row"><div class="label-cell">spacing/300 <span class="v">8</span></div><div class="spacing-bar" style="width:8px;"></div></div>
+          <div class="spacing-row"><div class="label-cell">spacing/400 <span class="v">12</span></div><div class="spacing-bar" style="width:12px;"></div></div>
+          <div class="spacing-row"><div class="label-cell">spacing/500 <span class="v">16</span></div><div class="spacing-bar" style="width:16px;"></div></div>
+          <div class="spacing-row"><div class="label-cell">spacing/600 <span class="v">20</span></div><div class="spacing-bar" style="width:20px;"></div></div>
+          <div class="spacing-row"><div class="label-cell">spacing/700 <span class="v">24 · iOS gutter</span></div><div class="spacing-bar" style="width:24px;"></div></div>
+          <div class="spacing-row"><div class="label-cell">spacing/800 <span class="v">32</span></div><div class="spacing-bar" style="width:32px;"></div></div>
+          <div class="spacing-row"><div class="label-cell">spacing/900 <span class="v">40</span></div><div class="spacing-bar" style="width:40px;"></div></div>
+          <div class="spacing-row"><div class="label-cell">spacing/1000 <span class="v">56</span></div><div class="spacing-bar" style="width:56px;"></div></div>
+        </div>
+      </div>
+
+      <!-- ── Shape ── -->
+      <div class="tokens-group">
+        <h3>Shape · corner radii</h3>
+        <div class="shape-row">
+          <div class="shape-sample">
+            <div class="shape-block" style="border-radius:0"></div>
+            <div class="label-tag">shape/none · 0</div>
+          </div>
+          <div class="shape-sample">
+            <div class="shape-block" style="border-radius:4px"></div>
+            <div class="label-tag">shape/sm · 4</div>
+          </div>
+          <div class="shape-sample">
+            <div class="shape-block" style="border-radius:12px"></div>
+            <div class="label-tag">shape/md · 12</div>
+          </div>
+          <div class="shape-sample">
+            <div class="shape-block" style="border-radius:20px"></div>
+            <div class="label-tag">shape/lg · 20</div>
+          </div>
+          <div class="shape-sample">
+            <div class="shape-block" style="border-radius:28px"></div>
+            <div class="label-tag">shape/xl · 28</div>
+          </div>
+          <div class="shape-sample">
+            <div class="shape-block" style="border-radius:999px"></div>
+            <div class="label-tag">shape/pill · 999</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Motion ── -->
+      <div class="tokens-group">
+        <h3>Motion</h3>
+        <p class="caption-mono" style="margin-bottom: var(--spacing-500);">prefers-reduced-motion collapses every token to motion/instant. Hard branch, no opt-outs.</p>
+        <div class="pill-list">
+          <div class="pill-card">
+            <div class="token-name">motion/instant</div>
+            <div class="note">0ms — reduced-motion fallback for every animation</div>
+          </div>
+          <div class="pill-card">
+            <div class="token-name">motion/fast</div>
+            <div class="note">120ms ease-out — hover / press feedback, focus ring</div>
+          </div>
+          <div class="pill-card">
+            <div class="token-name">motion/base</div>
+            <div class="note">200ms ease-out — default transition, sheet open</div>
+          </div>
+          <div class="pill-card">
+            <div class="token-name">motion/slow</div>
+            <div class="note">320ms ease-in-out — page transitions, large state changes</div>
+          </div>
+          <div class="pill-card">
+            <div class="token-name">motion/spring</div>
+            <div class="note">interactiveSpring(response: 0.4, dampingFraction: 0.85) — iOS gesture-driven only</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Elevation ── -->
+      <div class="tokens-group">
+        <h3>Elevation · shadow</h3>
+        <p class="caption-mono" style="margin-bottom: var(--spacing-500);">Lounge posture: chrome quiet, hairline + paper layering. Shadows reserved for true overlays. Cards on canvas lift via border/hairline + bg/elevated — not shadow.</p>
+        <div class="pill-list">
+          <div class="pill-card">
+            <div class="token-name">elevation/0</div>
+            <div class="note">none — flat surfaces, photo tiles, cards on canvas (default)</div>
+            <div class="elevation-demo"></div>
+          </div>
+          <div class="pill-card">
+            <div class="token-name">elevation/1</div>
+            <div class="note">reserved — do not use for cards (legacy / dark-mode review only)</div>
+          </div>
+          <div class="pill-card">
+            <div class="token-name">elevation/2</div>
+            <div class="note">0 4px 12px rgba(26,26,26,0.08) — sticky nav, raised toast</div>
+            <div class="elevation-demo e2"></div>
+          </div>
+          <div class="pill-card">
+            <div class="token-name">elevation/3</div>
+            <div class="note">0 12px 32px rgba(26,26,26,0.12) — modal sheet, partial sheet, drawer</div>
+            <div class="elevation-demo e3"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────── COMPONENTS ─────────────── -->
+    <section id="components">
+      <p class="section-eyebrow">section 04</p>
+      <h2>Components — live gallery.</h2>
+      <p class="body-lg" style="max-width: 720px;">Each block renders the component in real HTML next to its spec drawer. Tokens used are echoed at the foot of each card.</p>
+
+      <!-- ── Buttons ── -->
+      <div class="component-card" style="margin-top: var(--spacing-700);">
+        <h4>Buttons · 3 variants × 3 sizes</h4>
+        <div class="demo">
+          <div class="row">
+            <button class="btn btn-primary btn-sm">continue</button>
+            <button class="btn btn-primary btn-md">continue</button>
+            <button class="btn btn-primary btn-lg">continue</button>
+            <span class="caption-mono">primary · one per screen</span>
+          </div>
+          <div class="row">
+            <button class="btn btn-secondary btn-sm">cancel</button>
+            <button class="btn btn-secondary btn-md">cancel</button>
+            <button class="btn btn-secondary btn-lg">cancel</button>
+            <span class="caption-mono">secondary · adjacent counter-verb</span>
+          </div>
+          <div class="row">
+            <button class="btn btn-quiet btn-sm">read more</button>
+            <button class="btn btn-quiet btn-md">read more</button>
+            <button class="btn btn-quiet btn-lg">read more</button>
+            <span class="caption-mono">quiet · inline / nested</span>
+          </div>
+          <div class="row">
+            <button class="btn btn-secondary danger btn-md">end kid-agent session</button>
+            <button class="btn btn-primary btn-md" disabled>continue</button>
+            <span class="caption-mono">danger = modifier on secondary · disabled state</span>
+          </div>
+        </div>
+        <details>
+          <summary class="spec-summary">spec ▸ buttons.md</summary>
+          <div class="spec-body">
+            <ul>
+              <li>One <code>primary</code> per screen, full stop. If you need two, one is <code>secondary</code>.</li>
+              <li><code>danger</code> is a modifier on <code>secondary</code>, not a variant — destructive actions stay quiet until invoked.</li>
+              <li>Sizes <code>sm</code> (32h · type/label), <code>md</code> (40h · type/title-md), <code>lg</code> (48h · type/title-md). iOS hit target is 44pt minimum regardless of visual height — pad the tap area, not the chrome.</li>
+              <li><code>shape/pill</code> permitted on <code>lg</code> primary/secondary in CMS landing only. Forbidden in iOS in-app chrome.</li>
+              <li><code>primary</code> CTAs on warm photo tiles (saffron, rose) are forbidden — the on-photo-light label fails AA against olive-on-warm.</li>
+              <li>On sober surfaces only <code>secondary</code> and <code>quiet</code> are permitted — never primary saturated fill.</li>
+              <li>Reduce-motion replaces press-scale with <code>fill darken 4%</code>; no scale, no spring.</li>
+            </ul>
+          </div>
+        </details>
+      </div>
+
+      <!-- ── Forms ── -->
+      <div class="component-card" style="margin-top: var(--spacing-500);">
+        <h4>Forms · field states</h4>
+        <div class="demo">
+          <div class="row" style="align-items: flex-start; gap: var(--spacing-700);">
+            <div style="flex: 1; min-width: 240px;">
+              <div class="form-field">
+                <label class="label-tag" for="f-email">email</label>
+                <input id="f-email" type="email" placeholder="you@example.com" value="">
+                <div class="helper">we'll send your weekly digest here.</div>
+              </div>
+              <div class="form-field">
+                <label class="label-tag" for="f-name">your kid's first name</label>
+                <input id="f-name" type="text" placeholder="elena" value="elena">
+                <div class="helper">helps us match articles to your kid's stage.</div>
+              </div>
+            </div>
+            <div style="flex: 1; min-width: 240px;">
+              <div class="form-field error">
+                <label class="label-tag" for="f-err">email</label>
+                <input id="f-err" type="email" placeholder="you@example.com" value="elena@">
+                <div class="helper">this email looks off — try again?</div>
+              </div>
+              <div class="form-field disabled">
+                <label class="label-tag" for="f-dis">city</label>
+                <input id="f-dis" type="text" placeholder="not yet" disabled>
+                <div class="helper">complete the previous step first.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <details>
+          <summary class="spec-summary">spec ▸ forms.md</summary>
+          <div class="spec-body">
+            <ul>
+              <li>Labels live ABOVE the input. Never inside. Never floating.</li>
+              <li>One field per row on iOS; CMS may pair two short fields at ≥md viewport.</li>
+              <li>Helper text and error text occupy the same vertical slot — never both.</li>
+              <li>Errors are warm and specific: <em>"we need a valid email to send your weekly digest"</em> — not "invalid format".</li>
+              <li>Required fields are marked with a trailing <code>·</code> in <code>accent/default</code>, never an asterisk.</li>
+              <li>Sizes: <code>sm</code> 36h, <code>md</code> 44h (default — meets touch min), <code>lg</code> 52h.</li>
+              <li>On sober surfaces no inline validation animations — validate on blur only.</li>
+            </ul>
+          </div>
+        </details>
+      </div>
+
+      <!-- ── Cards: 4 variants ── -->
+      <div class="component-card" style="margin-top: var(--spacing-500);">
+        <h4>Cards · 4 variants (article, category, post, sober)</h4>
+        <div class="demo">
+          <div class="grid grid-2">
+            <!-- article card -->
+            <div class="article-card on-photo">
+              <div class="hero" style="background: var(--photo-rose);">
+                <span class="label-tag" style="color: var(--ink-on-photo-dark); position: relative; z-index: 1;">reading</span>
+              </div>
+              <div class="meta">
+                <h5>The Case for Boring Books</h5>
+                <div class="byline">by jane doe · 6 min · may 31, 2026</div>
+              </div>
+            </div>
+            <!-- category tile -->
+            <div class="category-tile saffron on-photo">
+              <span class="label-tag" style="opacity: 0.85;">raising kids</span>
+              <span class="subject" aria-hidden="true">📚</span>
+              <span class="label-tag">picture books · 24</span>
+            </div>
+          </div>
+          <div class="grid grid-2" style="margin-top: var(--spacing-500);">
+            <!-- post card -->
+            <div class="post-card">
+              <div class="author-row">
+                <div class="avatar"></div>
+                <div>
+                  <div class="author-name">maria · mom of 2</div>
+                  <div class="post-meta">3 hours ago</div>
+                </div>
+              </div>
+              <p class="body">we tried the bedtime negotiation thing last night. she fell asleep mid-sentence. small wins.</p>
+              <div class="actions">
+                <button class="btn btn-quiet btn-sm">read more</button>
+                <button class="btn btn-quiet btn-sm">12 replies</button>
+              </div>
+            </div>
+            <!-- sober card -->
+            <div class="sober-card">
+              <h5>your kid-agent is ready.</h5>
+              <p>elena's profile is set. you can pause or review the conversation any time from settings.</p>
+              <button class="btn btn-secondary btn-md">open</button>
+            </div>
+          </div>
+        </div>
+        <details>
+          <summary class="spec-summary">spec ▸ cards.md</summary>
+          <div class="spec-body">
+            <ul>
+              <li>Four variants: <code>article</code> (4:5 hero, byline) · <code>category</code> (saturated photo tile) · <code>post</code> (parent post, formerly community) · <code>sober</code> (kid-agent / safety, formerly kid-agent).</li>
+              <li>Photo on article + category is non-negotiable. No photo = use the <code>post</code> variant instead.</li>
+              <li>Category tiles use one photo token per tile; never gradient between two photo/* colors.</li>
+              <li>A library grid shows at most 3 distinct photo/* tokens above the fold (Rose LA discipline).</li>
+              <li>Sober cards forbid: photo, saturated fill, decorative serif, hover affordance, skeleton loading.</li>
+              <li>Cards lift via <code>border/hairline</code> + <code>bg/elevated</code> on canvas — not shadow. <code>elevation/1</code> is reserved.</li>
+              <li>Cards never nest. If you want a card-in-card, you want a <code>sheet</code>.</li>
+            </ul>
+          </div>
+        </details>
+      </div>
+
+      <!-- ── Chips ── -->
+      <div class="component-card" style="margin-top: var(--spacing-500);">
+        <h4>Chips · tag, filter, category</h4>
+        <div class="demo">
+          <div class="row">
+            <span class="chip chip-tag">5 min · audiobook</span>
+            <span class="chip chip-tag">advice</span>
+            <span class="chip chip-tag">tweens</span>
+            <span class="caption-mono">tag · read-only metadata</span>
+          </div>
+          <div class="row">
+            <button class="chip chip-filter active">all <span class="count">· 48</span></button>
+            <button class="chip chip-filter">picture books <span class="count">· 24</span></button>
+            <button class="chip chip-filter">audiobooks <span class="count">· 12</span></button>
+            <button class="chip chip-filter">poetry <span class="count">· 12</span></button>
+            <span class="caption-mono">filter · toggleable</span>
+          </div>
+          <div class="row">
+            <button class="chip chip-category">raising kids <span class="count">· 36</span></button>
+            <button class="chip chip-category">food + nutrition <span class="count">· 18</span></button>
+            <span class="caption-mono">category · navigates</span>
+          </div>
+        </div>
+        <details>
+          <summary class="spec-summary">spec ▸ chip.md</summary>
+          <div class="spec-body">
+            <ul>
+              <li>Minimum height is 28. Below that, you have a label, not a chip.</li>
+              <li>Tag chips are read-only — they do not navigate or toggle.</li>
+              <li>Filter pills toggle; active filters fill <code>ink/primary</code> (high contrast), not <code>accent/default</code>.</li>
+              <li>Counts appear inline with a middle-dot separator: "audiobooks · 12". Never parentheses.</li>
+              <li>On photo tiles, chips switch fill to <code>bg/elevated</code> @ 90% with <code>ink/primary</code> — never transparent with on-photo ink.</li>
+              <li>Filter "clear" affordance has a 44pt minimum hit area regardless of its 28-32pt visual height.</li>
+            </ul>
+          </div>
+        </details>
+      </div>
+
+      <!-- ── Empty / Loading / Error ── -->
+      <div class="component-card" style="margin-top: var(--spacing-500);">
+        <h4>States · empty · loading · error</h4>
+        <div class="demo">
+          <div class="grid grid-3">
+            <div class="empty-block">
+              <div class="icon" aria-hidden="true">▢</div>
+              <h5>nothing saved yet.</h5>
+              <p>tap the bookmark on any article to start a library.</p>
+              <button class="btn btn-secondary btn-md">browse library</button>
+            </div>
+            <div class="empty-block">
+              <div class="skeleton tall"></div>
+              <div class="skeleton title"></div>
+              <div class="skeleton line"></div>
+              <div class="skeleton line w85"></div>
+              <div class="skeleton line w70"></div>
+            </div>
+            <div class="empty-block error">
+              <div class="icon" aria-hidden="true">!</div>
+              <h5>couldn't load posts.</h5>
+              <p>your connection looks shaky. saved articles still work.</p>
+              <button class="btn btn-secondary btn-md">try again</button>
+            </div>
+          </div>
+          <div class="row" style="justify-content: center; margin-top: var(--spacing-500);">
+            <div class="spinner" aria-label="loading"></div>
+            <span class="caption-mono">loading…</span>
+          </div>
+        </div>
+        <details>
+          <summary class="spec-summary">spec ▸ empty.md</summary>
+          <div class="spec-body">
+            <ul>
+              <li>Empty states get a warm icon, never a sad face, never an exclamation mark.</li>
+              <li>Loading copy ("loading…") only appears after 1500ms — don't flash it for fast requests.</li>
+              <li>Skeleton blocks match the real layout's grid; never use generic "lorem" boxes.</li>
+              <li><strong>Skeletons are FORBIDDEN on kid-agent and crisis surfaces</strong> — use spinner only. They imply content will arrive, which is a trust violation on safety paths.</li>
+              <li>Retry actions are <code>secondary</code>, never <code>primary</code> — the parent didn't fail, the request did.</li>
+              <li>First-run surfaces always include a photo or photo-tile hero — never icon-only.</li>
+            </ul>
+          </div>
+        </details>
+      </div>
+
+      <!-- ── Nav (mini tab bar) ── -->
+      <div class="component-card" style="margin-top: var(--spacing-500);">
+        <h4>Nav · iOS tab bar (5 slots)</h4>
+        <div class="demo">
+          <div class="tab-bar" role="tablist">
+            <button class="tab-item active" role="tab" aria-selected="true"><span class="icon" aria-hidden="true">⌂</span><span>home</span></button>
+            <button class="tab-item" role="tab"><span class="icon" aria-hidden="true">☰</span><span>library</span></button>
+            <button class="tab-item center" role="tab"><span class="icon" aria-hidden="true">✦</span><span>ask</span></button>
+            <button class="tab-item" role="tab"><span class="icon" aria-hidden="true">◯</span><span>community</span></button>
+            <button class="tab-item" role="tab"><span class="icon" aria-hidden="true">●</span><span>you</span></button>
+          </div>
+        </div>
+        <details>
+          <summary class="spec-summary">spec ▸ nav.md</summary>
+          <div class="spec-body">
+            <ul>
+              <li>Five tab slots, period. Adding a sixth requires removing one.</li>
+              <li>Center "ask" is always slot 3, always raised, always <code>shape/pill</code> in <code>accent/default</code>.</li>
+              <li>Badge is a dot, never a number. If urgency requires a count, escalate to a sheet.</li>
+              <li>Tab labels are always visible — never icon-only.</li>
+              <li>Top-nav title is centered on iOS, left-aligned on CMS — do not mix.</li>
+              <li>Sub-nav chips scroll horizontally on iOS — never wrap. Wrap on CMS only.</li>
+            </ul>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- ─────────────── SURFACES ─────────────── -->
+    <section id="surfaces">
+      <p class="section-eyebrow">section 05</p>
+      <h2>Surfaces — iOS &amp; CMS.</h2>
+      <p class="body-lg" style="max-width: 720px;">Same tokens. Different density, different hit-targets, different motion budgets. The brand DNA survives the trip from iPhone to 15" laptop.</p>
+
+      <div class="surface-cols" style="margin-top: var(--spacing-700);">
+        <div class="surface-card">
+          <span class="platform-tag">primary target</span>
+          <h3>iOS · SwiftUI</h3>
+          <p>Tokens land in <code>Theme.swift</code> + <code>Theme+Typography.swift</code>. No raw hex, point value, or font name lives in a <code>View</code> file — CI fails on token violations.</p>
+          <p><strong>Touch floor: 44pt × 44pt</strong> for every tappable region. Adjacent 44pt regions never touch (gap ≥ <code>.hearth300</code>).</p>
+<pre>// Token → SwiftUI accessor
+Color.hearthCanvas          // bg/canvas
+Color.hearthInkPrimary      // ink/primary
+Color.hearthAccent          // accent/default
+.padding(.hearth700)        // 24pt page gutter
+.cornerRadius(.hearthRadiusLg) // shape/lg · 20pt
+.font(.hearthDisplayLG)     // Fraunces 40/44 · 600
+
+// Reduce motion routes through a single resolver
+.animation(Animation.hearthSpring, value: isPressed)</pre>
+          <p style="margin-top: var(--spacing-500);"><strong>Light-mode locked</strong> for Phase 1 — dark-mode tokens land in Phase 2.</p>
+        </div>
+
+        <div class="surface-card">
+          <span class="platform-tag">secondary target</span>
+          <h3>CMS · React + Tailwind</h3>
+          <p>Tokens land in <code>tailwind.config.ts</code> + <code>tokens.css</code>. No <code>bg-[#...]</code>, no <code>p-[13px]</code>, no arbitrary Tailwind values — ESLint rule fails the build.</p>
+          <p><strong>Denser than iOS</strong>: page gutter 16px, card pad 16px, button md 36h. No 44pt floor on desktop. Body type stays at 15px.</p>
+<pre>{/* Token → Tailwind class */}
+&lt;div className="bg-canvas text-ink-primary p-700"&gt;
+  &lt;h1 className="font-display text-display-lg"&gt;
+    library
+  &lt;/h1&gt;
+  &lt;button className="bg-accent text-ink-on-photo-light
+                     rounded-md px-500 h-9"&gt;
+    publish
+  &lt;/button&gt;
+&lt;/div&gt;
+
+/* fonts self-hosted; never the Google CDN at runtime */</pre>
+          <p style="margin-top: var(--spacing-500);"><strong>Springs are forbidden on CMS</strong> — mouse cursors hate them. Use motion/fast easeOut.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────── PHOTOGRAPHY ─────────────── -->
+    <section id="photography">
+      <p class="section-eyebrow">section 06</p>
+      <h2>Photography — Mode A &amp; Mode B.</h2>
+      <p class="body-lg" style="max-width: 720px;">Photography is the dominant visual layer. Two modes by lifecycle: Midjourney now, hired photographers later. Universal rules (casting, lighting, composition, palette) apply to both.</p>
+
+      <div class="surface-cols" style="margin-top: var(--spacing-700);">
+        <div class="photo-card">
+          <span class="badge">v1 — active</span>
+          <h4>Mode A — Midjourney.</h4>
+          <p>Production photography source for v1. MJ can hit our exact palette and contrast targets when prompted with locked hex values + <code>--style raw</code>. Two simultaneous techniques in every prompt: (a) cite hex inline, (b) <code>--style raw --v 6</code> (upgrade to v7 when available).</p>
+          <p>Every generation passes two QA gates — palette compliance (ΔE ≤ 6 from target hex) and the uncanny test (real family, real room, no plastic-skin sheen).</p>
+        </div>
+        <div class="photo-card">
+          <span class="badge">post-launch — reference</span>
+          <h4>Mode B — Human photographers.</h4>
+          <p>The day we shift from generated to shot photography. 6-8 families per shoot day, varied across ages, body types, skin tones, household structures. Not model agencies — independent casting via parenting communities. Audition signal that matters: can they ignore the camera.</p>
+          <p>Real homes, never studios. North-facing window, side light. A Hearth LUT clamps subject tones between <code>ink-700</code> and <code>ink-500</code>, photo-tile backgrounds within ΔE ≤ 5 of the assigned hex.</p>
+        </div>
+      </div>
+
+      <!-- Photo tile preview -->
+      <div style="margin-top: var(--spacing-700);">
+        <p class="caption-mono" style="margin-bottom: var(--spacing-400);">photo tiles · 4 only (saffron, rose, royal, forest). clay + sand retired from v1.</p>
+        <div class="photo-tile-preview on-photo">
+          <div class="tile saffron">
+            <span class="subject" aria-hidden="true">🚂</span>
+            <span class="name">photo/saffron</span>
+            <span class="desc">energy / play</span>
+          </div>
+          <div class="tile rose">
+            <span class="subject" aria-hidden="true">🍵</span>
+            <span class="name">photo/rose</span>
+            <span class="desc">care / tenderness</span>
+          </div>
+          <div class="tile royal">
+            <span class="subject" aria-hidden="true">📓</span>
+            <span class="name">photo/royal</span>
+            <span class="desc">focus / learning</span>
+          </div>
+          <div class="tile forest">
+            <span class="subject" aria-hidden="true">🌿</span>
+            <span class="name">photo/forest</span>
+            <span class="desc">nature / outdoors</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Example MJ prompt -->
+      <div style="margin-top: var(--spacing-700);">
+        <h4 style="margin-bottom: var(--spacing-400);">example prompt · <span class="caption-mono">tile/saffron-play-and-toys</span></h4>
+<pre>/imagine: editorial product still life photograph, a single
+wooden Brio train car centered on a flat saturated saffron
+paper background color exactly #E8A33C, no other dominant
+colors in frame, no teal, no orange-blue cinematic grade,
+single key light from upper left casting a tight dramatic
+shadow to the lower right, kodak portra 400 film stock
+aesthetic, magazine product photography, kinfolk magazine
+reference, slightly desaturated overall, subject occupies
+about 35 percent of square, dead centered
+--ar 1:1 --style raw --v 6 --no AI-glossy, plastic,
+oversaturated, teal-orange grade, cinematic LUT, gradient
+background, textured background, multiple objects, cluster
+of toys, baby in pumpkin, hands in frame, text in frame,
+logo in frame, lens flare, fake bokeh, white seamless,
+studio seamless</pre>
+      </div>
+
+      <!-- Forbidden cliches -->
+      <div style="margin-top: var(--spacing-700);">
+        <h4 style="margin-bottom: var(--spacing-400);">forbidden cliches</h4>
+        <p class="caption-mono">if a brief asks for any of these, push back. if MJ surfaces any of these, reject the generation.</p>
+        <ul class="forbidden-list">
+          <li>newborn feet cradled in parent hands</li>
+          <li>silhouette family against a sunset</li>
+          <li>"tired mom" gripping a coffee mug in a beige kitchen</li>
+          <li>"dad juggling laptop and baby"</li>
+          <li>a child reaching toward the camera with finger paint on hands</li>
+          <li>a family in matching white t-shirts on a beach</li>
+          <li>a pregnant belly with hands forming a heart</li>
+          <li>a single tear on a child's cheek</li>
+          <li>a parent's hand holding a child's hand, shot from above</li>
+          <li>balloons released into a blue sky</li>
+          <li>hands praying over a baby</li>
+          <li>stock-photo white-toothed grins; perfect teeth</li>
+          <li>perfectly-matched-outfits family portraits</li>
+          <li>studio backdrops, seamless paper of any color we don't ship as a token</li>
+          <li>lens flare added in post, fake bokeh, plug-in film grain</li>
+          <li>chalkboard text, mason jars, fairy lights</li>
+          <li>any baby in a pumpkin, basket, watering can, or sleeping in dad's beard</li>
+          <li>the AI-glossy look: plastic skin, glowing highlights, hyper-saturated golden hour</li>
+        </ul>
+      </div>
+
+      <!-- Crisis banner -->
+      <div class="crisis-banner">
+        <p><strong>Crisis surface rule.</strong> No photography on any crisis-lock or near-crisis surface. Type-only — type IS the design. <code>bg/sober</code> canvas, <code>ink/primary</code> text, no decorative elements. A photograph in a crisis context is a tonal violation regardless of how well it's shot.</p>
+      </div>
+    </section>
+
+    <!-- ─────────────── VOICE ─────────────── -->
+    <section id="voice">
+      <p class="section-eyebrow">section 07</p>
+      <h2>Voice — good copy, bad copy.</h2>
+      <p class="body-lg" style="max-width: 720px;">Warm, concrete, second-person, present-tense. Functional in chrome, editorial in long-form, sober in crisis. The pattern in every good error: what happened (specific) — what you can do next (specific) — no shame, no exclamation, no emoji.</p>
+
+      <div style="margin-top: var(--spacing-700);">
+        <div class="voice-row">
+          <div class="voice-cell good">
+            <div class="header">good · article fetch failed</div>
+            <div class="copy">couldn't load articles. pull down to retry.</div>
+            <div class="ctx">specific · actionable · no shame · no `!`</div>
+          </div>
+          <div class="voice-cell bad">
+            <div class="header">bad · tech-speak, no next step</div>
+            <div class="copy">Error 500: Internal Server Error</div>
+            <div class="ctx">unrecoverable · alarming · blames the system</div>
+          </div>
+        </div>
+        <div class="voice-row">
+          <div class="voice-cell good">
+            <div class="header">good · login wrong password</div>
+            <div class="copy">that password doesn't match. try again, or reset it below.</div>
+            <div class="ctx">no blame · second-person · path forward</div>
+          </div>
+          <div class="voice-cell bad">
+            <div class="header">bad · blames the parent</div>
+            <div class="copy">Invalid input! Please try again.</div>
+            <div class="ctx">accusatory · `!` · vague</div>
+          </div>
+        </div>
+        <div class="voice-row">
+          <div class="voice-cell good">
+            <div class="header">good · network offline</div>
+            <div class="copy">you're offline. saved articles still work; the rest is waiting on a connection.</div>
+            <div class="ctx">acknowledges state · names what still works</div>
+          </div>
+          <div class="voice-cell bad">
+            <div class="header">bad · cute when it shouldn't be</div>
+            <div class="copy">oops! something went sideways 😅 our gremlins are on it!</div>
+            <div class="ctx">emoji in chrome · brand `we` · no info</div>
+          </div>
+        </div>
+        <div class="voice-row">
+          <div class="voice-cell good">
+            <div class="header">good · photo upload too large</div>
+            <div class="copy">photo is over 10mb. try a smaller one or take a new shot.</div>
+            <div class="ctx">names the limit · two paths forward</div>
+          </div>
+          <div class="voice-cell bad">
+            <div class="header">bad · brand `we` + corporate</div>
+            <div class="copy">We're sorry, but we are unable to process your request at this time.</div>
+            <div class="ctx">marketing voice · no specifics · hedge</div>
+          </div>
+        </div>
+        <div class="voice-row">
+          <div class="voice-cell good">
+            <div class="header">good · form field missing</div>
+            <div class="copy">your kid's age helps us pick the right articles. add it to keep going.</div>
+            <div class="ctx">explains the why · names the unblock</div>
+          </div>
+          <div class="voice-cell bad">
+            <div class="header">bad · vague + alarming</div>
+            <div class="copy">Something went wrong. Please contact support.</div>
+            <div class="ctx">no signal · no next step · escalation off-app</div>
+          </div>
+        </div>
+      </div>
+
+      <hr class="hr-sub" />
+
+      <h4 style="margin-bottom: var(--spacing-400);">crisis-surface tone</h4>
+      <div class="sober-card" style="background: var(--bg-sober); max-width: 540px;">
+        <h5>this conversation is paused.</h5>
+        <p>a real person can help right now: 988 (call or text). it's free and open 24/7.</p>
+      </div>
+      <p class="caption-mono" style="margin-top: var(--spacing-400);">sober · declarative · no metaphor · no `!` · no emoji · no photography</p>
+    </section>
+
+    <!-- ─────────────── LOGO ─────────────── -->
+    <section id="logo">
+      <p class="section-eyebrow">section 08</p>
+      <h2>Logo — three directions.</h2>
+      <p class="body-lg" style="max-width: 720px;">Three wordmark explorations for the parent-app. One ships. The other two die honorable deaths. The wordmark is hand-drafted from Fraunces in Glyphs / Illustrator — MJ output is reference only.</p>
+
+      <div class="grid grid-3" style="margin-top: var(--spacing-700);">
+        <div class="logo-card">
+          <div class="preview">
+            <span class="mark">MVP</span>
+          </div>
+          <div class="body">
+            <span class="caption-mono">direction A · default recommendation</span>
+            <h4 style="margin: var(--spacing-300) 0 var(--spacing-400);">Wordmark only.</h4>
+            <p style="font-size: 14px; line-height: 20px;">All-caps Fraunces ExtraBold, tight tracking. Reads as confident, editorial, grown-up — Wonder Valley energy. Scales cleanly from 24pt nav to 1024px launch. Risk: no mark, so the App Store icon is a single-letter crop.</p>
+          </div>
+        </div>
+        <div class="logo-card">
+          <div class="preview">
+            <span class="glyph" aria-hidden="true"></span>
+            <span class="mark">MVP</span>
+          </div>
+          <div class="body">
+            <span class="caption-mono">direction B · only if we fund a real mark</span>
+            <h4 style="margin: var(--spacing-300) 0 var(--spacing-400);">Wordmark + mark.</h4>
+            <p style="font-size: 14px; line-height: 20px;">Wordmark plus a small geometric flame-or-doorway glyph at cap height. Gives us a brand mark that survives at 16×16 and 1024×1024. Risk: wellness-cliché territory unless drafted by an actual designer — flames are a crowded field.</p>
+          </div>
+        </div>
+        <div class="logo-card">
+          <div class="preview">
+            <span class="lowercase">mvp<span class="dot">.</span></span>
+          </div>
+          <div class="body">
+            <span class="caption-mono">direction C · if tonal calibration says warmer</span>
+            <h4 style="margin: var(--spacing-300) 0 var(--spacing-400);">Lowercase + dot.</h4>
+            <p style="font-size: 14px; line-height: 20px;">Lowercase Fraunces Regular, period in <code>accent/default</code> olive. Friendly bookshop sign. Warmest of the three; most approachable on first-time splash. Risk: less authoritative on health-adjacent surfaces. Monochrome fallback drops the dot.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────── LOADING RULES ─────────────── -->
+    <section id="loading">
+      <p class="section-eyebrow">section 09</p>
+      <h2>AI loading rules.</h2>
+      <p class="body-lg" style="max-width: 720px;">Operating manual for AI agents using Hearth. Two files load every session, unconditionally. Component and surface specs load by intent — pull only what the task touches.</p>
+
+      <div class="loading-rules" style="margin-top: var(--spacing-700);">
+        <div class="block">
+          <div class="block-eyebrow">always loaded · every session</div>
+          <ul>
+            <li>spec/look-and-feel/DESIGN.md <span class="when">— system prompt: principles, voice, rules</span></li>
+            <li>spec/look-and-feel/DESIGN.tokens.md <span class="when">— canonical token allowlist</span></li>
+          </ul>
+        </div>
+
+        <div class="block">
+          <div class="block-eyebrow">load by intent · components</div>
+          <ul>
+            <li>components/buttons.md <span class="when">— when generating CTAs / actions / nav buttons</span></li>
+            <li>components/forms.md <span class="when">— when generating inputs / pickers / validation</span></li>
+            <li>components/cards.md <span class="when">— when generating article / category / post / sober tiles</span></li>
+            <li>components/article.md <span class="when">— when generating long-form reading surfaces</span></li>
+            <li>components/nav.md <span class="when">— when generating tab bars / top nav / sub-nav</span></li>
+            <li>components/chip.md <span class="when">— when generating tags / filter pills / category chips</span></li>
+            <li>components/empty.md <span class="when">— when generating empty / loading / error / skeleton states</span></li>
+            <li>components/sheet.md <span class="when">— when generating modals / partial sheets / drawers</span></li>
+          </ul>
+        </div>
+
+        <div class="block">
+          <div class="block-eyebrow">load by intent · surfaces &amp; brand</div>
+          <ul>
+            <li>surfaces/ios.md <span class="when">— when emitting SwiftUI</span></li>
+            <li>surfaces/cms.md <span class="when">— when emitting Tailwind / React</span></li>
+            <li>photography.md <span class="when">— when briefing images / Midjourney prompts</span></li>
+            <li>voice.md <span class="when">— when writing copy / error strings / headlines</span></li>
+            <li>logo.md <span class="when">— when touching the wordmark / icon / launch screen</span></li>
+            <li>midjourney-prompts.md <span class="when">— when generating production photography</span></li>
+          </ul>
+        </div>
+
+        <div class="block">
+          <div class="block-eyebrow">generation rules — hard branches</div>
+          <ul>
+            <li>1. never emit a hex outside DESIGN.tokens.md — all colors resolve to a semantic token</li>
+            <li>2. never invent a token — token names are an allowlist</li>
+            <li>3. ask before generating if the surface is ambiguous (iOS / CMS / brand)</li>
+            <li>4. reference, don't copy — emit token names, never paste hex</li>
+            <li>5. one CTA per screen — if two primary buttons, demote one to secondary</li>
+            <li>6. reduced-motion is a hard branch — every motion uses motion/instant collapse</li>
+            <li>7. sober variant for kid-agent / crisis-lock / safety surfaces</li>
+            <li>8. no raw Color(hex:) / bg-[#...] / inline styles — linted out</li>
+            <li>9. cite the tokens used — every component spec ends with a `Tokens used` block</li>
+            <li>10. when in doubt, reduce — Hearth fails by addition more often than subtraction</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────── FOOTER ─────────────── -->
+    <footer>
+      <div class="wordmark">Hearth<span class="dot">.</span></div>
+      <div class="meta-row">
+        <span><strong>version:</strong> 1.0.0</span>
+        <span><strong>status:</strong> ✅ active</span>
+        <span><strong>owner:</strong> Miguel</span>
+        <span><strong>last_updated:</strong> 2026-05-31</span>
+      </div>
+      <p class="caption-mono" style="margin-top: var(--spacing-500);">a steady hand on the shoulder of an overwhelmed parent. architecture borrowed from sondermind's iris 2.0; the brand language is ours.</p>
+    </footer>
+
+  </div><!-- /.page -->
+
+  <!-- toast -->
+  <div id="toast" class="toast" role="status" aria-live="polite">copied</div>
+
+  <script>
+    // ─────────────── click-to-copy on token swatches ───────────────
+    (function () {
+      const toast = document.getElementById('toast');
+      let toastTimer;
+      function showToast(msg) {
+        toast.textContent = msg;
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 1400);
+      }
+
+      async function copy(text) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (e) {
+          // fallback for non-secure contexts
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); } catch (e2) {}
+          document.body.removeChild(ta);
+          return true;
+        }
+      }
+
+      document.querySelectorAll('.copyable').forEach(el => {
+        // make swatches keyboard-reachable
+        el.setAttribute('tabindex', '0');
+        el.setAttribute('role', 'button');
+        const token = el.dataset.token;
+        const hex = el.dataset.hex;
+        el.setAttribute('aria-label',
+          'copy token name ' + token + '. shift-click or shift-enter to copy hex ' + hex + '.');
+
+        const handler = async (e) => {
+          const shift = e.shiftKey;
+          const value = shift && hex ? hex : token;
+          const label = shift && hex ? hex : token;
+          await copy(value);
+          showToast('copied ' + label);
+        };
+
+        el.addEventListener('click', handler);
+        el.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handler(e);
+          }
+        });
+      });
+    })();
+
+    // ─────────────── active topnav link on scroll ───────────────
+    (function () {
+      const links = document.querySelectorAll('.topnav-links a');
+      const sections = Array.from(links)
+        .map(a => document.querySelector(a.getAttribute('href')))
+        .filter(Boolean);
+      if (!('IntersectionObserver' in window)) return;
+      const byId = new Map();
+      links.forEach(l => byId.set(l.getAttribute('href').slice(1), l));
+      const obs = new IntersectionObserver(entries => {
+        entries.forEach(e => {
+          if (e.isIntersecting) {
+            links.forEach(l => l.style.color = '');
+            const link = byId.get(e.target.id);
+            if (link) link.style.color = 'var(--ink-primary)';
+          }
+        });
+      }, { rootMargin: '-50% 0px -50% 0px' });
+      sections.forEach(s => obs.observe(s));
+    })();
+  </script>
+
+</body>
+</html>

@@ -8,7 +8,10 @@ final class ServerConfiguration: ObservableObject {
 
     /// Production URL — update this once you deploy to Railway.
     static let productionURL = "https://mvp-backend-production-8678.up.railway.app"
-    static let localURL = "http://localhost:8904"
+    // 127.0.0.1 (not "localhost") so AVPlayer's CoreMedia HTTP stack doesn't
+    // try the IPv6 ::1 address first — uvicorn binds IPv4-only by default, so
+    // localhost-DNS-resolves-IPv6-first breaks voice streaming.
+    static let localURL = "http://127.0.0.1:8904"
 
     static var defaultURL: String {
         #if DEBUG
@@ -30,8 +33,15 @@ final class ServerConfiguration: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        baseURLString = defaults.string(forKey: Self.baseURLKey) ?? Self.defaultURL
+        let stored = defaults.string(forKey: Self.baseURLKey) ?? Self.defaultURL
+        // One-shot migration: rewrite legacy localhost dev URL → 127.0.0.1
+        // so AVPlayer doesn't reach for IPv6 ::1.
+        let migrated = stored.hasPrefix("http://localhost") ? Self.localURL : stored
+        baseURLString = migrated
         threadID = defaults.string(forKey: Self.threadIDKey) ?? UUID().uuidString
+        if migrated != stored {
+            defaults.set(migrated, forKey: Self.baseURLKey)
+        }
     }
 
     var baseURL: URL? {

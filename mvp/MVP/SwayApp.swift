@@ -46,7 +46,7 @@ struct MVPApp: App {
     @MainActor
     private func seedProfileOnBackend(_ data: OnboardingData) async {
         let defaults = UserDefaults.standard
-        let baseString = defaults.string(forKey: "chat.base_url") ?? "http://localhost:8904"
+        let baseString = defaults.string(forKey: "chat.base_url") ?? "http://127.0.0.1:8904"
         guard let baseURL = URL(string: baseString) else {
             print("[profile/seed] invalid base URL: \(baseString)")
             return

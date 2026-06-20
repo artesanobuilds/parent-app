@@ -21,33 +21,33 @@ export function Dashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <span className="text-gray-400 text-sm">Loading...</span>
+        <span className="text-ink-muted text-body-sm">Loading...</span>
       </div>
     );
   }
 
   if (!stats) {
     return (
-      <div className="p-8 text-center text-gray-500">
+      <div className="p-800 text-center text-ink-muted">
         Failed to load dashboard data.
       </div>
     );
   }
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <div className="flex gap-3">
+    <div className="p-800 max-w-5xl mx-auto">
+      <div className="flex items-center justify-between mb-800">
+        <h1 className="font-display text-display-sm text-ink-primary">Dashboard</h1>
+        <div className="flex gap-400">
           <Link
             to="/articles/new"
-            className="rounded-lg bg-[#C9A84C] px-4 py-2 text-sm font-medium text-white hover:bg-[#B8973F] transition-colors"
+            className="rounded-md bg-accent px-500 py-300 text-title-md font-medium text-ink-on-photo-light hover:bg-accent-press transition-colors duration-fast"
           >
             New Article
           </Link>
           <Link
             to="/community/new"
-            className="rounded-lg border border-[#C9A84C] px-4 py-2 text-sm font-medium text-[#C9A84C] hover:bg-[#C9A84C]/5 transition-colors"
+            className="rounded-md border border-accent px-500 py-300 text-title-md font-medium text-accent hover:bg-accent-tint transition-colors duration-fast"
           >
             New Post
           </Link>
@@ -55,49 +55,49 @@ export function Dashboard() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-3 gap-6 mb-10">
-        <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-100">
-          <p className="text-sm font-medium text-gray-500 mb-1">Articles</p>
-          <p className="text-3xl font-bold text-[#C9A84C]">{stats.articles}</p>
+      <div className="grid grid-cols-3 gap-600 mb-1000">
+        <div className="rounded-lg bg-elevated p-600 border border-hairline">
+          <p className="text-body-sm font-medium text-ink-muted mb-200">Articles</p>
+          <p className="font-display text-display-sm text-accent">{stats.articles}</p>
         </div>
-        <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-100">
-          <p className="text-sm font-medium text-gray-500 mb-1">Community Posts</p>
-          <p className="text-3xl font-bold text-[#C9A84C]">{stats.community_posts}</p>
+        <div className="rounded-lg bg-elevated p-600 border border-hairline">
+          <p className="text-body-sm font-medium text-ink-muted mb-200">Community Posts</p>
+          <p className="font-display text-display-sm text-accent">{stats.community_posts}</p>
         </div>
-        <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-100">
-          <p className="text-sm font-medium text-gray-500 mb-1">Categories</p>
-          <p className="text-3xl font-bold text-[#C9A84C]">{stats.categories}</p>
+        <div className="rounded-lg bg-elevated p-600 border border-hairline">
+          <p className="text-body-sm font-medium text-ink-muted mb-200">Categories</p>
+          <p className="font-display text-display-sm text-accent">{stats.categories}</p>
         </div>
       </div>
 
       {/* Breakdowns */}
-      <div className="grid grid-cols-2 gap-6">
-        <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-700 mb-4">Articles by Category</h2>
+      <div className="grid grid-cols-2 gap-600">
+        <div className="rounded-lg bg-elevated p-600 border border-hairline">
+          <h2 className="text-title-md font-semibold text-ink-secondary mb-500">Articles by Category</h2>
           {Object.keys(stats.articles_by_category).length === 0 ? (
-            <p className="text-sm text-gray-400">No data yet</p>
+            <p className="text-body-sm text-ink-muted">No data yet</p>
           ) : (
-            <ul className="space-y-2">
+            <ul className="space-y-300">
               {Object.entries(stats.articles_by_category).map(([cat, count]) => (
-                <li key={cat} className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">{cat}</span>
-                  <span className="font-medium text-gray-900">{count}</span>
+                <li key={cat} className="flex items-center justify-between text-body-md">
+                  <span className="text-ink-secondary">{cat}</span>
+                  <span className="font-medium text-ink-primary">{count}</span>
                 </li>
               ))}
             </ul>
           )}
         </div>
 
-        <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-700 mb-4">Posts by Category</h2>
+        <div className="rounded-lg bg-elevated p-600 border border-hairline">
+          <h2 className="text-title-md font-semibold text-ink-secondary mb-500">Posts by Category</h2>
           {Object.keys(stats.posts_by_category).length === 0 ? (
-            <p className="text-sm text-gray-400">No data yet</p>
+            <p className="text-body-sm text-ink-muted">No data yet</p>
           ) : (
-            <ul className="space-y-2">
+            <ul className="space-y-300">
               {Object.entries(stats.posts_by_category).map(([cat, count]) => (
-                <li key={cat} className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">{cat}</span>
-                  <span className="font-medium text-gray-900">{count}</span>
+                <li key={cat} className="flex items-center justify-between text-body-md">
+                  <span className="text-ink-secondary">{cat}</span>
+                  <span className="font-medium text-ink-primary">{count}</span>
                 </li>
               ))}
             </ul>

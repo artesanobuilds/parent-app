@@ -7,7 +7,7 @@
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
     <scenes>
-        <!--Launch Screen-->
+        <!--Launch Screen — full-bleed Hearth LaunchHero image on a cream canvas.-->
         <scene sceneID="launch-scene">
             <objects>
                 <viewController id="launch-view-controller" sceneMemberID="viewController">
@@ -15,19 +15,17 @@
                         <rect key="frame" x="0.0" y="0.0" width="414" height="896"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" translatesAutoresizingMaskIntoConstraints="NO" image="MVPLogo" id="launch-logo">
-                                <rect key="frame" x="55" y="298" width="304" height="304"/>
-                                <constraints>
-                                    <constraint firstAttribute="width" secondItem="launch-logo" secondAttribute="height" multiplier="1:1" id="constraint-aspect"/>
-                                </constraints>
-                            </imageView>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFill" translatesAutoresizingMaskIntoConstraints="NO" image="LaunchHero" id="launch-hero"/>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="launch-safe-area"/>
-                        <color key="backgroundColor" red="0.10980392156862745" green="0.10980392156862745" blue="0.11764705882352941" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <!-- cream canvas — visible at the edges only if the image doesn't fully cover -->
+                        <color key="backgroundColor" red="0.9529411764705882" green="0.9411764705882353" blue="0.9215686274509804" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
-                            <constraint firstItem="launch-logo" firstAttribute="centerX" secondItem="launch-view" secondAttribute="centerX" id="constraint-cx"/>
-                            <constraint firstItem="launch-logo" firstAttribute="centerY" secondItem="launch-view" secondAttribute="centerY" id="constraint-cy"/>
-                            <constraint firstItem="launch-logo" firstAttribute="width" secondItem="launch-view" secondAttribute="width" multiplier="0.6" id="constraint-width-pct"/>
+                            <!-- Pin the hero to all four edges, full-bleed (ignores safe area). -->
+                            <constraint firstItem="launch-hero" firstAttribute="leading" secondItem="launch-view" secondAttribute="leading" id="constraint-leading"/>
+                            <constraint firstItem="launch-hero" firstAttribute="trailing" secondItem="launch-view" secondAttribute="trailing" id="constraint-trailing"/>
+                            <constraint firstItem="launch-hero" firstAttribute="top" secondItem="launch-view" secondAttribute="top" id="constraint-top"/>
+                            <constraint firstItem="launch-hero" firstAttribute="bottom" secondItem="launch-view" secondAttribute="bottom" id="constraint-bottom"/>
                         </constraints>
                     </view>
                 </viewController>
@@ -37,6 +35,6 @@
         </scene>
     </scenes>
     <resources>
-        <image name="MVPLogo" width="500" height="500"/>
+        <image name="LaunchHero" width="752" height="1584"/>
     </resources>
 </document>

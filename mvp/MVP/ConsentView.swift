@@ -4,6 +4,10 @@ import SwiftUI
 /// the kid-agent flow and `/consent/status.accepted == false` (or when the
 /// agreement_version has bumped).
 ///
+/// SOBER VARIANT: this is a safety surface. Uses `bg/sober`, no photo tiles,
+/// no decorative serif, restrained type. The quiet treatment is intentional —
+/// the screen sits between the parent and a permission decision.
+///
 /// This DOES NOT meet COPPA's "verifiable parental consent" bar — that's v1
 /// (see docs/roadmap.md). For v0 closed beta, an in-app agreement signed by
 /// participating parents is the gate.
@@ -28,16 +32,18 @@ struct ConsentView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: .hearth600) {
                 Text("Closed beta")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.brandGold)
+                    .font(.hearthLabel)
+                    .foregroundColor(.accentDefault)
+                    .tracking(0.66)
                     .textCase(.uppercase)
-                    .tracking(0.6)
 
+                // Sober variant forbids decorative serif on titles; use Inter
+                // title-lg here instead of Fraunces display.
                 Text("Before we set up your kid's companion")
-                    .font(.title2.weight(.semibold))
-                    .foregroundColor(.white)
+                    .font(.hearthTitleLG)
+                    .foregroundColor(.inkPrimary)
 
                 Text("""
                 You're trying something early. A few honest things you should know:
@@ -53,16 +59,18 @@ struct ConsentView: View {
                 compliance work.
                 • You can revoke this companion or delete its history at any time.
                 """)
-                    .font(.callout)
-                    .foregroundColor(.white.opacity(0.85))
-                    .lineSpacing(4)
+                    .font(.hearthBodyMD)
+                    .foregroundColor(.inkPrimary)
+                    .lineSpacing(.hearthLineBodyMD)
 
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: .hearth400) {
                     field("Your name", text: $parentName)
                     field("Your email", text: $parentEmail)
                     Text("Kid's age band")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundColor(.white.opacity(0.8))
+                        .font(.hearthLabel)
+                        .foregroundColor(.inkMuted)
+                        .tracking(0.66)
+                        .textCase(.uppercase)
                     Picker("Age band", selection: $kidAgeBand) {
                         ForEach(ageBands, id: \.value) { band in
                             Text(band.label).tag(band.value)
@@ -73,32 +81,35 @@ struct ConsentView: View {
 
                 if let error {
                     Text(error)
-                        .font(.footnote)
-                        .foregroundColor(.red)
+                        .font(.hearthBodySM)
+                        .foregroundColor(.statusError)
+                        .padding(.hearth400)
+                        .background(Color.statusErrorTint)
+                        .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
                 }
 
                 Button(action: submit) {
                     HStack {
-                        if submitting { ProgressView().tint(.brandBlack) }
+                        if submitting { ProgressView().tint(.inkOnPhotoLight) }
                         Text(submitting ? "Recording…" : "I understand and agree")
-                            .font(.headline.weight(.semibold))
+                            .font(.hearthTitleMD)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(canSubmit ? Color.brandGold : Color.brandGold.opacity(0.4))
-                    .foregroundColor(.brandBlack)
-                    .clipShape(Capsule())
+                    .padding(.vertical, .hearth500)
+                    .background(canSubmit ? Color.accentDefault : Color.accentDefault.opacity(0.4))
+                    .foregroundColor(.inkOnPhotoLight)
+                    .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
                 }
                 .disabled(!canSubmit || submitting)
 
                 Text("Agreement version: \(agreementVersion)")
-                    .font(.caption2)
-                    .foregroundColor(.brandGray)
-                    .padding(.top, 4)
+                    .font(.hearthCaptionMono)
+                    .foregroundColor(.inkMuted)
+                    .padding(.top, .hearth300)
             }
-            .padding(20)
+            .padding(.hearth600)
         }
-        .background(Color.brandBackground.ignoresSafeArea())
+        .background(Color.bgSober.ignoresSafeArea())
     }
 
     private var canSubmit: Bool {
@@ -107,15 +118,22 @@ struct ConsentView: View {
     }
 
     private func field(_ label: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: .hearth300) {
             Text(label)
-                .font(.subheadline.weight(.medium))
-                .foregroundColor(.white.opacity(0.8))
+                .font(.hearthLabel)
+                .foregroundColor(.inkMuted)
+                .tracking(0.66)
+                .textCase(.uppercase)
             TextField("", text: text)
-                .padding(12)
-                .background(Color.brandSurface)
-                .foregroundColor(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.hearth400)
+                .background(Color.bgElevated)
+                .foregroundColor(.inkPrimary)
+                .font(.hearthBodyMD)
+                .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                        .stroke(Color.borderStrong, lineWidth: 1)
+                )
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
         }

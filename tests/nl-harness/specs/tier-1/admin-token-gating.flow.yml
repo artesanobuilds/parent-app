@@ -1,0 +1,47 @@
+spec:
+  name: admin-token-gating
+  tier: 1
+  modules: [cms, data_export]
+  intent: >
+    Verify the X-Admin-Token gate. Every /cms/* mutation endpoint and every
+    /data/* export endpoint must return 401 without the header and 200 with
+    the right header. This is a security regression guard for the Track A
+    work that hardened these endpoints.
+
+  personas:
+    admin:
+      preset: admin
+
+  preconditions:
+    - "ADMIN_TOKEN env var is set in the harness env"
+    - "Backend has ADMIN_TOKEN env var set to the same value"
+
+  invariants:
+    - "GET /data/export without X-Admin-Token returns 401"
+    - "GET /data/export with the correct X-Admin-Token returns 200 with a checksums manifest"
+    - "GET /data/export with a bogus X-Admin-Token returns 401, not 200"
+    - "POST /cms/categories without X-Admin-Token returns 401 (mutation gated)"
+    - "POST /cms/export-parquet without X-Admin-Token returns 401"
+    - "Public read endpoints (/content/*) are unaffected by token presence"
+
+  boundary_contracts:
+    - endpoint: GET /data/export
+      as: anonymous
+      status: 401
+
+    - endpoint: GET /data/export
+      as: admin
+      status: 200
+      response_includes: [checksums]
+
+    - endpoint: POST /cms/categories
+      as: anonymous
+      status: 401
+
+    - endpoint: POST /cms/export-parquet
+      as: anonymous
+      status: 401
+
+    - endpoint: GET /content/categories
+      as: anonymous
+      status: 200

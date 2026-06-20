@@ -26,7 +26,7 @@ struct CircleView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Real parents. Real questions.")
                             .font(.title3.weight(.bold))
-                            .foregroundColor(.white)
+                            .foregroundColor(.inkPrimary)
                         Text("You're not alone in this.")
                             .font(.subheadline)
                             .foregroundColor(.brandGray)
@@ -114,8 +114,8 @@ struct CircleView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(isSelected ? Color.brandGold : Color.brandSurface)
-            .foregroundColor(isSelected ? .brandBlack : .white)
+            .background(isSelected ? Color.accentDefault : Color.bgElevated)
+            .foregroundColor(isSelected ? .inkOnPhotoLight : .inkPrimary)
             .clipShape(Capsule())
             .overlay(
                 Capsule()

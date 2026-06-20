@@ -1,0 +1,46 @@
+spec:
+  name: voice-synthesize-kid-pin-gating
+  tier: 1
+  modules: [auth, kid_agent, voice]
+  intent: >
+    /voice/synthesize must enforce kid_pin the same way /kid-chat does —
+    otherwise a leaked parent token replays arbitrary voice content and
+    burns ElevenLabs quota. Wrong PIN, missing PIN, and mismatched parent
+    token all reject with the right status before any provider call.
+
+  personas:
+    parent:
+      preset: kid-agent-parent
+
+  preconditions:
+    - "OPENAI_API_KEY is set on the backend (kid-chat is the source of the reply_id)"
+    - "ELEVENLABS_API_KEY may be unset — gating fires before the provider is consulted"
+    - "Kid agent is configured with voice_mode=true (needed to emit a fragment to attack)"
+
+  invariants:
+    - "GET /voice/synthesize/{reply_id}/{fragment_id} with no X-Kid-Pin header returns 401"
+    - "GET /voice/synthesize/{reply_id}/{fragment_id} with a wrong X-Kid-Pin returns 401"
+    - "GET /voice/synthesize/{reply_id}/{fragment_id} without a bearer token returns 401"
+    - "GET /voice/synthesize/{reply_id}/{fragment_id} as the correct parent with correct PIN reaches the provider (200 or 503 with fallback_reason, but not 401/403)"
+    - "PIN failures never increment tts_usage_daily.chars for the user (no quota burn on failed auth)"
+
+  boundary_contracts:
+    - endpoint: POST /kid-chat
+      as: parent
+      streaming: true
+      status: 200
+
+    - endpoint: GET /voice/synthesize/{reply_id}/{fragment_id}
+      as: parent
+      status: 401
+      headers_omitted: [X-Kid-Pin]
+
+    - endpoint: GET /voice/synthesize/{reply_id}/{fragment_id}
+      as: parent
+      status: 401
+      headers:
+        X-Kid-Pin: "0000-not-the-real-pin"
+
+    - endpoint: GET /voice/synthesize/{reply_id}/{fragment_id}
+      as: anonymous
+      status: 401

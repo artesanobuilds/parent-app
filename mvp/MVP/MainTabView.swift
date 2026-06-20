@@ -6,10 +6,11 @@ struct MainTabView: View {
     @StateObject private var configuration: ServerConfiguration  // set in init (viewModel depends on it)
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var contentVM = ContentViewModel()
+    @StateObject private var planVM = PlanViewModel()
     @State private var selectedTab: Tab = .home
 
     enum Tab: String {
-        case home, library, agent, circle
+        case home, library, agent, circle, planning
     }
 
     init(username: String = "") {
@@ -32,14 +33,17 @@ struct MainTabView: View {
         .environmentObject(contentVM)
         .environmentObject(configuration)
         .ignoresSafeArea(.keyboard, edges: .bottom)
-        .preferredColorScheme(.dark)
+        // Phase 1: light mode locked until dark-mode tokens land in Phase 2.
+        .preferredColorScheme(.light)
         .onAppear {
             viewModel.setUserID(username)
             contentVM.userId = username
+            planVM.userId = username
         }
         .task {
             if let url = configuration.baseURL {
                 contentVM.baseURL = url
+                planVM.baseURL = url
                 await contentVM.loadAllContent(baseURL: url)
             }
         }
@@ -47,6 +51,10 @@ struct MainTabView: View {
 
     private var tabContent: some View {
         ZStack(alignment: .bottom) {
+            // Full-bleed cream base so the bottom safe area (home-indicator strip)
+            // behind the tab bar is canvas-colored, not the default white.
+            Color.bgCanvas.ignoresSafeArea()
+
             // Tab content
             Group {
                 switch selectedTab {
@@ -58,11 +66,13 @@ struct MainTabView: View {
                     AgentView(viewModel: viewModel, configuration: configuration)
                 case .circle:
                     CircleView()
+                case .planning:
+                    PlanView(viewModel: planVM, configuration: configuration, userID: username)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Add bottom padding so content doesn't hide behind the tab bar
-            .padding(.bottom, 56)
+            .padding(.bottom, .hearth1000)
 
             // Custom bottom tab bar
             customTabBar
@@ -70,6 +80,10 @@ struct MainTabView: View {
     }
 
     // MARK: - Custom Tab Bar
+    //
+    // Hearth iOS surface spec: tab bar items 56pt, selected tint = accent,
+    // unselected = ink/muted, top-edge hairline divider, never translucent
+    // material over photography.
 
     private var customTabBar: some View {
         HStack(spacing: 0) {
@@ -77,23 +91,23 @@ struct MainTabView: View {
             tabBarItem(tab: .library, icon: "book", activeIcon: "book.fill", label: "Library")
             tabBarItem(tab: .agent, icon: "message", activeIcon: "message.fill", label: "MVP")
             tabBarItem(tab: .circle, icon: "person.2", activeIcon: "person.2.fill", label: "Circle")
+            tabBarItem(tab: .planning, icon: "calendar", activeIcon: "calendar", label: "Plan")
         }
-        .padding(.top, 8)
+        .padding(.top, .hearth300)
         .padding(.bottom, 2)
         .background(
             VStack(spacing: 0) {
                 Rectangle()
-                    .fill(Color.white.opacity(0.08))
+                    .fill(Color.borderHairline)
                     .frame(height: 0.5)
-                Color.brandBlack
+                Color.bgCanvas
             }
-            .shadow(color: Color.black.opacity(0.20), radius: 8, y: -2)
         )
     }
 
     private func tabBarItem(tab: Tab, icon: String, activeIcon: String, label: String) -> some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.15)) {
+            withAnimation(.hearthFast) {
                 selectedTab = tab
             }
         } label: {
@@ -103,11 +117,14 @@ struct MainTabView: View {
                     .frame(height: 26)
 
                 Text(label)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.hearthLabel)
+                    .tracking(0.66)
+                    .textCase(.uppercase)
             }
-            .foregroundColor(selectedTab == tab ? .brandGold : .brandGray)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 4)
+            .foregroundColor(selectedTab == tab ? .accentDefault : .inkMuted)
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .padding(.vertical, .hearth300)
+            .contentShape(Rectangle())
         }
         .accessibilityLabel(label)
     }

@@ -19,20 +19,22 @@ struct CommunityPostDetailView: View {
             if let post = post {
                 VStack(spacing: 0) {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
+                        VStack(alignment: .leading, spacing: .hearth600) {
                             postHeader(post)
                             postBody(post)
                             repliesSection
                         }
-                        .padding()
-                        .padding(.top, 8)
+                        .padding(.hearth700)
+                        .padding(.top, .hearth300)
                     }
 
                     replyInputBar
                 }
-                .background(Color.brandCardBackground.ignoresSafeArea())
+                .background(Color.bgCanvas.ignoresSafeArea())
                 .navigationTitle("")
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(Color.bgCanvas, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
                 .task {
                     if let url = contentVM.baseURL {
                         await contentVM.loadReplies(baseURL: url, postId: postId)
@@ -47,25 +49,25 @@ struct CommunityPostDetailView: View {
     // MARK: - Post Header
 
     private func postHeader(_ post: APICommunityPost) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: .hearth400) {
             Circle()
-                .fill(Color.brandGold.opacity(0.15))
+                .fill(Color.accentTint)
                 .frame(width: 48, height: 48)
                 .overlay(
                     Text(post.initials)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.brandGold)
+                        .font(.hearthTitleMD)
+                        .foregroundColor(.accentDefault)
                 )
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(post.name)
-                    .font(.headline)
-                    .foregroundColor(.brandNavy)
+                    .font(.hearthTitleMD)
+                    .foregroundColor(.inkPrimary)
 
                 if let category = contentVM.categories.first(where: { $0.id == post.category }) {
                     Text("\(category.emoji) \(category.name)")
-                        .font(.caption)
-                        .foregroundColor(.brandGray)
+                        .font(.hearthCaptionMono)
+                        .foregroundColor(.inkMuted)
                 }
             }
         }
@@ -74,79 +76,85 @@ struct CommunityPostDetailView: View {
     // MARK: - Post Body
 
     private func postBody(_ post: APICommunityPost) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: .hearth400) {
             Text(post.title)
-                .font(.title3.weight(.bold))
-                .foregroundColor(.brandNavy)
+                .font(.hearthDisplayMD)
+                .foregroundColor(.inkPrimary)
 
             Text(post.preview)
-                .font(.body)
-                .foregroundColor(.brandNavy.opacity(0.85))
-                .lineSpacing(4)
+                .font(.hearthBodyLG)
+                .foregroundColor(.inkPrimary)
+                .lineSpacing(.hearthLineBodyLG)
         }
     }
 
     // MARK: - Replies Section
 
     private var repliesSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Divider()
+        VStack(alignment: .leading, spacing: .hearth500) {
+            Divider().background(Color.borderHairline)
 
             let count = replies.count
             Text(count == 0 ? "No replies yet" : "\(count) \(count == 1 ? "reply" : "replies")")
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(.brandGray)
+                .font(.hearthLabel)
+                .foregroundColor(.inkMuted)
+                .tracking(0.66)
+                .textCase(.uppercase)
 
             ForEach(replies) { reply in
                 replyCard(reply)
             }
         }
-        .padding(.top, 4)
+        .padding(.top, .hearth300)
     }
 
     private func replyCard(_ reply: APIReply) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: .hearth300) {
+            HStack(spacing: .hearth400) {
                 Circle()
-                    .fill(Color.brandGold.opacity(0.15))
+                    .fill(Color.accentTint)
                     .frame(width: 32, height: 32)
                     .overlay(
                         Text(reply.initials)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.brandGold)
+                            .font(.hearthLabel)
+                            .foregroundColor(.accentDefault)
                     )
 
                 Text(reply.authorName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.brandNavy)
+                    .font(.hearthTitleMD)
+                    .foregroundColor(.inkPrimary)
 
                 Spacer()
             }
 
             Text(reply.body)
-                .font(.body)
-                .foregroundColor(.brandNavy.opacity(0.85))
-                .lineSpacing(3)
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkPrimary)
+                .lineSpacing(.hearthLineBodyMD)
         }
-        .padding(12)
-        .background(Color.brandNavy.opacity(0.03))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.hearth400)
+        .background(Color.bgElevated)
+        .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                .stroke(Color.borderHairline, lineWidth: 1)
+        )
     }
 
     // MARK: - Reply Input Bar
 
     private var replyInputBar: some View {
         VStack(spacing: 0) {
-            Divider()
+            Divider().background(Color.borderHairline)
 
-            HStack(spacing: 10) {
-                TextField("Write a reply...", text: $replyText, axis: .vertical)
-                    .font(.body)
-                    .foregroundColor(.brandNavy)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color.brandNavy.opacity(0.05))
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            HStack(spacing: .hearth400) {
+                TextField("Write a reply…", text: $replyText, axis: .vertical)
+                    .font(.hearthBodyMD)
+                    .foregroundColor(.inkPrimary)
+                    .padding(.horizontal, .hearth500)
+                    .padding(.vertical, .hearth400)
+                    .background(Color.accentTint)
+                    .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous))
                     .lineLimit(1...4)
 
                 Button {
@@ -155,19 +163,21 @@ struct CommunityPostDetailView: View {
                     if isSendingReply {
                         ProgressView()
                             .scaleEffect(0.7)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 44, height: 44)
                     } else {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.system(size: 30))
-                            .foregroundColor(canSendReply ? .brandGold : .brandGray.opacity(0.4))
+                            .foregroundColor(canSendReply ? .accentDefault : .inkPlaceholder)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                 }
                 .disabled(!canSendReply)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, .hearth500)
+            .padding(.vertical, .hearth300)
         }
-        .background(Color.brandCardBackground)
+        .background(Color.bgElevated)
     }
 
     private var canSendReply: Bool {
@@ -193,15 +203,15 @@ struct CommunityPostDetailView: View {
     // MARK: - Not Found
 
     private var notFound: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: .hearth400) {
             Image(systemName: "doc.questionmark")
                 .font(.system(size: 40))
-                .foregroundColor(.brandGray.opacity(0.5))
+                .foregroundColor(.inkPlaceholder)
             Text("Post not found")
-                .font(.subheadline)
-                .foregroundColor(.brandGray)
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.brandBackground.ignoresSafeArea())
+        .background(Color.bgCanvas.ignoresSafeArea())
     }
 }

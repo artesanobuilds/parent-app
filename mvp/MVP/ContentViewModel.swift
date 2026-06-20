@@ -10,6 +10,9 @@ final class ContentViewModel: ObservableObject {
     @Published var loadError: String?
     @Published var userId: String = ""
     @Published var baseURL: URL?
+    /// Active tag filter applied to `libraryItems` via `reloadArticles(baseURL:tag:)`.
+    /// Nil = unfiltered. Reset by callers when leaving a screen.
+    @Published var currentTagFilter: String? = nil
 
     /// Cache for full article content (keyed by article id).
     private var articleCache: [String: APIArticle] = [:]
@@ -46,6 +49,20 @@ final class ContentViewModel: ObservableObject {
 
         if !failures.isEmpty {
             loadError = "Couldn't load \(failures.joined(separator: ", ")). Pull to refresh or check your connection."
+        }
+    }
+
+    // MARK: - Tag-Filtered Reload
+
+    /// Replace `libraryItems` with articles filtered server-side by `tag`.
+    /// Pass `nil` to clear the filter and reload everything.
+    func reloadArticles(baseURL: URL, tag: String?) async {
+        currentTagFilter = tag
+        do {
+            libraryItems = try await ContentService.fetchArticles(baseURL: baseURL, tag: tag)
+        } catch {
+            print("[ContentViewModel] reloadArticles(tag:\(tag ?? "nil")) failed: \(error)")
+            loadError = "Couldn't load articles. Pull to refresh or check your connection."
         }
     }
 
@@ -104,6 +121,14 @@ final class ContentViewModel: ObservableObject {
 
     // MARK: - Convenience Accessors
 
+    /// The 11 top-level parents. iOS browse views (Library, Home) enumerate
+    /// these instead of `categories` so the 99 sub-categories don't flood
+    /// the UI before the hierarchical browse UX is built (Phase 3).
+    /// Children remain in `categories` and reachable by id when needed.
+    var topLevelCategories: [APICategory] {
+        categories.filter { $0.parentID == nil }
+    }
+
     func libraryItems(for category: String) -> [APIArticle] {
         libraryItems.filter { $0.category == category }
     }
@@ -126,5 +151,11 @@ final class ContentViewModel: ObservableObject {
 
     func postData(_ id: String) -> APICommunityPost? {
         communityPosts.first { $0.id == id }
+    }
+
+    /// Resolve an article id to its loaded model (for voice client-tool cards).
+    /// Checks the published library list then the detail cache.
+    func articleData(_ id: String) -> APIArticle? {
+        libraryItems.first { $0.id == id } ?? articleCache[id]
     }
 }

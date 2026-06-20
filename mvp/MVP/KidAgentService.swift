@@ -46,6 +46,10 @@ struct KidAgentService {
         guard let http = response as? HTTPURLResponse else {
             throw KidAgentServiceError.invalidResponse
         }
+        if !(200..<300).contains(http.statusCode) {
+            let snippet = String(data: data.prefix(300), encoding: .utf8) ?? ""
+            dlog("[http] \(http.statusCode) \(request.httpMethod ?? "GET") \(request.url?.path ?? "?") — \(snippet)")
+        }
         switch http.statusCode {
         case 200..<300: break
         case 401:
@@ -195,10 +199,23 @@ struct KidAgentService {
 
     // MARK: - Kid chat (parent-side, e.g. preview / test sandbox)
 
-    /// Streams kid-chat tokens. Used by KidAgentView; can also be used by the
-    /// letter editor's "test as kid" sandbox.
-    func streamKidChat(kidName: String, message: String, threadID: String,
-                       kidPin: String? = nil) -> AsyncThrowingStream<String, Error> {
+    /// One decoded event from the `/kid-chat` SSE stream: `token` text deltas
+    /// plus the `frozen` crisis-lock signal. Other event types (`tool_start`,
+    /// `blocked`, `crisis`, `retract`) are dropped here — the chat view model
+    /// only needs text to render; voice is exclusively the ConvAI session's job.
+    enum KidChatStreamEvent: Sendable {
+        case token(String)
+        /// Agent is crisis-locked. The backend renders a frozen message as a
+        /// token first, then emits this with the lock category — the surface
+        /// must switch to the crisis-locked state (no input, no retry).
+        case frozen(category: String)
+    }
+
+    /// Typed event stream over `/kid-chat`. Replaces the older token-only
+    /// `streamKidChat` so the chat view model can observe voice fragments
+    /// landing alongside text tokens.
+    func streamKidChatEvents(kidName: String, message: String, threadID: String,
+                             kidPin: String? = nil) -> AsyncThrowingStream<KidChatStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
@@ -233,8 +250,8 @@ struct KidAgentService {
                         payload = payload.drop(while: { $0 == " " })
                         if payload == "[DONE]" { break }
                         guard !payload.isEmpty else { continue }
-                        if let token = decodeToken(from: payload) {
-                            continuation.yield(token)
+                        if let event = decodeEvent(from: payload) {
+                            continuation.yield(event)
                         }
                     }
                     continuation.finish()
@@ -243,6 +260,74 @@ struct KidAgentService {
                 }
             }
         }
+    }
+
+    // MARK: - ConvAI token
+
+    struct ConvAITokenResponse {
+        let signedURL: String?
+        let configOverride: [String: Any]?
+        let extraBody: [String: Any]?
+    }
+
+    func voiceConvAIToken(kidName: String) async throws -> ConvAITokenResponse {
+        var request = try await authedRequest("voice/convai-token", query: [
+            URLQueryItem(name: "kid_name", value: kidName),
+        ])
+        request.timeoutInterval = 15
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw KidAgentServiceError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let snippet = String(data: data.prefix(300), encoding: .utf8) ?? ""
+            dlog("[http] \(http.statusCode) GET voice/convai-token — \(snippet)")
+            if http.statusCode == 403 {
+                // Distinguish a consent gate from a true crisis lock — they
+                // need very different UI (re-consent vs. "voice unavailable").
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let detail = json["detail"] as? [String: Any],
+                   detail["error"] as? String == "consent_required",
+                   let version = detail["required_version"] as? String {
+                    throw KidAgentServiceError.consentRequired(version: version)
+                }
+                throw KidAgentServiceError.voiceFallback(reason: .crisis, status: 403)
+            }
+            throw KidAgentServiceError.status(http.statusCode)
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw KidAgentServiceError.invalidResponse
+        }
+        return ConvAITokenResponse(
+            signedURL: json["signed_url"] as? String,
+            configOverride: json["conversation_config_override"] as? [String: Any],
+            extraBody: json["custom_llm_extra_body"] as? [String: Any]
+        )
+    }
+
+    /// ConvAI token for the PARENT coaching agent (no kid/PIN). Reuses the same
+    /// response shape; the override carries the parent system prompt + voice
+    /// directive, and extra_body carries user_id/thread_id.
+    func voiceParentConvAIToken() async throws -> ConvAITokenResponse {
+        var request = try await authedRequest("voice/parent-convai-token")
+        request.timeoutInterval = 15
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw KidAgentServiceError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let snippet = String(data: data.prefix(300), encoding: .utf8) ?? ""
+            dlog("[http] \(http.statusCode) GET voice/parent-convai-token — \(snippet)")
+            throw KidAgentServiceError.status(http.statusCode)
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw KidAgentServiceError.invalidResponse
+        }
+        return ConvAITokenResponse(
+            signedURL: json["signed_url"] as? String,
+            configOverride: json["conversation_config_override"] as? [String: Any],
+            extraBody: json["custom_llm_extra_body"] as? [String: Any]
+        )
     }
 
     func transcripts(kidName: String, threadID: String = "default") async throws -> [KidMessage] {
@@ -270,15 +355,46 @@ struct KidAgentService {
 
     // MARK: - Helpers
 
-    private func decodeToken(from payload: Substring) -> String? {
+    private func decodeEvent(from payload: Substring) -> KidChatStreamEvent? {
         let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let data = trimmed.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
-        if object["type"] as? String == "token", let content = object["content"] as? String {
-            return content
+        switch object["type"] as? String {
+        case "token":
+            if let content = object["content"] as? String { return .token(content) }
+        case "frozen":
+            return .frozen(category: (object["content"] as? String) ?? "unknown")
+        default:
+            break
         }
         return nil
+    }
+
+    // MARK: - Agent status
+
+    struct KidAgentStatus: Decodable {
+        let enabled: Bool
+        let crisisLocked: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case enabled
+            case crisisLocked = "crisis_locked"
+        }
+    }
+
+    /// Lightweight status probe used when a voice session ends unexpectedly:
+    /// distinguishes "crisis-locked mid-call" (frozen surface) from a benign
+    /// disconnect (text fallback).
+    func kidAgentStatus(kidName: String) async throws -> KidAgentStatus {
+        let request = try await authedRequest("kid-agent/status", query: [
+            URLQueryItem(name: "kid_name", value: kidName),
+        ])
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw KidAgentServiceError.invalidResponse
+        }
+        return try JSONDecoder().decode(KidAgentStatus.self, from: data)
     }
 }
 

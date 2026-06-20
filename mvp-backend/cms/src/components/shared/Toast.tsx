@@ -36,12 +36,14 @@ export function Toaster() {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+    <div className="fixed bottom-500 right-500 z-50 flex flex-col gap-300">
       {toasts.map((t) => (
         <div
           key={t.id}
-          className={`rounded-lg px-4 py-3 text-sm font-medium text-white shadow-lg transition-all ${
-            t.type === "success" ? "bg-green-600" : "bg-red-600"
+          className={`rounded-md px-500 py-400 text-body-md font-medium shadow-e2 transition-all duration-base ${
+            t.type === "success"
+              ? "bg-success-tint text-success border border-success/30"
+              : "bg-error-tint text-error border border-error/30"
           }`}
         >
           {t.message}

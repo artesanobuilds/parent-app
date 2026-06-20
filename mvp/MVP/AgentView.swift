@@ -6,6 +6,7 @@ struct AgentView: View {
     @ObservedObject var configuration: ServerConfiguration
     @State private var messageText: String = ""
     @State private var isShowingSettings: Bool = false
+    @State private var isShowingVoice: Bool = false
 
     @EnvironmentObject private var contentVM: ContentViewModel
 
@@ -17,7 +18,7 @@ struct AgentView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 Divider()
-                    .overlay(Color.white.opacity(0.08))
+                    .background(Color.borderHairline)
                 messageList
                 inputArea
             }
@@ -29,35 +30,51 @@ struct AgentView: View {
                     } label: {
                         Image(systemName: "line.3.horizontal")
                             .font(.system(size: 18, weight: .medium))
-                            .foregroundColor(.white)
+                            .foregroundColor(.inkPrimary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     Text("MVP")
-                        .font(.headline.weight(.semibold))
-                        .foregroundColor(.white)
+                        .font(.hearthTitleLG)
+                        .foregroundColor(.inkPrimary)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 16) {
+                    HStack(spacing: .hearth500) {
                         Button {
-                            withAnimation { viewModel.resetConversation() }
+                            isShowingVoice = true
+                        } label: {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundColor(.inkPrimary)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("Talk to your coach")
+                        Button {
+                            withAnimation(.hearthBase) { viewModel.resetConversation() }
                             contentCards = [:]
                         } label: {
                             Image(systemName: "square.and.pencil")
                                 .font(.system(size: 17, weight: .medium))
-                                .foregroundColor(.white)
+                                .foregroundColor(.inkPrimary)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                         }
                         Button {
                             // Bookmark placeholder
                         } label: {
                             Image(systemName: "bookmark")
                                 .font(.system(size: 17, weight: .medium))
-                                .foregroundColor(.white)
+                                .foregroundColor(.inkPrimary)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                         }
                     }
                 }
             }
-            .toolbarBackground(Color.brandBackground, for: .navigationBar)
+            .toolbarBackground(Color.bgCanvas, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .sheet(isPresented: $isShowingSettings) {
                 NavigationStack {
@@ -68,6 +85,19 @@ struct AgentView: View {
                                 Button("Done") { isShowingSettings = false }
                             }
                         }
+                }
+            }
+            .fullScreenCover(isPresented: $isShowingVoice) {
+                if let baseURL = configuration.baseURL {
+                    ParentVoiceView(
+                        userID: viewModel.currentUserID,
+                        baseURL: baseURL,
+                        onClose: { transcript in
+                            viewModel.importMessages(transcript)
+                            isShowingVoice = false
+                        }
+                    )
+                    .environmentObject(contentVM)
                 }
             }
             .alert(
@@ -81,7 +111,7 @@ struct AgentView: View {
             } message: {
                 Text(viewModel.errorMessage ?? "")
             }
-            .background(Color.brandBackground.ignoresSafeArea())
+            .background(Color.bgCanvas.ignoresSafeArea())
             .withContentNavigationDestinations()
         }
     }
@@ -104,7 +134,7 @@ struct AgentView: View {
                             if !message.isStreaming && !message.content.isEmpty {
                                 let cards = cardsForMessage(message)
                                 if !cards.0.isEmpty || !cards.1.isEmpty {
-                                    VStack(alignment: .leading, spacing: 20) {
+                                    VStack(alignment: .leading, spacing: .hearth600) {
                                         CommunitySection(posts: cards.0)
                                         LibrarySection(items: cards.1)
                                         FeedbackRow(
@@ -113,18 +143,30 @@ struct AgentView: View {
                                             onThumbsDown: { viewModel.submitFeedback(messageID: message.id, feedback: .thumbsDown) }
                                         )
                                     }
-                                    .padding(.horizontal, 16)
-                                    .padding(.top, 16)
-                                    .padding(.bottom, 8)
+                                    .padding(.horizontal, .hearth500)
+                                    .padding(.top, .hearth500)
+                                    .padding(.bottom, .hearth300)
                                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                                 }
                             }
                         }
                     }
                 }
-                .padding(.vertical, 8)
+                .padding(.vertical, .hearth300)
             }
-            .background(Color.brandBackground)
+            .background(Color.bgCanvas)
+            // Tap anywhere on the message list to dismiss the keyboard.
+            // .contentShape ensures empty space inside the ScrollView is
+            // tappable; .scrollDismissesKeyboard covers the drag-to-dismiss
+            // gesture as a complementary path.
+            .contentShape(Rectangle())
+            .onTapGesture {
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder),
+                    to: nil, from: nil, for: nil,
+                )
+            }
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: viewModel.messages) { _, newValue in
                 guard newValue.last?.isStreaming == true else { return }
                 scrollToBottom(proxy: proxy)
@@ -141,84 +183,86 @@ struct AgentView: View {
         HStack {
             Spacer(minLength: 60)
             Text(message.content)
-                .font(.body)
-                .foregroundColor(.white)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
-                .background(Color.brandLightBlue)
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkOnPhotoLight)
+                .padding(.horizontal, .hearth500)
+                .padding(.vertical, .hearth400)
+                .background(Color.accentDefault)
+                .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous))
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .padding(.horizontal, .hearth500)
+        .padding(.vertical, .hearth300)
     }
 
-    // MARK: - Assistant Message (GiGi Style)
+    // MARK: - Assistant Message
 
     private func assistantMessageRow(_ message: ChatMessage) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            // Gold branded avatar
+        HStack(alignment: .top, spacing: .hearth400) {
+            // Accent-tinted avatar
             Circle()
-                .fill(Color.brandGold)
+                .fill(Color.accentDefault)
                 .frame(width: 30, height: 30)
                 .overlay(
                     Text("M")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.white)
+                        .font(.hearthLabel)
+                        .foregroundColor(.inkOnPhotoLight)
                 )
                 .padding(.top, 2)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: .hearth300) {
                 Markdown(message.content.isEmpty ? "..." : message.content)
                     .markdownTextStyle {
+                        FontFamily(.custom(HearthFontFamily.sans))
                         FontSize(15)
-                        ForegroundColor(.white)
+                        ForegroundColor(Color.inkPrimary)
                     }
                     .markdownBlockStyle(\.heading2) { configuration in
                         configuration.label
                             .markdownTextStyle {
-                                FontWeight(.bold)
-                                FontSize(17)
-                                ForegroundColor(.white)
+                                FontFamily(.custom(HearthFontFamily.displaySerif))
+                                FontWeight(.semibold)
+                                FontSize(18)
+                                ForegroundColor(Color.inkPrimary)
                             }
                     }
 
                 if message.isStreaming {
-                    HStack(spacing: 4) {
+                    HStack(spacing: .hearth300) {
                         ProgressView()
                             .scaleEffect(0.6)
-                        Text("Thinking...")
-                            .font(.caption)
-                            .foregroundColor(.brandGray)
+                        Text("Thinking…")
+                            .font(.hearthBodySM)
+                            .foregroundColor(.inkMuted)
                     }
                 }
             }
 
             Spacer(minLength: 16)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, .hearth500)
+        .padding(.vertical, .hearth300)
     }
 
     // MARK: - Input Area
 
     private var inputArea: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: .hearth300) {
             Divider()
-                .overlay(Color.white.opacity(0.08))
+                .background(Color.borderHairline)
 
-            HStack(alignment: .bottom, spacing: 10) {
+            HStack(alignment: .bottom, spacing: .hearth400) {
                 // Text field
                 TextField("Type your question", text: $messageText, axis: .vertical)
-                    .font(.body)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .font(.hearthBodyMD)
+                    .foregroundColor(.inkPrimary)
+                    .padding(.horizontal, .hearth500)
+                    .padding(.vertical, .hearth400)
                     .background(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .fill(Color.brandSurface)
+                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                            .fill(Color.bgElevated)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                    .stroke(Color.brandStroke, lineWidth: 1)
+                                RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                                    .stroke(Color.borderStrong, lineWidth: 1)
                             )
                     )
                     .lineLimit(1...4)
@@ -226,48 +270,40 @@ struct AgentView: View {
                     .textInputAutocapitalization(.sentences)
                     .onSubmit(sendMessage)
 
-                // Microphone button (decorative)
-                Button {
-                    // Voice input placeholder
-                } label: {
-                    Image(systemName: "mic")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(.brandGray)
-                }
-                .disabled(true)
-                .opacity(0.6)
-
                 // Send button
                 Button {
                     sendMessage()
                 } label: {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(canSend ? .brandBlack : .brandGray)
-                        .frame(width: 34, height: 34)
+                        .foregroundColor(canSend ? .inkOnPhotoLight : .inkMuted)
+                        .frame(width: 44, height: 44)
                         .background(
                             Circle()
-                                .fill(canSend ? Color.brandGold : Color.brandSurface)
+                                .fill(canSend ? Color.accentDefault : Color.bgElevated)
+                                .overlay(Circle().stroke(Color.borderHairline, lineWidth: canSend ? 0 : 1))
                         )
                 }
                 .disabled(!canSend)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
+            .padding(.horizontal, .hearth500)
+            .padding(.top, .hearth300)
 
-            // Disclaimer
-            HStack(spacing: 4) {
-                Text("AI can make mistakes and is not a crisis line.")
-                    .font(.caption2)
-                    .foregroundColor(.brandGray)
-                Text("Learn More")
-                    .font(.caption2)
-                    .foregroundColor(.brandGray)
-                    .underline()
-            }
-            .padding(.bottom, 6)
+            // Disclaimer — wrap, don't truncate. "Learn more" sits inline at
+            // the end via Markdown so the whole disclaimer stays one logical
+            // sentence that can break at the page gutter.
+            Text(try! AttributedString(
+                markdown: "AI can make mistakes and is not a crisis line. [Learn more](mvp://learn-more)"
+            ))
+                .font(.hearthCaptionMono)
+                .foregroundColor(.inkMuted)
+                .tint(.inkMuted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, .hearth500)
+                .padding(.bottom, .hearth300)
         }
-        .background(Color.brandBackground)
+        .background(Color.bgCanvas)
     }
 
     // MARK: - Helpers
@@ -290,7 +326,7 @@ struct AgentView: View {
     private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool = true) {
         guard let lastID = viewModel.messages.last?.id else { return }
         if animated {
-            withAnimation { proxy.scrollTo(lastID, anchor: .bottom) }
+            withAnimation(.hearthBase) { proxy.scrollTo(lastID, anchor: .bottom) }
         } else {
             proxy.scrollTo(lastID, anchor: .bottom)
         }

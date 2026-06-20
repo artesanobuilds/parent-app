@@ -57,7 +57,7 @@ CONSTITUTIONAL_MODEL = os.getenv("KID_CONSTITUTIONAL_MODEL", "gpt-5.2")
 # would force the classifier to guess. Anything above ~80 makes short
 # replies — most of what an agent says to a young kid — feel non-streaming
 # because the whole reply lands in finalize() instead of flowing through.
-OUTPUT_CHUNK_BUFFER_CHARS = int(os.getenv("KID_OUTPUT_BUFFER_CHARS", "40"))
+OUTPUT_CHUNK_BUFFER_CHARS = int(os.getenv("KID_OUTPUT_BUFFER_CHARS", "0"))
 
 # After the initial gate clears, re-run heavy moderation (OpenAI + age) every
 # N additional chars. The cheap crisis regex always runs on every token append.
@@ -462,6 +462,17 @@ class StreamingModerator:
     _emitted: str = ""             # full assembled output that crossed the gate
     _last_recheck_at: int = 0      # _emitted length at last heavy recheck
     _block_reason: Optional[ModerationResult] = None
+
+    def __post_init__(self) -> None:
+        # When KID_OUTPUT_BUFFER_CHARS=0 we skip the BUFFERING phase entirely:
+        # tokens stream straight to the kid from the first character, matching
+        # the parent agent's UX. The per-token crisis regex (scan_for_crisis,
+        # line ~492) still fires on every token, and periodic full moderation
+        # rechecks still run from STREAMING state. What we lose vs >0 buffer:
+        # the OpenAI moderation + age-classification gate on the FIRST chunk
+        # before any character reaches the kid. Explicit UX trade-off.
+        if OUTPUT_CHUNK_BUFFER_CHARS <= 0:
+            self.state = StreamingState.STREAMING
 
     def feed(self, token: str) -> List[str]:
         """Returns a list of safe chunks to emit (may be empty while buffering)."""

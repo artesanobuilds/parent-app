@@ -1,16 +1,168 @@
+@import "./styles/fonts.css";
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/*
+  Hearth design tokens — CMS surface.
+  Authoritative reference: spec/look-and-feel/DESIGN.tokens.md
+                            spec/look-and-feel/surfaces/cms.md
+  Tailwind 4 reads @theme to generate utility classes (bg-canvas, text-ink-primary,
+  p-500, rounded-lg, font-display, …). No tailwind.config.ts needed — see notes.
+*/
+
 @theme {
-  --color-brand-gold: #C9A84C;
-  --color-brand-black: #1C1C1E;
-  --color-brand-surface: #2B2B2E;
-  --color-brand-card-bg: #FFFFFF;
-  --color-brand-navy: #212123;
-  --color-brand-gray: #999999;
+  /* ── Color — semantic ─────────────────────────────────────────────── */
+  --color-canvas: #F3F0EB;             /* bg/canvas      neutral/cream-100 */
+  --color-elevated: #FFFFFF;           /* bg/elevated    neutral/paper     */
+  --color-sober: #FAF7F2;              /* bg/sober       neutral/cream-50  */
+
+  --color-ink-primary: #1A1A1A;        /* ink/primary    neutral/ink-900 */
+  --color-ink-secondary: #2D2D2D;      /* ink/secondary  neutral/ink-700 */
+  --color-ink-muted: #6F6A60;          /* ink/muted      neutral/ink-500 */
+  --color-ink-placeholder: #8A8275;    /* ink/placeholder neutral/ink-300 */
+  --color-ink-on-photo-dark: #1A1A1A;  /* ink/onPhoto-dark — warm tiles */
+  --color-ink-on-photo-light: #FFFFFF; /* ink/onPhoto-light — dark tiles */
+
+  --color-hairline: #E9E4DC;           /* border/hairline neutral/cream-200 */
+  --color-strong: #8A8275;             /* border/strong   neutral/ink-300   */
+
+  --color-accent: #4F5D3A;             /* accent/default  brand/olive-500 */
+  --color-accent-press: #3A4A2A;       /* accent/press    brand/olive-700 */
+  --color-accent-tint: #E8EBDC;        /* accent/tint     brand/olive-100 */
+
+  --color-photo-saffron: #E8A33C;
+  --color-photo-rose: #B86A60;
+  --color-photo-royal: #2E3A5F;
+  --color-photo-forest: #2D3F2C;
+  --color-photo-clay: #B86A60;         /* alias of rose for token-map parity */
+  --color-photo-sand: #F3F0EB;         /* alias of canvas tone for sand-tile use */
+
+  --color-success: #3D6B3D;
+  --color-warning: #8A6420;
+  --color-error: #A03A3A;
+  --color-info: #2E3A5F;
+  --color-success-tint: #DCE7DC;
+  --color-warning-tint: #F5EAD2;
+  --color-error-tint: #F6E4E4;
+
+  --color-focus-ring-on-light: #4F5D3A;  /* focus/ring-on-light */
+  --color-focus-ring-on-photo: #FFFFFF;  /* focus/ring-on-photo */
+  --color-focus-ring: #4F5D3A;           /* default ring alias */
+
+  /* ── Spacing — Hearth 9-step scale + CMS extension to 1200 ────────── */
+  --spacing-0: 0px;
+  --spacing-100: 2px;
+  --spacing-200: 4px;
+  --spacing-300: 8px;
+  --spacing-400: 12px;
+  --spacing-500: 16px;
+  --spacing-600: 20px;
+  --spacing-700: 24px;
+  --spacing-800: 32px;
+  --spacing-900: 40px;
+  --spacing-1000: 56px;
+  --spacing-1100: 72px;
+  --spacing-1200: 96px;
+
+  /* ── Radius ───────────────────────────────────────────────────────── */
+  --radius-none: 0px;
+  --radius-sm: 4px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-pill: 9999px;
+
+  /* ── Motion ───────────────────────────────────────────────────────── */
+  --motion-instant: 0ms;
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 320ms;
+
+  /* ── Elevation (shadow) ───────────────────────────────────────────── */
+  --shadow-e0: none;
+  --shadow-e1: 0 1px 2px rgba(26, 26, 26, 0.06);
+  --shadow-e2: 0 4px 12px rgba(26, 26, 26, 0.08);
+  --shadow-e3: 0 12px 32px rgba(26, 26, 26, 0.12);
+
+  /* ── Type — families ──────────────────────────────────────────────── */
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+
+  /* ── Type — scale (size / line-height pairs) ──────────────────────── */
+  --text-display-xl: 80px;
+  --text-display-xl--line-height: 84px;
+  --text-display-xl--letter-spacing: -0.01em;
+  --text-display-xl--font-weight: 700;
+
+  --text-display-lg: 56px;
+  --text-display-lg--line-height: 60px;
+  --text-display-lg--letter-spacing: -0.01em;
+  --text-display-lg--font-weight: 700;
+
+  --text-display-md: 40px;
+  --text-display-md--line-height: 44px;
+  --text-display-md--font-weight: 600;
+
+  --text-display-sm: 28px;
+  --text-display-sm--line-height: 32px;
+  --text-display-sm--font-weight: 600;
+
+  --text-title-lg: 20px;
+  --text-title-lg--line-height: 24px;
+  --text-title-lg--font-weight: 600;
+
+  --text-title-md: 16px;
+  --text-title-md--line-height: 22px;
+  --text-title-md--font-weight: 600;
+
+  --text-body-lg: 17px;
+  --text-body-lg--line-height: 26px;
+  --text-body-lg--font-weight: 400;
+
+  --text-body-md: 15px;
+  --text-body-md--line-height: 22px;
+  --text-body-md--font-weight: 400;
+
+  --text-body-sm: 13px;
+  --text-body-sm--line-height: 18px;
+  --text-body-sm--font-weight: 400;
+
+  --text-label: 11px;
+  --text-label--line-height: 14px;
+  --text-label--letter-spacing: 0.06em;
+  --text-label--font-weight: 600;
+
+  --text-caption-mono: 12px;
+  --text-caption-mono--line-height: 16px;
+  --text-caption-mono--font-weight: 400;
+}
+
+/* Reduce motion globally — never branch on this in component code. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Focus ring — keyboard only, follows shape, sits OUTSIDE the bounds. */
+:where(button, a, [role="button"], input, select, textarea, [tabindex]:not([tabindex="-1"]))
+  :focus-visible,
+:where(button, a, [role="button"], input, select, textarea, [tabindex]:not([tabindex="-1"]))
+  :focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: inherit;
 }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
+  color: var(--color-ink-primary);
+  background-color: var(--color-canvas);
 }

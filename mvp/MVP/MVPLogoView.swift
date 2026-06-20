@@ -1,156 +1,119 @@
 import SwiftUI
 
-/// A 5-pointed star shape used in the MVP badge logo.
-struct StarShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let outerRadius = min(rect.width, rect.height) / 2
-        let innerRadius = outerRadius * 0.42
-        let points = 5
-        var path = Path()
+// MARK: - Typographic mark
+//
+// We tried a geometric hearth glyph (arch + ember) in three iterations.
+// Each one collapsed into a different cliche (padlock, then a face, then
+// an Eye-of-Providence). Symmetric curve over a central dot is hardwired
+// face-grammar; the concept needs a designer's hand to escape, not Canvas
+// shape code.
+//
+// The pivot is Direction A from logo.md: the wordmark IS the logo. The
+// App Store icon falls back to a single oversized Fraunces "M". Clean,
+// confident, internally coherent with the rest of the type system.
 
-        for i in 0..<(points * 2) {
-            let radius = i.isMultiple(of: 2) ? outerRadius : innerRadius
-            let angle = Angle(degrees: Double(i) * 360.0 / Double(points * 2) - 90)
-            let point = CGPoint(
-                x: center.x + CGFloat(cos(angle.radians)) * radius,
-                y: center.y + CGFloat(sin(angle.radians)) * radius
-            )
-            if i == 0 {
-                path.move(to: point)
-            } else {
-                path.addLine(to: point)
-            }
-        }
-        path.closeSubpath()
-        return path
-    }
-}
-
-/// Replicates the MVP badge logo: silver ring, black circle, large background star,
-/// "MVP" text, divider, "MOST VALUABLE PARENT" subtitle, and scattered accent stars/dots.
-struct MVPLogoView: View {
-    var size: CGFloat = 200
-
-    private var ringWidth: CGFloat { size * 0.06 }
-    private var starSize: CGFloat { size * 0.65 }
-    private var mvpFontSize: CGFloat { size * 0.22 }
-    private var subtitleFontSize: CGFloat { size * 0.046 }
-    private var dividerWidth: CGFloat { size * 0.45 }
-
-    private let silverLight = Color(red: 0.82, green: 0.83, blue: 0.84)
-    private let silverDark = Color(red: 0.55, green: 0.56, blue: 0.58)
-    private let darkGold = Color(red: 0.50, green: 0.42, blue: 0.18)
-    private let badgeBlack = Color(red: 0.12, green: 0.12, blue: 0.13)
+/// The Hearth mark — a single oversized Fraunces letter "M". Used as the
+/// App Store icon, favicon, and any standalone-mark context. Kept around
+/// as a SwiftUI view (vs purely an asset image) so call sites can tint
+/// for sober variants and scale arbitrarily without re-export.
+struct HearthMark: View {
+    /// Width/height of the bounding box. Mark renders centered + square.
+    var size: CGFloat = 64
+    /// Single-color tint. Defaults to ink/primary on light surfaces;
+    /// switch to `.inkOnPhotoLight` (paper white) on dark photo tiles
+    /// or `.inkOnPhotoDark` (near-black) on warm photo tiles.
+    var tint: Color = .inkPrimary
 
     var body: some View {
-        ZStack {
-            silverRing
-            innerCircle
-            backgroundStar
-            accentStars
-            accentDots
-            textOverlay
-        }
-        .frame(width: size, height: size)
-    }
-
-    // MARK: - Ring & circle
-
-    private var silverRing: some View {
-        Circle()
-            .fill(
-                LinearGradient(
-                    colors: [silverLight, silverDark, silverLight],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+        // The "M" is set in Fraunces ExtraBold (variable wght → 900).
+        // Optical size axis (opsz) is at its largest setting so the M's
+        // serifs read as architectural at icon scale.
+        Text("M")
+            .font(.custom("Fraunces", size: size * 0.80).weight(.heavy))
+            .foregroundColor(tint)
             .frame(width: size, height: size)
-    }
-
-    private var innerCircle: some View {
-        Circle()
-            .fill(badgeBlack)
-            .frame(width: size - ringWidth * 2, height: size - ringWidth * 2)
-    }
-
-    // MARK: - Background star
-
-    private var backgroundStar: some View {
-        StarShape()
-            .fill(darkGold.opacity(0.55))
-            .frame(width: starSize, height: starSize)
-            .offset(y: -size * 0.02)
-    }
-
-    // MARK: - Text overlay
-
-    private var textOverlay: some View {
-        VStack(spacing: size * 0.01) {
-            Text("MVP")
-                .font(.system(size: mvpFontSize, weight: .heavy))
-                .tracking(size * 0.01)
-                .foregroundColor(.white)
-
-            Rectangle()
-                .fill(Color.brandGold.opacity(0.6))
-                .frame(width: dividerWidth, height: 1)
-
-            Text("MOST VALUABLE PARENT")
-                .font(.system(size: subtitleFontSize, weight: .semibold))
-                .tracking(size * 0.01)
-                .foregroundColor(.brandGold)
-        }
-        .offset(y: size * 0.04)
-    }
-
-    // MARK: - Accent stars
-
-    private var accentStars: some View {
-        ZStack {
-            accentStar(x: -0.18, y: -0.26, s: 0.08)
-            accentStar(x: 0.22, y: -0.22, s: 0.07)
-            accentStar(x: -0.28, y: 0.06, s: 0.05)
-            accentStar(x: 0.30, y: 0.04, s: 0.05)
-            accentStar(x: -0.14, y: 0.30, s: 0.065)
-            accentStar(x: 0.18, y: 0.30, s: 0.065)
-        }
-    }
-
-    private func accentStar(x: CGFloat, y: CGFloat, s: CGFloat) -> some View {
-        StarShape()
-            .fill(Color.brandGold)
-            .frame(width: size * s, height: size * s)
-            .offset(x: size * x, y: size * y)
-    }
-
-    // MARK: - Accent dots
-
-    private var accentDots: some View {
-        let dotSize = size * 0.015
-        return ZStack {
-            dot(x: -0.10, y: -0.18, d: dotSize)
-            dot(x: 0.12, y: -0.16, d: dotSize)
-            dot(x: -0.22, y: -0.10, d: dotSize)
-            dot(x: 0.24, y: -0.08, d: dotSize)
-            dot(x: 0.00, y: -0.20, d: dotSize)
-            dot(x: -0.06, y: 0.08, d: dotSize)
-            dot(x: 0.08, y: 0.06, d: dotSize)
-        }
-    }
-
-    private func dot(x: CGFloat, y: CGFloat, d: CGFloat) -> some View {
-        Circle()
-            .fill(Color.brandGold.opacity(0.7))
-            .frame(width: d, height: d)
-            .offset(x: size * x, y: size * y)
+            .accessibilityHidden(true)
     }
 }
 
-#Preview {
+// MARK: - MVP wordmark + lockups
+//
+// One file ships every variant. Call sites pick a style; the SwiftUI
+// composition handles spacing + alignment + tint inheritance.
+
+/// The MVP wordmark. Three variants:
+/// - `.lockup`   — full wordmark "MVP" at display scale (launch screen, splash)
+/// - `.wordmark` — wordmark in nav/footer scale (smaller of the same thing)
+/// - `.mark`     — standalone "M" only (favicon, app icon crop, watermark)
+struct MVPLogoView: View {
+    enum Variant {
+        case lockup
+        case wordmark
+        case mark
+    }
+
+    var variant: Variant = .lockup
+    /// Total width hint. The view sizes itself proportionally.
+    var size: CGFloat = 200
+    /// Single-color tint applied to all variants.
+    var tint: Color = .inkPrimary
+
+    var body: some View {
+        switch variant {
+        case .lockup, .wordmark:
+            wordmarkText
+                .frame(width: size)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("MVP")
+
+        case .mark:
+            HearthMark(size: size, tint: tint)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("MVP")
+        }
+    }
+
+    // MARK: - Wordmark
+
+    private var wordmarkText: some View {
+        // Fraunces ExtraBold at display scale. Tracking nudged tighter
+        // (~ -2%) at large sizes; Fraunces' variable optical-size axis
+        // (opsz) handles size-specific letterform optimization in the
+        // font itself.
+        Text("MVP")
+            .font(.custom("Fraunces", size: size * 0.30).weight(.heavy))
+            .tracking(size * -0.006)
+            .foregroundColor(tint)
+            .multilineTextAlignment(.center)
+    }
+}
+
+// MARK: - Previews
+
+#Preview("Lockup on cream") {
     ZStack {
-        Color.brandBackground.ignoresSafeArea()
-        MVPLogoView(size: 240)
+        Color.bgCanvas.ignoresSafeArea()
+        MVPLogoView(variant: .lockup, size: 240, tint: .inkPrimary)
+    }
+}
+
+#Preview("Mark only — launch / icon scale") {
+    ZStack {
+        Color.bgCanvas.ignoresSafeArea()
+        MVPLogoView(variant: .mark, size: 200, tint: .inkPrimary)
+    }
+}
+
+#Preview("Wordmark — nav scale") {
+    ZStack {
+        Color.bgCanvas.ignoresSafeArea()
+        MVPLogoView(variant: .wordmark, size: 120, tint: .inkPrimary)
+    }
+}
+
+#Preview("On saffron tile (app-icon composition)") {
+    ZStack {
+        Color.photoSaffron.ignoresSafeArea()
+        MVPLogoView(variant: .mark, size: 240, tint: .inkOnPhotoDark)
     }
 }

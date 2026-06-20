@@ -8,6 +8,9 @@ struct KidsHomeSection: View {
     let baseURL: URL
 
     @StateObject private var vm: KidsHomeViewModel
+    // Persisted flag so HomeView's greeting header can conditionally show
+    // the "Hand to kid" button only when at least one companion exists.
+    @AppStorage("has_kid_companions") private var hasKidCompanions: Bool = false
 
     init(userID: String, baseURL: URL) {
         self.userID = userID
@@ -16,23 +19,23 @@ struct KidsHomeSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: .hearth400) {
             HStack {
                 Text("Companions")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundColor(.brandGray)
+                    .font(.hearthLabel)
+                    .foregroundColor(.inkMuted)
+                    .tracking(0.66)
                     .textCase(.uppercase)
-                    .tracking(0.5)
                 Spacer()
                 if vm.isLoading {
-                    ProgressView().tint(.brandGray).scaleEffect(0.7)
+                    ProgressView().tint(.inkMuted).scaleEffect(0.7)
                 }
             }
 
             if vm.kids.isEmpty && !vm.isLoading {
                 emptyState
             } else {
-                VStack(spacing: 10) {
+                VStack(spacing: .hearth400) {
                     ForEach(vm.kids, id: \.kidName) { kid in
                         NavigationLink(value: KidNavigation.review(kidName: kid.kidName)) {
                             KidCard(
@@ -54,17 +57,31 @@ struct KidsHomeSection: View {
                     .navigationBarTitleDisplayMode(.inline)
             }
         }
-        .task { await vm.refresh() }
+        .task {
+            await vm.refresh()
+            // Surface ACTIVE-companion count to the flag — draft/missing
+            // configs don't count: the Hand-to-kid handoff opens a picker
+            // that has zero pickable options if no kid is enabled, so we
+            // must not show the CTA in that case.
+            hasKidCompanions = vm.kids.contains { $0.status == .active }
+        }
+        .onChange(of: vm.kids.filter({ $0.status == .active }).count) { _, activeCount in
+            hasKidCompanions = activeCount > 0
+        }
     }
 
     private var emptyState: some View {
         Text("Add a kid in onboarding to set up their companion.")
-            .font(.subheadline)
-            .foregroundColor(.brandGray)
-            .padding(14)
+            .font(.hearthBodyMD)
+            .foregroundColor(.inkMuted)
+            .padding(.hearth500)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.brandSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(Color.bgElevated)
+            .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                    .stroke(Color.borderHairline, lineWidth: 1)
+            )
     }
 }
 
@@ -75,53 +92,59 @@ private struct KidCard: View {
     let status: KidsHomeViewModel.Status
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: .hearth400) {
             Circle()
-                .fill(Color.brandGold.opacity(0.25))
+                .fill(Color.accentTint)
                 .frame(width: 44, height: 44)
                 .overlay(
                     Text(String(kidName.prefix(1)))
-                        .font(.headline.weight(.semibold))
-                        .foregroundColor(.brandGold)
+                        .font(.hearthTitleMD)
+                        .foregroundColor(.accentDefault)
                 )
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: .hearth300) {
                 Text(kidName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.white)
+                    .font(.hearthTitleMD)
+                    .foregroundColor(.inkPrimary)
                 Text("\(kidName)'s friend, \(agentName)")
-                    .font(.caption)
-                    .foregroundColor(.brandGray)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
                 if !summary.isEmpty {
                     Text(summary)
-                        .font(.caption2)
-                        .foregroundColor(.brandGray.opacity(0.85))
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkMuted)
                         .lineLimit(2)
                 }
             }
             Spacer()
             statusPill
         }
-        .padding(12)
-        .background(Color.brandSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.hearth400)
+        .background(Color.bgElevated)
+        .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                .stroke(Color.borderHairline, lineWidth: 1)
+        )
     }
 
     private var statusPill: some View {
         let (label, fg, bg): (String, Color, Color) = {
             switch status {
-            case .active:  return ("Active",       .brandBlack, .brandGold)
-            case .draft:   return ("Introduce",    .brandGold,  .brandSurface)
-            case .missing: return ("Set up",       .brandGold,  .brandSurface)
+            case .active:  return ("Active",    .inkOnPhotoLight, .accentDefault)
+            case .draft:   return ("Introduce", .accentDefault,   .accentTint)
+            case .missing: return ("Set up",    .inkMuted,        .bgElevated)
             }
         }()
         return Text(label)
-            .font(.caption2.weight(.semibold))
+            .font(.hearthLabel)
             .foregroundColor(fg)
-            .padding(.horizontal, 10).padding(.vertical, 5)
+            .tracking(0.66)
+            .textCase(.uppercase)
+            .padding(.horizontal, .hearth400).padding(.vertical, .hearth300)
             .background(bg)
             .overlay(
-                Capsule().stroke(status == .active ? Color.clear : Color.brandGold.opacity(0.4),
+                Capsule().stroke(status == .active ? Color.clear : Color.accentDefault.opacity(0.4),
                                  lineWidth: 1)
             )
             .clipShape(Capsule())

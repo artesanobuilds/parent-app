@@ -8,3 +8,32 @@ cms/dist
 .git
 data/*.duckdb
 data/*.duckdb.wal
+
+# Runtime / user-state parquets: NEVER ship local dev DB state to prod.
+# These tables are created by DDL on bootstrap (duckdb_storage.py) and prod
+# keeps its own volume copies. Only the 4 content parquets (categories,
+# articles, community_posts, post_replies) are meant to seed prod.
+data/mvp.parquet
+data/auth_tokens.parquet
+data/kid_credentials.parquet
+data/kid_messages.parquet
+data/consent_records.parquet
+data/moderation_events.parquet
+data/kid_agent_configs.parquet
+data/kid_agent_crisis_locks.parquet
+data/daily_summaries.parquet
+data/tts_usage_daily.parquet
+data/audit_events.parquet
+# Activity planning + Chief-of-Staff (all user state — never seed prod from local)
+data/research_runs.parquet
+data/activity_candidates.parquet
+data/tracked_activities.parquet
+data/calendar_entries.parquet
+data/recurring_appointments.parquet
+data/caregivers.parquet
+data/logistics_assignments.parquet
+data/todo_items.parquet
+data/ingest_artifacts.parquet
+data/cos_messages.parquet
+data/google_oauth_tokens.parquet
+data/eval_reports/

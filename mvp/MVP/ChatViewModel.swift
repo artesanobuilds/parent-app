@@ -7,6 +7,9 @@ final class ChatViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published private var userID: String = ""
 
+    /// Read-only access to the current parent user id (e.g. to hand to the voice surface).
+    var currentUserID: String { userID }
+
     private let service: ChatService
     private let configuration: ServerConfiguration
     private var streamTask: Task<Void, Never>?
@@ -73,6 +76,14 @@ final class ChatViewModel: ObservableObject {
 
     var isUserIDMissing: Bool {
         userID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Append a finished voice-call transcript so the text chat shows the
+    /// just-ended session. No-op if empty. (The agent's memory is already shared
+    /// via the LangGraph thread; this only surfaces the displayed history.)
+    func importMessages(_ msgs: [ChatMessage]) {
+        guard !msgs.isEmpty else { return }
+        messages.append(contentsOf: msgs)
     }
 
     func submitFeedback(messageID: UUID, feedback: MessageFeedback) {

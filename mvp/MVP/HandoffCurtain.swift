@@ -87,13 +87,17 @@ struct HandoffEntryButton: View {
             HStack(spacing: 8) {
                 Image(systemName: "hand.wave")
                 Text("Hand to kid")
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
-            .font(.subheadline.weight(.semibold))
-            .foregroundColor(.brandGold)
-            .padding(.horizontal, 14).padding(.vertical, 8)
+            .font(.hearthBodyMD.weight(.semibold))
+            .foregroundColor(.accentDefault)
+            .padding(.horizontal, 18).padding(.vertical, 10)
+            .background(Color.accentTint)
             .overlay(
-                Capsule().stroke(Color.brandGold.opacity(0.5), lineWidth: 1)
+                Capsule().stroke(Color.accentDefault.opacity(0.35), lineWidth: 1)
             )
+            .clipShape(Capsule())
         }
     }
 }

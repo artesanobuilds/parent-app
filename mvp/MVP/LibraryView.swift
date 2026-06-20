@@ -1,169 +1,165 @@
 import SwiftUI
 
+/// LibraryView — editorial-first browse.
+///
+/// Redesign (June 2026, after Rams/Pentagram critique + UXR research):
+/// - No top filter strips. The previous design stacked category chips +
+///   auto-derived tag pills — two navigation rows pretending to be filters.
+///   Chips/pills filter within a context (Material 3) but here they were
+///   doing two different jobs.
+/// - Editorial-first single scroll: hero "This Week" → 11 parent tiles →
+///   recently published. The grid IS the navigation; no carousel chip row.
+/// - Tags disappear from the top. They live on article detail + (future)
+///   a Search sheet from the nav-bar magnifying-glass icon.
+/// - Community lives at its own CIRCLE tab; LibraryView is editorial only.
 struct LibraryView: View {
     @EnvironmentObject private var contentVM: ContentViewModel
-    @State private var selectedCategory: String? = nil
+    @EnvironmentObject private var configuration: ServerConfiguration
+
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Category filter chips
-                    categoryChips
-                        .padding(.top, 8)
+                VStack(alignment: .leading, spacing: .hearth1000) {
+                    heroCard
+                        .padding(.horizontal, .hearth700)
+                        .padding(.top, .hearth500)
 
-                    if let selected = selectedCategory {
-                        // Filtered view: show items for selected category
-                        let items = contentVM.libraryItems(for: selected)
-                        let posts = contentVM.communityPosts(for: selected)
-                        let categoryName = contentVM.categories.first { $0.id == selected }?.name ?? ""
+                    parentGrid
+                        .padding(.horizontal, .hearth700)
 
-                        if !items.isEmpty {
-                            sectionHeader("Articles", subtitle: categoryName)
-                                .padding(.horizontal)
+                    recentlyPublished
+                        .padding(.horizontal, .hearth700)
 
-                            ForEach(items) { item in
-                                NavigationLink(value: ArticleRoute(id: item.id)) {
-                                    LibraryItemCard(item: item)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.horizontal)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-
-                        if !posts.isEmpty {
-                            sectionHeader("Community", subtitle: categoryName)
-                                .padding(.horizontal)
-                                .padding(.top, 8)
-
-                            ForEach(posts) { post in
-                                NavigationLink(value: PostRoute(id: post.id)) {
-                                    CommunityPostCard(post: post)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.horizontal)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-
-                        if items.isEmpty && posts.isEmpty {
-                            emptyState(categoryName)
-                        }
-                    } else {
-                        // All categories view: horizontal scroll per category
-                        ForEach(contentVM.categories) { category in
-                            let items = contentVM.libraryItems(for: category.id)
-                            if !items.isEmpty {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    HStack(spacing: 6) {
-                                        Text(category.emoji)
-                                            .font(.system(size: 16))
-                                        Text(category.name)
-                                            .font(.footnote.weight(.semibold))
-                                            .foregroundColor(.brandGray)
-                                            .textCase(.uppercase)
-                                            .tracking(0.5)
-                                    }
-                                    .padding(.leading)
-
-                                    ScrollView(.horizontal, showsIndicators: false) {
-                                        HStack(spacing: 12) {
-                                            ForEach(items) { item in
-                                                NavigationLink(value: ArticleRoute(id: item.id)) {
-                                                    LibraryItemCard(item: item)
-                                                        .frame(width: 240)
-                                                }
-                                                .buttonStyle(.plain)
-                                            }
-                                        }
-                                        .padding(.horizontal)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(minLength: 20)
+                    Spacer(minLength: .hearth700)
                 }
             }
-            .background(Color.brandBackground.ignoresSafeArea())
+            .background(Color.bgCanvas.ignoresSafeArea())
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.brandBackground, for: .navigationBar)
+            .toolbarBackground(Color.bgCanvas, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .withContentNavigationDestinations()
         }
     }
 
-    // MARK: - Category Chips
+    // MARK: - Hero "This Week"
 
-    private var categoryChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                chipButton(label: "All", emoji: nil, isSelected: selectedCategory == nil) {
-                    withAnimation(.easeInOut(duration: 0.2)) { selectedCategory = nil }
-                }
-
-                ForEach(contentVM.categories) { category in
-                    chipButton(label: category.name, emoji: category.emoji, isSelected: selectedCategory == category.id) {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            selectedCategory = selectedCategory == category.id ? nil : category.id
+    @ViewBuilder
+    private var heroCard: some View {
+        if let item = featuredItem {
+            NavigationLink(value: ArticleRoute(id: item.id)) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ZStack(alignment: .bottomLeading) {
+                        if let assetName = articleImageAssets[item.id] {
+                            Image(assetName)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(height: 200)
+                                .clipped()
+                        } else {
+                            Color.photoSaffron
+                                .frame(height: 200)
+                            Text(item.emoji)
+                                .font(.system(size: 64))
+                                .padding(.hearth600)
                         }
                     }
+                    .frame(height: 200)
+
+                    VStack(alignment: .leading, spacing: .hearth300) {
+                        Text("This week")
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
+
+                        Text(item.title)
+                            .font(.hearthDisplayMD)
+                            .foregroundColor(.inkPrimary)
+                            .multilineTextAlignment(.leading)
+
+                        Text(item.subtitle)
+                            .font(.hearthBodyMD)
+                            .foregroundColor(.inkSecondary)
+                            .lineLimit(3)
+                    }
+                    .padding(.hearth500)
                 }
+                .background(Color.bgElevated)
+                .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                        .stroke(Color.borderHairline, lineWidth: 1)
+                )
             }
-            .padding(.horizontal)
+            .buttonStyle(.plain)
         }
     }
 
-    private func chipButton(label: String, emoji: String?, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                if let emoji = emoji {
-                    Text(emoji).font(.system(size: 14))
+    // MARK: - 11 parent-category tiles
+
+    private var parentGrid: some View {
+        VStack(alignment: .leading, spacing: .hearth400) {
+            Text("Browse by topic")
+                .font(.hearthLabel)
+                .foregroundColor(.inkMuted)
+                .tracking(0.66)
+                .textCase(.uppercase)
+
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: .hearth400), GridItem(.flexible())],
+                spacing: .hearth400
+            ) {
+                ForEach(contentVM.topLevelCategories) { category in
+                    NavigationLink(value: category.id) {
+                        CategoryTile(category: category)
+                    }
+                    .buttonStyle(.plain)
                 }
-                Text(label)
-                    .font(.caption.weight(.medium))
-                    .lineLimit(1)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(isSelected ? Color.brandGold : Color.brandSurface)
-            .foregroundColor(isSelected ? .brandBlack : .white)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(isSelected ? Color.clear : Color.brandStroke, lineWidth: 1)
-            )
+        }
+    }
+
+    // MARK: - Recently published
+
+    private var recentlyPublished: some View {
+        VStack(alignment: .leading, spacing: .hearth400) {
+            Text("Recently published")
+                .font(.hearthLabel)
+                .foregroundColor(.inkMuted)
+                .tracking(0.66)
+                .textCase(.uppercase)
+
+            // We don't have a real "published_at" wire field yet — take the
+            // last 6 articles by load order as a stand-in. When backend
+            // ships a published_at, sort by that descending here.
+            let recent = Array(contentVM.libraryItems.prefix(6))
+            VStack(spacing: .hearth400) {
+                ForEach(recent) { item in
+                    NavigationLink(value: ArticleRoute(id: item.id)) {
+                        LibraryItemCard(item: item)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 
     // MARK: - Helpers
 
-    private func sectionHeader(_ title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.footnote.weight(.semibold))
-                .foregroundColor(.brandGray)
-                .textCase(.uppercase)
-                .tracking(0.5)
-            Text(subtitle)
-                .font(.headline.weight(.bold))
-                .foregroundColor(.white)
+    /// Pick a featured article for the "This week" hero. Prefers an article
+    /// in the Inner Life / Raising Kids parents; falls back to the first
+    /// available. Stable across loads (no shuffle) so the hero doesn't
+    /// flicker between scrolls.
+    private var featuredItem: APIArticle? {
+        let priorities = ["raising-kids", "family-life", "inner-life", "emotional-wellness"]
+        for p in priorities {
+            if let match = contentVM.libraryItems.first(where: { $0.category == p }) {
+                return match
+            }
         }
-    }
-
-    private func emptyState(_ categoryName: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "tray")
-                .font(.system(size: 32))
-                .foregroundColor(.brandGray.opacity(0.5))
-            Text("No content yet for \(categoryName)")
-                .font(.subheadline)
-                .foregroundColor(.brandGray)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
+        return contentVM.libraryItems.first
     }
 }

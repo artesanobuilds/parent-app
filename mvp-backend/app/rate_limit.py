@@ -18,6 +18,8 @@ CHAT_RATE_PER_MIN = int(os.getenv("RATE_LIMIT_CHAT_PER_MIN", "60"))
 CONFIG_RATE_PER_MIN = int(os.getenv("RATE_LIMIT_CONFIG_PER_MIN", "30"))
 # Token issuance is unauthenticated and a token-flooding amplifier; cap hard.
 AUTH_RATE_PER_HOUR = int(os.getenv("RATE_LIMIT_AUTH_PER_HOUR", "5"))
+# A research run fans out web searches + LLM calls and is expensive; cap per-hour.
+RESEARCH_RATE_PER_HOUR = int(os.getenv("RATE_LIMIT_RESEARCH_PER_HOUR", "20"))
 
 
 @dataclass
@@ -46,6 +48,9 @@ class _RateLimiter:
                     refill_per_sec = cap / 60.0
                 elif klass == "auth":
                     cap = AUTH_RATE_PER_HOUR
+                    refill_per_sec = cap / 3600.0
+                elif klass == "research":
+                    cap = RESEARCH_RATE_PER_HOUR
                     refill_per_sec = cap / 3600.0
                 else:
                     cap = 60

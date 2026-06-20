@@ -82,7 +82,7 @@ private struct SparkleCluster: View {
 /// Wavy underline decoration inspired by CHANI's squiggly dividers
 private struct WavyLine: View {
     var width: CGFloat = 120
-    var color: Color = .brandGold
+    var color: Color = .accentDefault
 
     var body: some View {
         WavyShape()
@@ -111,11 +111,15 @@ private struct WavyShape: Shape {
 struct OnboardingView: View {
     var onComplete: (OnboardingData) -> Void
 
+    @State private var keyboardVisible: Bool = false
     @State private var step: Int = 0
     @State private var parentName: String = ""
     @State private var kids: [KidEntry] = [KidEntry()]
-    @State private var household: String = ""
-    @State private var supportSystem: String = ""
+    // Multi-select: realistic households often combine (e.g. "Two-parent
+    // home" + "Blended family"). Stored as Set in UI; flattened to a
+    // comma-joined String when sent to the backend.
+    @State private var household: Set<String> = []
+    @State private var supportSystem: Set<String> = []
     @State private var energyPattern: String = ""
     @State private var dreadedMoment: String = ""
     @State private var challenges: Set<String> = []
@@ -135,51 +139,59 @@ struct OnboardingView: View {
 
     private let totalSteps = 9  // 0=welcome, 1=name, 2=aboutYou, 3=kids, 4=world, 5=energy, 6=challenges, 7=goals, 8=preview
 
-    private let countryOptions = [
-        ("US", "\u{1F1FA}\u{1F1F8}"),
-        ("MX", "\u{1F1F2}\u{1F1FD}"),
-        ("CA", "\u{1F1E8}\u{1F1E6}"),
-        ("GB", "\u{1F1EC}\u{1F1E7}"),
-        ("Other", "\u{1F310}")
+    // Option lists — each entry is (label, SF Symbol name). The chip renderer
+    // uses `Image(systemName: symbol)` so icons stay tinted with Hearth
+    // tokens and match the editorial line-art aesthetic. Replaces the
+    // previous (label, emoji) tuples that read as kindergarten-app next to
+    // Fraunces typography.
+
+    private let countryOptions: [(label: String, symbol: String)] = [
+        ("US", "globe.americas"),
+        ("MX", "globe.americas"),
+        ("CA", "globe.americas"),
+        ("GB", "globe.europe.africa"),
+        ("Other", "globe")
     ]
 
-    private let languageOptions = [
-        ("English", "\u{1F1FA}\u{1F1F8}"),
-        ("Spanish", "\u{1F1EA}\u{1F1F8}"),
-        ("Mandarin", "\u{1F1E8}\u{1F1F3}"),
-        ("Other", "\u{1F310}")
+    private let languageOptions: [(label: String, symbol: String)] = [
+        ("English", "text.bubble"),
+        ("Spanish", "text.bubble"),
+        ("Mandarin", "text.bubble"),
+        ("Other", "globe")
     ]
 
-    private let parentAgeOptions = [
-        ("<25", "\u{1F331}"),
-        ("25-34", "\u{1F33F}"),
-        ("35-44", "\u{1F33E}"),
-        ("45-54", "\u{1F332}"),
-        ("55+", "\u{1F333}"),
-        ("Prefer not to say", "\u{1F910}")
+    private let parentAgeOptions: [(label: String, symbol: String)] = [
+        ("<25", "person"),
+        ("25-34", "person"),
+        ("35-44", "person"),
+        ("45-54", "person"),
+        ("55+", "person"),
+        ("Prefer not to say", "lock")
     ]
 
-    private let employmentOptions = [
-        ("Stay-at-home", "\u{1F3E1}"),
-        ("Part-time", "\u{1F552}"),
-        ("Full-time", "\u{1F4BC}"),
-        ("Shift work", "\u{1F319}"),
-        ("Self-employed", "\u{1F4BB}"),
-        ("Unemployed", "\u{1F33F}"),
-        ("Other", "\u{2728}")
+    private let employmentOptions: [(label: String, symbol: String)] = [
+        ("Stay-at-home", "house"),
+        ("Part-time", "clock"),
+        ("Full-time", "briefcase"),
+        ("Shift work", "moon.stars"),
+        ("Self-employed", "laptopcomputer"),
+        ("Unemployed", "pause.circle"),
+        ("Other", "ellipsis.circle")
     ]
 
-    private let parentPronounsOptions = [
-        ("she/her", "\u{1F338}"),
-        ("he/him", "\u{1F343}"),
-        ("they/them", "\u{1F308}"),
-        ("Other", "\u{2728}")
+    // Pronouns are text-primary; icon adds noise. Symbol kept for tuple
+    // shape consistency but the chip renderer can drop it when empty.
+    private let parentPronounsOptions: [(label: String, symbol: String)] = [
+        ("she/her", ""),
+        ("he/him", ""),
+        ("they/them", ""),
+        ("Other", "")
     ]
 
-    private let kidPronounsOptions = [
-        ("she/her", "\u{1F338}"),
-        ("he/him", "\u{1F343}"),
-        ("they/them", "\u{1F308}")
+    private let kidPronounsOptions: [(label: String, symbol: String)] = [
+        ("she/her", ""),
+        ("he/him", ""),
+        ("they/them", "")
     ]
 
     private let gradeBandOptions = [
@@ -187,76 +199,76 @@ struct OnboardingView: View {
         "6", "7", "8", "9", "10", "11", "12", "N/A"
     ]
 
-    private let householdOptions = [
-        ("Two-parent home", "\u{1F3E0}"),
-        ("Single parent", "\u{1F4AA}"),
-        ("Co-parenting", "\u{1F91D}"),
-        ("Blended family", "\u{1F33F}"),
-        ("Extended family", "\u{1F46A}"),
-        ("It's complicated", "\u{1F30A}")
+    private let householdOptions: [(label: String, symbol: String)] = [
+        ("Two-parent home", "house.fill"),
+        ("Single parent", "person.fill"),
+        ("Co-parenting", "person.2.fill"),
+        ("Blended family", "person.3.fill"),
+        ("Extended family", "house.and.flag"),
+        ("It's complicated", "questionmark.circle")
     ]
 
-    private let supportOptions = [
-        ("Family nearby", "\u{2764}\u{FE0F}"),
-        ("Childcare/nanny", "\u{1F476}"),
-        ("Partner is hands-on", "\u{1F64C}"),
-        ("Friends & neighbors", "\u{1F3E1}"),
-        ("Online communities", "\u{1F4F1}"),
-        ("Mostly on my own", "\u{1F331}")
+    private let supportOptions: [(label: String, symbol: String)] = [
+        ("Family nearby", "heart"),
+        ("Childcare/nanny", "figure.and.child.holdinghands"),
+        ("Partner is hands-on", "hands.sparkles"),
+        ("Friends & neighbors", "person.3"),
+        ("Online communities", "bubble.left.and.bubble.right"),
+        ("Mostly on my own", "person")
     ]
 
-    private let energyOptions = [
-        ("Morning person", "\u{2600}\u{FE0F}"),
-        ("Night owl", "\u{1F319}"),
-        ("Afternoon peak", "\u{26A1}"),
-        ("Depends on the day", "\u{1F300}")
+    private let energyOptions: [(label: String, symbol: String)] = [
+        ("Morning person", "sunrise"),
+        ("Night owl", "moon.stars"),
+        ("Afternoon peak", "sun.max"),
+        ("Depends on the day", "arrow.triangle.2.circlepath")
     ]
 
-    private let dreadedOptions = [
-        ("Mornings", "\u{23F0}"),
-        ("After school", "\u{1F3EB}"),
-        ("Dinnertime", "\u{1F372}"),
-        ("Bedtime", "\u{1F634}"),
-        ("Weekends", "\u{1F3E0}"),
-        ("Homework hour", "\u{1F4DA}"),
-        ("Transitions", "\u{1F504}"),
-        ("Honestly, all of it", "\u{1F605}")
+    private let dreadedOptions: [(label: String, symbol: String)] = [
+        ("Mornings", "sunrise"),
+        ("After school", "bag"),
+        ("Dinnertime", "fork.knife"),
+        ("Bedtime", "bed.double"),
+        ("Weekends", "calendar"),
+        ("Homework hour", "book"),
+        ("Transitions", "arrow.triangle.swap"),
+        ("Honestly, all of it", "face.smiling")
     ]
 
-    private let temperamentOptions = [
-        ("Spirited", "\u{1F525}"),
-        ("Sensitive", "\u{1F338}"),
-        ("Easy-going", "\u{2600}\u{FE0F}"),
-        ("Strong-willed", "\u{26A1}"),
-        ("Shy/cautious", "\u{1F43A}"),
-        ("Social butterfly", "\u{1F98B}")
+    private let temperamentOptions: [(label: String, symbol: String)] = [
+        ("Spirited", "flame"),
+        ("Sensitive", "heart"),
+        ("Easy-going", "cloud.sun"),
+        ("Strong-willed", "bolt"),
+        ("Shy/cautious", "tortoise"),
+        ("Social butterfly", "figure.wave")
     ]
 
-    private let challengeOptions: [(label: String, emoji: String)] = [
-        ("Morning routines", "\u{2600}\u{FE0F}"),
-        ("Bedtime battles", "\u{1F319}"),
-        ("Big emotions", "\u{1F30A}"),
-        ("Picky eating", "\u{1F966}"),
-        ("Screen time", "\u{1F4F1}"),
-        ("Sibling rivalry", "\u{26A1}"),
-        ("Work-life balance", "\u{2696}\u{FE0F}"),
-        ("Feeling alone in it", "\u{1F49B}"),
-        ("School struggles", "\u{1F4DA}"),
-        ("Behavior changes", "\u{1F504}")
+    private let challengeOptions: [(label: String, symbol: String)] = [
+        ("Morning routines", "sunrise"),
+        ("Bedtime battles", "moon.zzz"),
+        ("Big emotions", "wave.3.left"),
+        ("Picky eating", "fork.knife"),
+        ("Screen time", "iphone"),
+        ("Sibling rivalry", "person.2"),
+        ("Work-life balance", "scale.3d"),
+        ("Feeling alone in it", "person"),
+        ("School struggles", "book.closed"),
+        ("Behavior changes", "arrow.triangle.2.circlepath")
     ]
 
-    private let goalOptions: [(label: String, emoji: String)] = [
-        ("Expert guidance", "\u{1F9E0}"),
-        ("Daily strategies", "\u{1F4CB}"),
-        ("Understanding my child", "\u{1F50D}"),
-        ("Community support", "\u{1F91D}"),
-        ("Managing my stress", "\u{1F9D8}"),
-        ("Building confidence", "\u{1F4AA}")
+    private let goalOptions: [(label: String, symbol: String)] = [
+        ("Expert guidance", "book"),
+        ("Daily strategies", "list.bullet"),
+        ("Understanding my child", "magnifyingglass"),
+        ("Community support", "person.3"),
+        ("Managing my stress", "heart.circle"),
+        ("Building confidence", "figure.stand")
     ]
 
     var body: some View {
         ZStack {
-            Color.brandBackground
+            Color.bgCanvas
                 .ignoresSafeArea()
 
             Group {
@@ -278,8 +290,15 @@ struct OnboardingView: View {
                 removal: .opacity.combined(with: .move(edge: .leading))
             ))
         }
-        .preferredColorScheme(.dark)
-        .onAppear { withAnimation(.easeOut(duration: 0.8)) { appearAnimation = true } }
+        // Phase 1: light mode locked. Dark-mode tokens arrive in Phase 2.
+        .preferredColorScheme(.light)
+        .onAppear { withAnimation(.hearthSlow) { appearAnimation = true } }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            withAnimation(.easeOut(duration: 0.2)) { keyboardVisible = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.easeOut(duration: 0.2)) { keyboardVisible = false }
+        }
     }
 
     // MARK: - Progress Indicator
@@ -288,7 +307,7 @@ struct OnboardingView: View {
         HStack(spacing: 6) {
             ForEach(1..<totalSteps, id: \.self) { i in
                 Capsule()
-                    .fill(i <= current ? Color.brandGold : Color.brandGold.opacity(0.2))
+                    .fill(i <= current ? Color.accentDefault : Color.accentDefault.opacity(0.2))
                     .frame(width: i == current ? 24 : 8, height: 4)
                     .animation(.easeInOut(duration: 0.3), value: current)
             }
@@ -297,104 +316,94 @@ struct OnboardingView: View {
     }
 
     // MARK: - Screen 0: Welcome
+    //
+    // Editorial magazine-cover composition: full-bleed Hearth photo hero
+    // on the upper ~55% of the screen, ink-on-cream content card below
+    // with wordmark + tagline + CTAs. No emoji decorations, no wavy
+    // underlines — the photo carries the warmth, type carries the brand.
+    //
+    // The hero image lives in Assets.xcassets/WelcomeHero.imageset and
+    // is swappable: drop a different MJ generation at the same name and
+    // path, rebuild, no code changes.
 
     private var welcomeScreen: some View {
-        VStack(spacing: 0) {
-            Spacer()
-
-            // Whimsical illustration cluster above logo
-            ZStack {
-                // Floating decorative elements
-                Text("\u{2728}")
-                    .font(.system(size: 28))
-                    .offset(x: -80, y: -40)
-                    .opacity(appearAnimation ? 1 : 0)
-                    .offset(y: appearAnimation ? 0 : 20)
-
-                Text("\u{1F31F}")
-                    .font(.system(size: 22))
-                    .offset(x: 90, y: -30)
-                    .opacity(appearAnimation ? 1 : 0)
-                    .offset(y: appearAnimation ? 0 : 20)
-
-                Text("\u{1F33F}")
-                    .font(.system(size: 24))
-                    .offset(x: -70, y: 50)
-                    .rotationEffect(.degrees(-15))
+        GeometryReader { geo in
+            VStack(spacing: 0) {
+                // ─── Hero photo (full-bleed, top 55%) ──────────────
+                Image("WelcomeHero")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: geo.size.width, height: geo.size.height * 0.55)
+                    .clipped()
                     .opacity(appearAnimation ? 1 : 0)
 
-                Text("\u{2764}\u{FE0F}")
-                    .font(.system(size: 20))
-                    .offset(x: 75, y: 55)
-                    .opacity(appearAnimation ? 1 : 0)
+                // ─── Cream content card (bottom 45%) ───────────────
+                VStack(spacing: 0) {
+                    Spacer(minLength: 32)
 
-                // Logo badge
-                GeometryReader { geo in
-                    MVPLogoView(size: geo.size.width * 0.50)
-                        .frame(maxWidth: .infinity)
-                }
-                .aspectRatio(1, contentMode: .fit)
-            }
-            .padding(.horizontal, 40)
+                    // Wordmark — Fraunces ExtraBold, sits centered above the tagline
+                    MVPLogoView(variant: .lockup, size: 200, tint: .inkPrimary)
 
-            Spacer().frame(height: 24)
+                    Spacer(minLength: 20)
 
-            // Tagline with wavy underline
-            VStack(spacing: 8) {
-                Text("Every parent deserves\nsomeone in their corner.")
-                    .font(.system(.title3, design: .serif).italic())
-                    .foregroundColor(.white.opacity(0.9))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+                    // Tagline — Fraunces italic display, ink/secondary on cream
+                    Text("Every parent deserves\nsomeone in their corner.")
+                        .font(.custom("Fraunces", size: 22).italic())
+                        .foregroundColor(.inkSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                        .lineSpacing(4)
 
-                WavyLine(width: 100, color: .brandGold.opacity(0.5))
-            }
+                    Spacer()
 
-            Spacer()
+                    // CTAs
+                    if isReturningUser {
+                        VStack(spacing: 12) {
+                            onboardingTextField(placeholder: "Your name", text: $returningUserName)
+                                .padding(.horizontal, .hearth700)
 
-            // Returning user section
-            if isReturningUser {
-                VStack(spacing: 16) {
-                    onboardingTextField(placeholder: "Your name", text: $returningUserName)
-                        .padding(.horizontal, 24)
+                            brandButton(label: "Continue", disabled: returningUserName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                                let trimmed = returningUserName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !trimmed.isEmpty else { return }
+                                onComplete(OnboardingData(
+                                    parentName: trimmed, kids: [], household: "",
+                                    supportSystem: "", energyPattern: "", dreadedMoment: "",
+                                    challenges: [], goals: [],
+                                    postalCode: "", country: "", primaryLanguage: "",
+                                    parentAgeRange: "", adultsInHousehold: nil,
+                                    employment: "", culturalBackground: "", pronouns: ""
+                                ))
+                            }
+                            .padding(.horizontal, .hearth700)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    } else {
+                        VStack(spacing: 10) {
+                            brandButton(label: "I'm new here") {
+                                advance(to: 1)
+                            }
+                            .padding(.horizontal, .hearth700)
 
-                    brandButton(label: "Continue", disabled: returningUserName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
-                        let trimmed = returningUserName.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmed.isEmpty else { return }
-                        onComplete(OnboardingData(
-                            parentName: trimmed, kids: [], household: "",
-                            supportSystem: "", energyPattern: "", dreadedMoment: "",
-                            challenges: [], goals: [],
-                            postalCode: "", country: "", primaryLanguage: "",
-                            parentAgeRange: "", adultsInHousehold: nil,
-                            employment: "", culturalBackground: "", pronouns: ""
-                        ))
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.3)) { isReturningUser = true }
+                            } label: {
+                                Text("Welcome back")
+                                    .font(.custom("Inter", size: 15).weight(.semibold))
+                                    .foregroundColor(.inkPrimary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .overlay(Capsule().stroke(Color.borderStrong, lineWidth: 1))
+                            }
+                            .padding(.horizontal, .hearth700)
+                        }
                     }
-                    .padding(.horizontal, 24)
-                }
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            } else {
-                VStack(spacing: 12) {
-                    brandButton(label: "I'm new here") {
-                        advance(to: 1)
-                    }
-                    .padding(.horizontal, 24)
 
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.3)) { isReturningUser = true }
-                    } label: {
-                        Text("Welcome back")
-                            .font(.body.weight(.bold))
-                            .foregroundColor(.brandGold)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .overlay(Capsule().stroke(Color.brandGold, lineWidth: 1.5))
-                    }
-                    .padding(.horizontal, 24)
+                    Spacer().frame(height: 40)
                 }
+                .frame(width: geo.size.width, height: geo.size.height * 0.45)
+                .background(Color.bgCanvas)
             }
-
-            Spacer().frame(height: 48)
+            .ignoresSafeArea(edges: .top)
         }
     }
 
@@ -404,47 +413,26 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 0) {
             onboardingHeader(backTo: 0, step: 1)
 
-            // Illustration: hand-wave collage
-            HStack {
-                Spacer()
-                ZStack {
-                    Text("\u{1F44B}")
-                        .font(.system(size: 56))
-                    Text("\u{2728}")
-                        .font(.system(size: 20))
-                        .offset(x: 35, y: -25)
-                    Text("\u{1F331}")
-                        .font(.system(size: 18))
-                        .offset(x: -30, y: 20)
-                        .rotationEffect(.degrees(-20))
-                }
-                Spacer()
-            }
-            .padding(.top, 8)
-            .padding(.bottom, 16)
+            // Editorial hero — replaces the previous emoji collage. The
+            // photo lives in Assets.xcassets/OnboardingStep1.imageset; swap
+            // the PNG at the same path to refresh without code changes.
+            onboardingStepImage("OnboardingStep1")
+                .padding(.top, 8)
+                .padding(.bottom, 16)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("What should we\ncall you?")
-                    .font(.system(.title, design: .serif).weight(.bold))
-                    .foregroundColor(.white)
+            onboardingHeading("What should we\ncall you?", subtitle: "Just a first name is perfect.")
 
-                Text("Just a first name is perfect.")
-                    .font(.system(.subheadline, design: .serif).italic())
-                    .foregroundColor(.brandGray)
-            }
-            .padding(.horizontal, 24)
-
-            Spacer().frame(height: 32)
+            Spacer().frame(height: .hearth700)
 
             onboardingTextField(placeholder: "Your name", text: $parentName)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, .hearth700)
 
             Spacer()
 
             brandButton(label: "Next", disabled: parentName.trimmed.isEmpty) {
                 advance(to: 2)
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, .hearth700)
             .padding(.bottom, 48)
         }
     }
@@ -459,8 +447,8 @@ struct OnboardingView: View {
                     Spacer()
                     Button { advance(to: 3) } label: {
                         Text("Skip")
-                            .font(.system(.subheadline, design: .serif).weight(.medium))
-                            .foregroundColor(.brandGold)
+                            .font(.hearthBodyMD.weight(.medium))
+                            .foregroundColor(.accentDefault)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 6)
                     }
@@ -469,37 +457,11 @@ struct OnboardingView: View {
                 .padding(.top, 8)
             }
 
-            HStack {
-                Spacer()
-                ZStack {
-                    Text("\u{1F30D}")
-                        .font(.system(size: 44))
-                    Text("\u{1F4CD}")
-                        .font(.system(size: 22))
-                        .offset(x: 32, y: -22)
-                    Text("\u{1F5E3}\u{FE0F}")
-                        .font(.system(size: 20))
-                        .offset(x: -36, y: -10)
-                        .rotationEffect(.degrees(-10))
-                    Text("\u{2728}")
-                        .font(.system(size: 16))
-                        .offset(x: 30, y: 22)
-                }
-                Spacer()
-            }
-            .padding(.top, 4)
-            .padding(.bottom, 12)
+            onboardingStepImage("OnboardingStep2")
+                .padding(.top, 4)
+                .padding(.bottom, 12)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("A little about\nyou")
-                    .font(.system(.title, design: .serif).weight(.bold))
-                    .foregroundColor(.white)
-
-                Text("All optional. Helps us tailor advice to your world.")
-                    .font(.system(.subheadline, design: .serif).italic())
-                    .foregroundColor(.brandGray)
-            }
-            .padding(.horizontal, 24)
+            onboardingHeading("A little about\nyou", subtitle: "All optional. Helps us tailor advice to your world.")
 
             Spacer().frame(height: 16)
 
@@ -508,8 +470,10 @@ struct OnboardingView: View {
                     // Zip + Country row
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Where you are")
-                            .font(.system(.subheadline, design: .serif).weight(.semibold))
-                            .foregroundColor(.brandGold)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
                         HStack(spacing: 12) {
                             onboardingTextField(
@@ -519,29 +483,30 @@ struct OnboardingView: View {
                             )
 
                             Menu {
-                                ForEach(countryOptions, id: \.0) { code, flag in
+                                ForEach(countryOptions, id: \.label) { option in
                                     Button {
-                                        country = code
+                                        country = option.label
                                     } label: {
-                                        Text("\(flag)  \(code)")
+                                        Label(option.label, systemImage: option.symbol)
                                     }
                                 }
                             } label: {
-                                HStack(spacing: 6) {
-                                    Text(countryOptions.first(where: { $0.0 == country })?.1 ?? "\u{1F310}")
+                                HStack(spacing: 8) {
+                                    Image(systemName: countryOptions.first(where: { $0.label == country })?.symbol ?? "globe")
+                                        .font(.system(size: 14, weight: .regular))
                                     Text(country.isEmpty ? "Country" : country)
-                                        .font(.system(.body, design: .serif))
+                                        .font(.hearthBodyMD)
                                     Image(systemName: "chevron.down")
                                         .font(.caption)
                                 }
-                                .foregroundColor(.white)
+                                .foregroundColor(.inkPrimary)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 14)
-                                .background(Color.brandSurface)
+                                .background(Color.bgElevated)
                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(Color.brandStroke, style: StrokeStyle(lineWidth: 1, dash: [6]))
+                                        .stroke(Color.borderHairline, style: StrokeStyle(lineWidth: 1, dash: [6]))
                                 )
                             }
                         }
@@ -550,8 +515,10 @@ struct OnboardingView: View {
                     // Primary language
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Primary language at home")
-                            .font(.system(.subheadline, design: .serif).weight(.semibold))
-                            .foregroundColor(.brandGold)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
                         singleSelectGrid(options: languageOptions, selection: $primaryLanguage)
                     }
@@ -559,8 +526,10 @@ struct OnboardingView: View {
                     // Parent age range
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Your age range")
-                            .font(.system(.subheadline, design: .serif).weight(.semibold))
-                            .foregroundColor(.brandGold)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
                         singleSelectGrid(options: parentAgeOptions, selection: $parentAgeRange)
                     }
@@ -568,38 +537,59 @@ struct OnboardingView: View {
                     // Adults in household
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Adults in your household")
-                            .font(.system(.subheadline, design: .serif).weight(.semibold))
-                            .foregroundColor(.brandGold)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
-                        HStack(spacing: 16) {
-                            Button {
-                                if adultsInHousehold > 1 { adultsInHousehold -= 1 }
-                            } label: {
-                                Image(systemName: "minus.circle")
-                                    .font(.system(size: 28))
-                                    .foregroundColor(.brandGold)
+                        // Pill stepper — one visual unit, single color family,
+                        // sans-serif numeral matches the SF Symbol icon
+                        // language. Min/max enforced via button disabled state.
+                        HStack(spacing: 0) {
+                            HStack(spacing: 0) {
+                                Button {
+                                    if adultsInHousehold > 1 { adultsInHousehold -= 1 }
+                                } label: {
+                                    Image(systemName: "minus")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(adultsInHousehold > 1 ? .inkPrimary : .inkMuted)
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Rectangle())
+                                }
+                                .disabled(adultsInHousehold <= 1)
+
+                                Text("\(adultsInHousehold)")
+                                    .font(.hearthBodyMD.weight(.medium))
+                                    .foregroundColor(.inkPrimary)
+                                    .frame(minWidth: 24)
+                                    .monospacedDigit()
+
+                                Button {
+                                    if adultsInHousehold < 4 { adultsInHousehold += 1 }
+                                } label: {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(adultsInHousehold < 4 ? .inkPrimary : .inkMuted)
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Rectangle())
+                                }
+                                .disabled(adultsInHousehold >= 4)
                             }
-                            Text("\(adultsInHousehold)")
-                                .font(.system(.title2, design: .serif).weight(.bold))
-                                .foregroundColor(.white)
-                                .frame(minWidth: 32)
-                            Button {
-                                if adultsInHousehold < 4 { adultsInHousehold += 1 }
-                            } label: {
-                                Image(systemName: "plus.circle")
-                                    .font(.system(size: 28))
-                                    .foregroundColor(.brandGold)
-                            }
+                            .background(Color.bgElevated)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.borderHairline, lineWidth: 1))
+
                             Spacer()
                         }
-                        .padding(.vertical, 4)
                     }
 
                     // Employment
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Work pattern")
-                            .font(.system(.subheadline, design: .serif).weight(.semibold))
-                            .foregroundColor(.brandGold)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
                         singleSelectGrid(options: employmentOptions, selection: $employment)
                     }
@@ -607,8 +597,10 @@ struct OnboardingView: View {
                     // Pronouns
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Your pronouns")
-                            .font(.system(.subheadline, design: .serif).weight(.semibold))
-                            .foregroundColor(.brandGold)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
                         singleSelectGrid(options: parentPronounsOptions, selection: $pronouns)
                     }
@@ -616,8 +608,10 @@ struct OnboardingView: View {
                     // Cultural background
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Cultural background (optional)")
-                            .font(.system(.subheadline, design: .serif).weight(.semibold))
-                            .foregroundColor(.brandGold)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
                         onboardingTextField(
                             placeholder: "e.g., Mexican-American, South Asian",
@@ -625,14 +619,14 @@ struct OnboardingView: View {
                         )
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, .hearth700)
                 .padding(.bottom, 16)
             }
 
             Spacer()
 
             brandButton(label: "Next") { advance(to: 3) }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, .hearth700)
                 .padding(.bottom, 48)
         }
     }
@@ -643,40 +637,11 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 0) {
             onboardingHeader(backTo: 2, step: 3)
 
-            // Illustration: playful kid-themed collage
-            HStack {
-                Spacer()
-                ZStack {
-                    Text("\u{1F9F8}")
-                        .font(.system(size: 44))
-                        .offset(x: -30)
-                        .rotationEffect(.degrees(-10))
-                    Text("\u{1F3A8}")
-                        .font(.system(size: 36))
-                        .offset(x: 30, y: -5)
-                        .rotationEffect(.degrees(8))
-                    Text("\u{2B50}")
-                        .font(.system(size: 16))
-                        .offset(x: 0, y: -30)
-                    Text("\u{1F308}")
-                        .font(.system(size: 22))
-                        .offset(x: 55, y: -25)
-                }
-                Spacer()
-            }
-            .padding(.top, 4)
-            .padding(.bottom, 12)
+            onboardingStepImage("OnboardingStep3")
+                .padding(.top, 4)
+                .padding(.bottom, 12)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Tell us about your\nlittle ones")
-                    .font(.system(.title, design: .serif).weight(.bold))
-                    .foregroundColor(.white)
-
-                Text("Names, ages, and a peek at their personality.")
-                    .font(.system(.subheadline, design: .serif).italic())
-                    .foregroundColor(.brandGray)
-            }
-            .padding(.horizontal, 24)
+            onboardingHeading("Tell us about your\nlittle ones", subtitle: "Names, ages, and a peek at their personality.")
 
             Spacer().frame(height: 24)
 
@@ -693,13 +658,13 @@ struct OnboardingView: View {
                             Image(systemName: "plus.circle")
                                 .font(.body.weight(.medium))
                             Text("Add another child")
-                                .font(.body.weight(.medium))
+                                .font(.hearthBodyMD.weight(.medium))
                         }
-                        .foregroundColor(.brandGold)
+                        .foregroundColor(.accentDefault)
                     }
                     .padding(.top, 4)
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, .hearth700)
             }
 
             Spacer()
@@ -710,7 +675,7 @@ struct OnboardingView: View {
             ) {
                 advance(to: 4)
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, .hearth700)
             .padding(.bottom, 48)
         }
     }
@@ -722,37 +687,11 @@ struct OnboardingView: View {
             onboardingHeader(backTo: 3, step: 4)
 
             // Illustration: home & family collage
-            HStack {
-                Spacer()
-                ZStack {
-                    Text("\u{1F3E1}")
-                        .font(.system(size: 48))
-                    Text("\u{1F343}")
-                        .font(.system(size: 22))
-                        .offset(x: -40, y: -15)
-                        .rotationEffect(.degrees(-30))
-                    Text("\u{2728}")
-                        .font(.system(size: 18))
-                        .offset(x: 40, y: -20)
-                    Text("\u{1F49B}")
-                        .font(.system(size: 16))
-                        .offset(x: 35, y: 20)
-                }
-                Spacer()
-            }
-            .padding(.top, 4)
-            .padding(.bottom, 12)
+            onboardingStepImage("OnboardingStep4")
+                .padding(.top, 4)
+                .padding(.bottom, 12)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Paint us a picture\nof your world")
-                    .font(.system(.title, design: .serif).weight(.bold))
-                    .foregroundColor(.white)
-
-                Text("No right answers. Just your reality.")
-                    .font(.system(.subheadline, design: .serif).italic())
-                    .foregroundColor(.brandGray)
-            }
-            .padding(.horizontal, 24)
+            onboardingHeading("Paint us a picture\nof your world", subtitle: "No right answers. Just your reality.")
 
             Spacer().frame(height: 24)
 
@@ -761,28 +700,32 @@ struct OnboardingView: View {
                     // Household
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Your household")
-                            .font(.system(.subheadline, design: .serif).weight(.semibold))
-                            .foregroundColor(.brandGold)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
-                        singleSelectGrid(options: householdOptions, selection: $household)
+                        multiSelectGrid(options: householdOptions, selection: $household)
                     }
 
                     // Support system
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Your support crew")
-                            .font(.system(.subheadline, design: .serif).weight(.semibold))
-                            .foregroundColor(.brandGold)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
-                        singleSelectGrid(options: supportOptions, selection: $supportSystem)
+                        multiSelectGrid(options: supportOptions, selection: $supportSystem)
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, .hearth700)
             }
 
             Spacer()
 
             brandButton(label: "Next") { advance(to: 5) }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, .hearth700)
                 .padding(.bottom, 48)
         }
     }
@@ -793,39 +736,11 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 0) {
             onboardingHeader(backTo: 4, step: 5)
 
-            // Illustration: energy/time collage
-            HStack {
-                Spacer()
-                ZStack {
-                    Text("\u{23F0}")
-                        .font(.system(size: 44))
-                        .rotationEffect(.degrees(-8))
-                    Text("\u{26A1}")
-                        .font(.system(size: 24))
-                        .offset(x: 35, y: -20)
-                    Text("\u{1F319}")
-                        .font(.system(size: 22))
-                        .offset(x: -35, y: -18)
-                    Text("\u{2615}")
-                        .font(.system(size: 20))
-                        .offset(x: -30, y: 22)
-                        .rotationEffect(.degrees(10))
-                }
-                Spacer()
-            }
-            .padding(.top, 4)
-            .padding(.bottom, 12)
+            onboardingStepImage("OnboardingStep5")
+                .padding(.top, 4)
+                .padding(.bottom, 12)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("When do you feel\nmost yourself?")
-                    .font(.system(.title, design: .serif).weight(.bold))
-                    .foregroundColor(.white)
-
-                Text("And when does it all feel like... a lot?")
-                    .font(.system(.subheadline, design: .serif).italic())
-                    .foregroundColor(.brandGray)
-            }
-            .padding(.horizontal, 24)
+            onboardingHeading("When do you feel\nmost yourself?", subtitle: "And when does it all feel like... a lot?")
 
             Spacer().frame(height: 24)
 
@@ -834,8 +749,10 @@ struct OnboardingView: View {
                     // Energy pattern
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Your energy sweet spot")
-                            .font(.system(.subheadline, design: .serif).weight(.semibold))
-                            .foregroundColor(.brandGold)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
                         singleSelectGrid(options: energyOptions, selection: $energyPattern)
                     }
@@ -843,19 +760,21 @@ struct OnboardingView: View {
                     // Dreaded moment
                     VStack(alignment: .leading, spacing: 12) {
                         Text("The part of the day you dread")
-                            .font(.system(.subheadline, design: .serif).weight(.semibold))
-                            .foregroundColor(.brandGold)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
                         singleSelectGrid(options: dreadedOptions, selection: $dreadedMoment)
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, .hearth700)
             }
 
             Spacer()
 
             brandButton(label: "Next") { advance(to: 6) }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, .hearth700)
                 .padding(.bottom, 48)
         }
     }
@@ -866,47 +785,23 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 0) {
             onboardingHeader(backTo: 5, step: 6)
 
-            // Illustration
-            HStack {
-                Spacer()
-                ZStack {
-                    Text("\u{1F30A}")
-                        .font(.system(size: 44))
-                    Text("\u{1F9E1}")
-                        .font(.system(size: 22))
-                        .offset(x: 35, y: -22)
-                    Text("\u{1F343}")
-                        .font(.system(size: 20))
-                        .offset(x: -38, y: -10)
-                        .rotationEffect(.degrees(15))
-                }
-                Spacer()
-            }
-            .padding(.top, 4)
-            .padding(.bottom, 12)
+            onboardingStepImage("OnboardingStep6")
+                .padding(.top, 4)
+                .padding(.bottom, 12)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("What feels hardest\nright now?")
-                    .font(.system(.title, design: .serif).weight(.bold))
-                    .foregroundColor(.white)
-
-                Text("Pick as many as you want. No judgment here.")
-                    .font(.system(.subheadline, design: .serif).italic())
-                    .foregroundColor(.brandGray)
-            }
-            .padding(.horizontal, 24)
+            onboardingHeading("What feels hardest\nright now?", subtitle: "Pick as many as you want. No judgment here.")
 
             Spacer().frame(height: 24)
 
             ScrollView {
                 chipGrid(options: challengeOptions, selection: $challenges)
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, .hearth700)
             }
 
             Spacer()
 
             brandButton(label: "Next") { advance(to: 7) }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, .hearth700)
                 .padding(.bottom, 48)
         }
     }
@@ -917,50 +812,23 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 0) {
             onboardingHeader(backTo: 6, step: 7)
 
-            // Illustration
-            HStack {
-                Spacer()
-                ZStack {
-                    Text("\u{1F3AF}")
-                        .font(.system(size: 44))
-                    Text("\u{2728}")
-                        .font(.system(size: 20))
-                        .offset(x: -35, y: -18)
-                    Text("\u{1F31F}")
-                        .font(.system(size: 18))
-                        .offset(x: 38, y: -15)
-                    Text("\u{1F33F}")
-                        .font(.system(size: 18))
-                        .offset(x: 30, y: 22)
-                        .rotationEffect(.degrees(20))
-                }
-                Spacer()
-            }
-            .padding(.top, 4)
-            .padding(.bottom, 12)
+            onboardingStepImage("OnboardingStep7")
+                .padding(.top, 4)
+                .padding(.bottom, 12)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("What are you\nhoping for?")
-                    .font(.system(.title, design: .serif).weight(.bold))
-                    .foregroundColor(.white)
-
-                Text("This helps us point you in the right direction.")
-                    .font(.system(.subheadline, design: .serif).italic())
-                    .foregroundColor(.brandGray)
-            }
-            .padding(.horizontal, 24)
+            onboardingHeading("What are you\nhoping for?", subtitle: "This helps us point you in the right direction.")
 
             Spacer().frame(height: 24)
 
             ScrollView {
                 chipGrid(options: goalOptions, selection: $goals)
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, .hearth700)
             }
 
             Spacer()
 
             brandButton(label: "Next") { advance(to: 8) }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, .hearth700)
                 .padding(.bottom, 48)
         }
     }
@@ -971,18 +839,20 @@ struct OnboardingView: View {
     /// (e.g., returning user who bypassed the demographic step).
     private func parentSummaryChips() -> [String] {
         var parts: [String] = []
-        let flag = countryOptions.first(where: { $0.0 == country })?.1 ?? "\u{1F4CD}"
+        // Summary chips are plain strings (no SF Symbol — they render in
+        // the recap view as Fraunces text). Drop the icon entirely; the
+        // country code or postal code alone is informative.
         if !postalCode.trimmed.isEmpty {
-            parts.append("\(flag) \(postalCode.trimmed)")
+            parts.append(postalCode.trimmed)
         } else if !country.isEmpty && country != "US" {
-            parts.append("\(flag) \(country)")
+            parts.append(country)
         }
         if !primaryLanguage.isEmpty { parts.append(primaryLanguage) }
         if !parentAgeRange.isEmpty { parts.append(parentAgeRange) }
         if !employment.isEmpty { parts.append(employment) }
         if !pronouns.isEmpty { parts.append(pronouns) }
         if !culturalBackground.trimmed.isEmpty { parts.append(culturalBackground.trimmed) }
-        if !household.isEmpty { parts.append(household) }
+        if !household.isEmpty { parts.append(household.sorted().joined(separator: ", ")) }
         // Only surface the adults count if the user touched any other field on the About-you step
         if !parts.isEmpty { parts.append("\(adultsInHousehold) adult\(adultsInHousehold == 1 ? "" : "s")") }
         return parts
@@ -1006,14 +876,12 @@ struct OnboardingView: View {
 
         if hasAnything {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Here's what we have")
-                    .font(.system(.subheadline, design: .serif).weight(.semibold))
-                    .foregroundColor(.brandGold)
+                sectionLabel("Here's what we have")
 
                 if !parentChips.isEmpty {
                     Text(parentChips.joined(separator: " · "))
                         .font(.system(.subheadline, design: .serif))
-                        .foregroundColor(.white)
+                        .foregroundColor(.inkPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -1023,18 +891,18 @@ struct OnboardingView: View {
                             .font(.system(size: 14))
                         Text(kidSummaryLine(kid))
                             .font(.system(.subheadline, design: .serif))
-                            .foregroundColor(.white)
+                            .foregroundColor(.inkPrimary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.brandSurface.opacity(0.5))
+            .background(Color.bgElevated.opacity(0.5))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.brandStroke, lineWidth: 1)
+                    .stroke(Color.borderHairline, lineWidth: 1)
             )
         }
     }
@@ -1053,39 +921,13 @@ struct OnboardingView: View {
             onboardingHeader(backTo: 7, step: 8)
 
             // Celebration collage
-            HStack {
-                Spacer()
-                ZStack {
-                    Text("\u{1F389}")
-                        .font(.system(size: 44))
-                    Text("\u{2B50}")
-                        .font(.system(size: 20))
-                        .offset(x: -35, y: -20)
-                    Text("\u{1F38A}")
-                        .font(.system(size: 26))
-                        .offset(x: 38, y: -12)
-                    Text("\u{2728}")
-                        .font(.system(size: 18))
-                        .offset(x: -25, y: 22)
-                    Text("\u{1F31F}")
-                        .font(.system(size: 14))
-                        .offset(x: 42, y: 22)
-                }
-                Spacer()
-            }
-            .padding(.top, 4)
-            .padding(.bottom, 12)
+            onboardingStepImage("OnboardingStep8")
+                .padding(.top, 4)
+                .padding(.bottom, 12)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("And here's a peek\nat the goodness")
-                    .font(.system(.title, design: .serif).weight(.bold))
-                    .foregroundColor(.white)
+            onboardingHeading("And here's a peek\nat the goodness")
 
-                WavyLine(width: 140, color: .brandGold.opacity(0.4))
-            }
-            .padding(.horizontal, 24)
-
-            Spacer().frame(height: 24)
+            Spacer().frame(height: .hearth700)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
@@ -1099,12 +941,12 @@ struct OnboardingView: View {
 
                                 Text(text)
                                     .font(.system(.body, design: .serif).weight(.medium))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(.inkPrimary)
                             }
                         }
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, .hearth700)
                 .padding(.bottom, 16)
             }
 
@@ -1122,8 +964,8 @@ struct OnboardingView: View {
                 onComplete(OnboardingData(
                     parentName: displayName,
                     kids: kidData,
-                    household: household,
-                    supportSystem: supportSystem,
+                    household: household.sorted().joined(separator: ", "),
+                    supportSystem: supportSystem.sorted().joined(separator: ", "),
                     energyPattern: energyPattern,
                     dreadedMoment: dreadedMoment,
                     challenges: Array(challenges),
@@ -1138,7 +980,7 @@ struct OnboardingView: View {
                     pronouns: pronouns
                 ))
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, .hearth700)
             .padding(.bottom, 48)
         }
     }
@@ -1149,13 +991,72 @@ struct OnboardingView: View {
         withAnimation(.easeInOut(duration: 0.3)) { step = target }
     }
 
+    /// Shared section-label style — UPPERCASE caption-mono, ink/muted,
+    /// tracked. Used above every chip grid (Your household / Your support
+    /// crew / Your energy sweet spot / etc.). Matches the section-label
+    /// pattern in LibraryView + HomeView for cross-screen consistency.
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.hearthLabel)
+            .foregroundColor(.inkMuted)
+            .tracking(0.66)
+            .textCase(.uppercase)
+    }
+
+    /// Shared frame for the editorial photo at the top of each onboarding
+    /// step. Centered on the page. 180pt square, soft rounded corners,
+    /// hairline border. Headings are centered to match (see
+    /// `onboardingHeading` helper); form fields below stay leading-aligned.
+    /// Each step references its own image asset by name so a designer can
+    /// swap any one screen's photo without touching the other 8.
+    @ViewBuilder
+    private func onboardingStepImage(_ assetName: String) -> some View {
+        if !keyboardVisible {
+            HStack {
+                Spacer()
+                Image(assetName)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 180, height: 180)
+                    .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                            .stroke(Color.borderHairline, lineWidth: 1)
+                    )
+                Spacer()
+            }
+        }
+    }
+
+    /// Centered heading + optional subtitle pair. Used at the top of every
+    /// onboarding funnel step so the title block visually aligns with the
+    /// centered editorial photo above it. Form fields below the heading
+    /// remain leading-aligned (chip grids + inputs scan better that way).
+    private func onboardingHeading(_ title: String, subtitle: String? = nil) -> some View {
+        VStack(spacing: keyboardVisible ? 2 : 6) {
+            Text(title)
+                .font(keyboardVisible ? .hearthTitleLG : .hearthDisplayMD)
+                .foregroundColor(.inkPrimary)
+                .multilineTextAlignment(.center)
+
+            if !keyboardVisible, let subtitle = subtitle {
+                Text(subtitle)
+                    .font(.hearthBodyMD.italic())
+                    .foregroundColor(.inkSecondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, .hearth700)
+    }
+
     private func onboardingHeader(backTo target: Int, step current: Int) -> some View {
         VStack(spacing: 0) {
             HStack {
                 Button { advance(to: target) } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(.inkPrimary)
                         .frame(width: 44, height: 44)
                 }
                 Spacer()
@@ -1168,17 +1069,17 @@ struct OnboardingView: View {
     }
 
     private func onboardingTextField(placeholder: String, text: Binding<String>, keyboardType: UIKeyboardType = .default, width: CGFloat? = nil) -> some View {
-        TextField("", text: text, prompt: Text(placeholder).foregroundColor(.brandGray))
-            .font(.system(.body, design: .serif))
-            .foregroundColor(.white)
+        TextField("", text: text, prompt: Text(placeholder).foregroundColor(.inkMuted))
+            .font(.hearthBodyLG)
+            .foregroundColor(.inkPrimary)
             .keyboardType(keyboardType)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(Color.brandSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(.horizontal, .hearth500)
+            .padding(.vertical, .hearth400)
+            .background(Color.bgElevated)
+            .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.brandStroke, style: StrokeStyle(lineWidth: 1, dash: [6]))
+                RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                    .stroke(Color.borderStrong, lineWidth: 1)
             )
             .frame(width: width)
     }
@@ -1186,12 +1087,12 @@ struct OnboardingView: View {
     private func brandButton(label: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(.body, design: .serif).weight(.bold))
-                .foregroundColor(.brandBlack)
+                .font(.hearthTitleMD)
+                .foregroundColor(.inkOnPhotoLight)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(Color.brandGold)
-                .clipShape(Capsule())
+                .padding(.vertical, .hearth500)
+                .background(Color.accentDefault)
+                .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
         }
         .disabled(disabled)
         .opacity(disabled ? 0.5 : 1.0)
@@ -1213,7 +1114,7 @@ struct OnboardingView: View {
                     Button { kids.remove(at: index) } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 22))
-                            .foregroundColor(.brandGray)
+                            .foregroundColor(.inkSecondary)
                     }
                 }
             }
@@ -1223,29 +1124,35 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("What's \(kids[index].name.trimmed.isEmpty ? "their" : kids[index].name.trimmed)'s vibe?")
                         .font(.system(.caption, design: .serif).italic())
-                        .foregroundColor(.brandGray)
+                        .foregroundColor(.inkSecondary)
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(temperamentOptions, id: \.0) { label, emoji in
-                                let isSelected = kids[index].temperament == label
+                            ForEach(temperamentOptions, id: \.label) { option in
+                                let isSelected = kids[index].temperament == option.label
                                 Button {
                                     withAnimation(.easeInOut(duration: 0.15)) {
-                                        kids[index].temperament = isSelected ? "" : label
+                                        kids[index].temperament = isSelected ? "" : option.label
                                     }
                                 } label: {
-                                    HStack(spacing: 4) {
-                                        Text(emoji).font(.system(size: 14))
-                                        Text(label)
-                                            .font(.system(.caption, design: .serif).weight(.medium))
+                                    HStack(spacing: 6) {
+                                        if !option.symbol.isEmpty {
+                                            Image(systemName: option.symbol)
+                                                .font(.system(size: 12, weight: .regular))
+                                                .symbolRenderingMode(.monochrome)
+                                        }
+                                        Text(option.label)
+                                            .font(.hearthBodySM.weight(.medium))
+                                            .lineLimit(1)
+                                            .fixedSize(horizontal: true, vertical: false)
                                     }
-                                    .foregroundColor(isSelected ? .brandBlack : .white)
+                                    .foregroundColor(isSelected ? .inkOnPhotoLight : .inkPrimary)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 8)
-                                    .background(isSelected ? Color.brandGold : Color.brandSurface)
+                                    .background(isSelected ? Color.accentDefault : Color.bgElevated)
                                     .clipShape(Capsule())
                                     .overlay(
-                                        Capsule().stroke(isSelected ? Color.clear : Color.brandStroke, lineWidth: 1)
+                                        Capsule().stroke(isSelected ? Color.clear : Color.borderHairline, lineWidth: 1)
                                     )
                                 }
                             }
@@ -1257,26 +1164,25 @@ struct OnboardingView: View {
                 HStack(spacing: 10) {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
-                            ForEach(kidPronounsOptions, id: \.0) { label, emoji in
-                                let isSelected = kids[index].pronouns == label
+                            ForEach(kidPronounsOptions, id: \.label) { option in
+                                let isSelected = kids[index].pronouns == option.label
                                 Button {
                                     withAnimation(.easeInOut(duration: 0.15)) {
-                                        kids[index].pronouns = isSelected ? "" : label
+                                        kids[index].pronouns = isSelected ? "" : option.label
                                     }
                                 } label: {
-                                    HStack(spacing: 4) {
-                                        Text(emoji).font(.system(size: 12))
-                                        Text(label)
-                                            .font(.system(.caption2, design: .serif).weight(.medium))
-                                    }
-                                    .foregroundColor(isSelected ? .brandBlack : .white)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(isSelected ? Color.brandGold : Color.brandSurface)
-                                    .clipShape(Capsule())
-                                    .overlay(
-                                        Capsule().stroke(isSelected ? Color.clear : Color.brandStroke, lineWidth: 1)
-                                    )
+                                    Text(option.label)
+                                        .font(.hearthBodySM.weight(.medium))
+                                        .lineLimit(1)
+                                        .fixedSize(horizontal: true, vertical: false)
+                                        .foregroundColor(isSelected ? .inkOnPhotoLight : .inkPrimary)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 6)
+                                        .background(isSelected ? Color.accentDefault : Color.bgElevated)
+                                        .clipShape(Capsule())
+                                        .overlay(
+                                            Capsule().stroke(isSelected ? Color.clear : Color.borderHairline, lineWidth: 1)
+                                        )
                                 }
                             }
                         }
@@ -1295,60 +1201,47 @@ struct OnboardingView: View {
                             Image(systemName: "chevron.down")
                                 .font(.caption2)
                         }
-                        .foregroundColor(.white)
+                        .foregroundColor(.inkPrimary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Color.brandSurface)
+                        .background(Color.bgElevated)
                         .clipShape(Capsule())
                         .overlay(
-                            Capsule().stroke(Color.brandStroke, lineWidth: 1)
+                            Capsule().stroke(Color.borderHairline, lineWidth: 1)
                         )
                     }
                 }
             }
         }
         .padding(16)
-        .background(Color.brandSurface.opacity(0.5))
+        .background(Color.bgElevated.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.brandStroke, lineWidth: 1)
+                .stroke(Color.borderHairline, lineWidth: 1)
         )
     }
 
-    private func singleSelectGrid(options: [(String, String)], selection: Binding<String>) -> some View {
+    private func singleSelectGrid(options: [(label: String, symbol: String)], selection: Binding<String>) -> some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            ForEach(options, id: \.0) { label, emoji in
-                let isSelected = selection.wrappedValue == label
+            ForEach(options, id: \.label) { option in
+                let isSelected = selection.wrappedValue == option.label
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) {
-                        selection.wrappedValue = isSelected ? "" : label
+                        selection.wrappedValue = isSelected ? "" : option.label
                     }
                 } label: {
-                    HStack(spacing: 6) {
-                        Text(emoji).font(.system(size: 16))
-                        Text(label)
-                            .font(.system(.subheadline, design: .serif).weight(.medium))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    .foregroundColor(isSelected ? .brandBlack : .white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity)
-                    .background(isSelected ? Color.brandGold : Color.brandSurface)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(isSelected ? Color.clear : Color.brandStroke, lineWidth: 1)
-                    )
+                    chipLabel(symbol: option.symbol, label: option.label, isSelected: isSelected)
                 }
             }
         }
     }
 
-    private func chipGrid(options: [(label: String, emoji: String)], selection: Binding<Set<String>>) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+    /// Multi-select variant of singleSelectGrid. Tapping toggles each option
+    /// independently — used on screens like "Your household" and "Your
+    /// support crew" where multiple answers are realistic.
+    private func multiSelectGrid(options: [(label: String, symbol: String)], selection: Binding<Set<String>>) -> some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
             ForEach(options, id: \.label) { option in
                 let isSelected = selection.wrappedValue.contains(option.label)
                 Button {
@@ -1360,26 +1253,45 @@ struct OnboardingView: View {
                         }
                     }
                 } label: {
-                    HStack(spacing: 6) {
-                        Text(option.emoji).font(.system(size: 16))
-                        Text(option.label)
-                            .font(.system(.subheadline, design: .serif).weight(.medium))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    .foregroundColor(isSelected ? .brandBlack : .white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity)
-                    .background(isSelected ? Color.brandGold : Color.brandSurface)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(isSelected ? Color.clear : Color.brandStroke, lineWidth: 1)
-                    )
+                    chipLabel(symbol: option.symbol, label: option.label, isSelected: isSelected)
                 }
             }
         }
+    }
+
+    /// Alias for the 2-col multi-select grid kept distinct in name for
+    /// caller-readability (challenges / goals read more naturally as
+    /// `chipGrid` than `multiSelectGrid`).
+    private func chipGrid(options: [(label: String, symbol: String)], selection: Binding<Set<String>>) -> some View {
+        multiSelectGrid(options: options, selection: selection)
+    }
+
+    /// Shared chip-button label — keeps colors + spacing consistent across
+    /// all chip grids. Renders an SF Symbol prefix when `symbol` is
+    /// non-empty; otherwise the chip is text-only (used for pronouns and
+    /// other label-primary options where an icon would be noise).
+    private func chipLabel(symbol: String, label: String, isSelected: Bool) -> some View {
+        HStack(spacing: 8) {
+            if !symbol.isEmpty {
+                Image(systemName: symbol)
+                    .font(.system(size: 14, weight: .regular))
+                    .symbolRenderingMode(.monochrome)
+            }
+            Text(label)
+                .font(.hearthBodyMD.weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .foregroundColor(isSelected ? .inkOnPhotoLight : .inkPrimary)
+        .padding(.horizontal, .hearth500)
+        .padding(.vertical, .hearth400)
+        .frame(maxWidth: .infinity)
+        .background(isSelected ? Color.accentDefault : Color.bgElevated)
+        .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                .stroke(isSelected ? Color.clear : Color.borderHairline, lineWidth: 1)
+        )
     }
 }
 

@@ -24,23 +24,23 @@ struct ChatView: View {
             VStack(spacing: 0) {
                 modeHeader
                 messageList
-                Divider()
+                Divider().background(Color.borderHairline)
                 inputArea
             }
             .navigationTitle(agentMode.navTitle)
-            .toolbarBackground(Color.brandBackground, for: .navigationBar)
+            .toolbarBackground(Color.bgCanvas, for: .navigationBar)
             .toolbarColorScheme(.light, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
-                        withAnimation { viewModel.resetConversation() }
+                        withAnimation(.hearthBase) { viewModel.resetConversation() }
                     } label: {
                         ToolbarBadge(icon: "arrow.counterclockwise", title: "Reset")
                     }
                     .disabled(viewModel.isSending)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: .hearth400) {
                         Button {
                             isShowingSettings = true
                         } label: {
@@ -131,42 +131,41 @@ struct ChatView: View {
             } message: {
                 Text(viewModel.errorMessage ?? "")
             }
-            .tint(.brandCoral)
-            .background(Color.brandBackground.ignoresSafeArea())
+            .tint(.accentDefault)
+            .background(Color.bgCanvas.ignoresSafeArea())
         }
     }
 
     private var modeHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: .hearth300) {
             HStack {
                 Text(agentMode.navTitle)
-                    .font(.headline)
-                    .foregroundColor(.brandNavy)
+                    .font(.hearthTitleLG)
+                    .foregroundColor(.inkPrimary)
                 Spacer()
             }
             Text(agentMode.description)
-                .font(.subheadline)
-                .foregroundColor(.brandNavy.opacity(0.7))
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkMuted)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .padding(.top, 6)
-        .background(Color.brandBackground)
+        .padding(.horizontal, .hearth700)
+        .padding(.vertical, .hearth400)
+        .background(Color.bgCanvas)
     }
 
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 12) {
+                LazyVStack(spacing: .hearth400) {
                     ForEach(viewModel.messages) { message in
                         ChatBubble(message: message)
                             .id(message.id)
-                            .padding(.horizontal, 12)
+                            .padding(.horizontal, .hearth400)
                     }
                 }
-                .padding(.vertical)
+                .padding(.vertical, .hearth500)
             }
-            .background(Color.brandBackground)
+            .background(Color.bgCanvas)
             .onChange(of: viewModel.messages) { _, newValue in
                 guard newValue.last?.isStreaming == true else { return }
                 scrollToBottom(proxy: proxy)
@@ -178,56 +177,56 @@ struct ChatView: View {
     }
 
     private var inputArea: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: .hearth300) {
             if let baseURL = configuration.baseURL {
                 Text("Connected to \(baseURL.absoluteString)")
-                    .font(.caption)
-                    .foregroundColor(.brandNavy.opacity(0.7))
+                    .font(.hearthCaptionMono)
+                    .foregroundColor(.inkMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
+                    .padding(.horizontal, .hearth700)
             } else {
                 Text("Enter a valid server URL in Settings.")
-                    .font(.caption)
-                    .foregroundColor(.red)
+                    .font(.hearthCaptionMono)
+                    .foregroundColor(.statusError)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
+                    .padding(.horizontal, .hearth700)
             }
 
-            HStack(alignment: .bottom, spacing: 8) {
+            HStack(alignment: .bottom, spacing: .hearth300) {
                 TextField("Type a message", text: $messageText, axis: .vertical)
-                    .padding(12)
+                    .padding(.hearth400)
                     .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color.brandSurface)
+                        RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                            .fill(Color.bgElevated)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .stroke(Color.brandStroke, lineWidth: 1)
+                                RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                                    .stroke(Color.borderStrong, lineWidth: 1)
                             )
                     )
                     .lineLimit(1...4)
                     .disabled(viewModel.isSending || configuration.baseURL == nil || viewModel.isUserIDMissing)
                     .textInputAutocapitalization(.sentences)
                     .onSubmit(sendMessage)
-                    .foregroundColor(.brandNavy)
+                    .foregroundColor(.inkPrimary)
+                    .font(.hearthBodyMD)
 
                 Button {
                     sendMessage()
                 } label: {
                     Image(systemName: "paperplane.fill")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(.inkOnPhotoLight)
                         .frame(width: 46, height: 46)
                         .background(
                             Circle()
-                                .fill(Color.brandCoral)
-                                .shadow(color: Color.black.opacity(0.12), radius: 8, y: 3)
+                                .fill(Color.accentDefault)
                         )
                 }
                 .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSending || configuration.baseURL == nil || viewModel.isUserIDMissing)
             }
-            .padding([.horizontal, .bottom])
+            .padding([.horizontal, .bottom], .hearth500)
         }
-        .background(Color.brandBackground)
+        .background(Color.bgCanvas)
     }
 
     private func sendMessage() {
@@ -241,7 +240,7 @@ struct ChatView: View {
     private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool = true) {
         guard let lastID = viewModel.messages.last?.id else { return }
         if animated {
-            withAnimation {
+            withAnimation(.hearthBase) {
                 proxy.scrollTo(lastID, anchor: .bottom)
             }
         } else {
@@ -258,38 +257,45 @@ private struct ChatBubble: View {
     var body: some View {
         HStack {
             if message.role == .assistant { avatar }
-            if message.role == .assistant { bubble(alignment: .leading, color: Color.brandSurface, textColor: .brandNavy) }
+            if message.role == .assistant {
+                bubble(alignment: .leading, color: Color.bgElevated, textColor: .inkPrimary)
+            }
             else { Spacer(minLength: 24) }
 
-            if message.role == .user { bubble(alignment: .trailing, color: Color.brandCoral, textColor: .white) }
+            if message.role == .user {
+                bubble(alignment: .trailing, color: Color.accentDefault, textColor: .inkOnPhotoLight)
+            }
             if message.role == .user { avatar }
         }
         .frame(maxWidth: .infinity, alignment: message.role == .assistant ? .leading : .trailing)
     }
 
     private func bubble(alignment: HorizontalAlignment, color: Color, textColor: Color) -> some View {
-        VStack(alignment: alignment, spacing: 6) {
+        VStack(alignment: alignment, spacing: .hearth300) {
             renderedContent(alignment: alignment)
             if message.isStreaming {
                 ProgressView()
                     .scaleEffect(0.7, anchor: .center)
             }
         }
-        .padding(12)
+        .padding(.hearth400)
         .background(color)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: Color.black.opacity(alignment == .leading ? 0.03 : 0.07), radius: 8, y: 4)
+        .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                .stroke(message.role == .assistant ? Color.borderHairline : Color.clear, lineWidth: 1)
+        )
         .frame(maxWidth: UIScreen.main.bounds.width * 0.9, alignment: alignment == .leading ? .leading : .trailing)
         .foregroundColor(textColor)
     }
 
     private var avatar: some View {
         Circle()
-            .fill(message.role == .assistant ? Color.brandCoral.opacity(0.9) : Color.brandNavy.opacity(0.6))
+            .fill(message.role == .assistant ? Color.accentDefault : Color.accentTint)
             .frame(width: 32, height: 32)
             .overlay(
                 Image(systemName: message.role == .assistant ? "sparkles" : "person.fill")
-                    .foregroundColor(.white)
+                    .foregroundColor(message.role == .assistant ? .inkOnPhotoLight : .accentDefault)
                     .font(.system(size: 14, weight: .bold))
             )
     }
@@ -297,8 +303,9 @@ private struct ChatBubble: View {
     private func renderedContent(alignment: HorizontalAlignment) -> some View {
         Markdown(message.content.isEmpty ? "…" : message.content)
             .markdownTextStyle {
+                FontFamily(.custom(HearthFontFamily.sans))
                 FontSize(15)
-                ForegroundColor(message.role == .assistant ? Color.brandNavy : .white)
+                ForegroundColor(message.role == .assistant ? Color.inkPrimary : Color.inkOnPhotoLight)
             }
             .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
     }
@@ -310,21 +317,23 @@ private struct ToolbarPill: View {
     let title: String
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: .hearth300) {
             Image(systemName: icon)
                 .font(.system(size: 15, weight: .semibold))
             Text(title)
-                .font(.caption2.weight(.semibold))
+                .font(.hearthLabel)
+                .tracking(0.66)
+                .textCase(.uppercase)
         }
-        .foregroundColor(.brandCoral)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .foregroundColor(.accentDefault)
+        .padding(.horizontal, .hearth400)
+        .padding(.vertical, .hearth300)
         .background(
             Capsule()
-                .fill(Color.brandSurface)
+                .fill(Color.accentTint)
                 .overlay(
                     Capsule()
-                        .stroke(Color.brandStroke, lineWidth: 1)
+                        .stroke(Color.borderHairline, lineWidth: 1)
                 )
         )
         .accessibilityElement(children: .combine)
@@ -337,79 +346,81 @@ private struct ToolbarBadge: View {
     let title: String
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: .hearth300) {
             ZStack {
                 Circle()
-                    .stroke(Color.brandCoral.opacity(0.25), lineWidth: 1)
+                    .stroke(Color.accentDefault.opacity(0.25), lineWidth: 1)
                     .frame(width: 44, height: 44)
                 Image(systemName: icon)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.brandCoral)
+                    .foregroundColor(.accentDefault)
             }
             Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundColor(.brandCoral)
+                .font(.hearthLabel)
+                .foregroundColor(.accentDefault)
+                .tracking(0.66)
+                .textCase(.uppercase)
         }
         .padding(.horizontal, 2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(title)
     }
 }
+
 private struct AgentChoiceView: View {
     let logoName: String
     let onSelect: (AgentMode) -> Void
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: .hearth700) {
             Spacer()
             MVPLogoView(size: 160)
                 .accessibilityHidden(true)
 
-            VStack(spacing: 12) {
+            VStack(spacing: .hearth400) {
                 Text("Choose how you want to start")
-                    .font(.title2.weight(.semibold))
-                    .foregroundColor(.brandNavy)
+                    .font(.hearthDisplayMD)
+                    .foregroundColor(.inkPrimary)
                 Text("Onboarding learns about your family first. Coaching jumps right into live help.")
-                    .font(.body)
-                    .foregroundColor(.brandNavy.opacity(0.8))
+                    .font(.hearthBodyMD)
+                    .foregroundColor(.inkSecondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                    .padding(.horizontal, .hearth700)
             }
 
-            VStack(spacing: 12) {
+            VStack(spacing: .hearth400) {
                 Button {
                     onSelect(.onboarding)
                 } label: {
                     Text("Onboarding Agent")
-                        .font(.headline)
+                        .font(.hearthTitleMD)
                         .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.brandNavy)
-                        .foregroundColor(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .padding(.hearth500)
+                        .background(Color.accentDefault)
+                        .foregroundColor(.inkOnPhotoLight)
+                        .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
                 }
 
                 Button {
                     onSelect(.coaching)
                 } label: {
                     Text("Coaching Agent")
-                        .font(.headline)
+                        .font(.hearthTitleMD)
                         .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.brandSurface)
-                        .foregroundColor(.brandNavy)
+                        .padding(.hearth500)
+                        .background(Color.bgElevated)
+                        .foregroundColor(.inkPrimary)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.brandStroke, lineWidth: 1)
+                            RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                                .stroke(Color.borderStrong, lineWidth: 1)
                         )
                 }
             }
-            .padding(.horizontal)
+            .padding(.horizontal, .hearth700)
 
             Spacer()
         }
-        .padding()
-        .background(Color.brandBackground.ignoresSafeArea())
+        .padding(.hearth700)
+        .background(Color.bgCanvas.ignoresSafeArea())
     }
 }
-

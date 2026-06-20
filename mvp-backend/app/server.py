@@ -22,6 +22,7 @@ from app import content as content_service
 from app import kid_agent as kid_agent_service
 from app import moderation
 from app import telemetry
+from app import email_smtp
 from app import summary as kid_summary
 from app.auth import current_user, authorize_user_match, issue_token as auth_issue_token
 from app.rate_limit import enforce as rate_limit_enforce
@@ -50,12 +51,36 @@ onboarding_memory = MemoryRepository()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_persisted_state()
+    # Activity-research background worker. Sweep any run a prior restart left
+    # 'running' back to 'queued' (re-runs are idempotent), then start the daemon.
+    try:
+        storage_backend.requeue_stale_running_runs()
+        from app.research.worker import init_worker
+        init_worker(storage_backend).start()
+    except Exception:
+        logger.exception("[research] worker failed to start")
     yield
+    try:
+        from app.research.worker import research_worker
+        if research_worker is not None:
+            research_worker.stop()
+    except Exception:
+        logger.exception("[research] worker failed to stop cleanly")
     persist_state()
     storage_backend.close()
 
 
 app = FastAPI(title="MVP Backend", version="1.0.0", lifespan=lifespan)
+
+# ConvAI: ElevenLabs Custom LLM endpoints (kid companion + parent coach)
+from app.convai_endpoint import router as convai_router
+app.include_router(convai_router)
+from app.parent_convai_endpoint import router as parent_convai_router
+app.include_router(parent_convai_router)
+from app.research.router import router as research_router
+app.include_router(research_router)
+from app.cos.router import router as cos_router
+app.include_router(cos_router)
 
 # Lock CORS to known origins. Env: ALLOWED_ORIGINS=https://a.com,https://b.com
 # Default keeps localhost dev usable. iOS does not need CORS (not a browser).
@@ -127,6 +152,17 @@ class FeedbackRequest(BaseModel):
     thread_id: str
     user_id: str
     feedback: str  # "thumbs_up", "thumbs_down", or "none"
+
+
+class DebugReportRequest(BaseModel):
+    """A test-user diagnostic bundle, posted from the iOS app's 'send debug
+    data' affordance. All fields optional/best-effort — this endpoint must
+    accept reports even when the user's auth/consent is broken (that's the
+    bug class we most want to capture), so it is unauthenticated."""
+    user_id: Optional[str] = None
+    note: str = ""
+    diagnostics: Dict[str, Any] = {}   # version, device, baseURL, consent, mic, ...
+    logs: str = ""                     # recent client log buffer
 
 
 class OnboardingSeedRequest(BaseModel):
@@ -201,12 +237,17 @@ class CategoryCreateRequest(BaseModel):
     name: str
     emoji: str = ""
     description: str = ""
+    parent_id: str | None = None
 
 
 class CategoryUpdateRequest(BaseModel):
     name: str | None = None
     emoji: str | None = None
     description: str | None = None
+    # parent_id is omitted-from-payload-vs-explicit-null sensitive: the route
+    # strips keys with v is None before forwarding, so clearing the parent
+    # requires a sentinel handled at the route layer (see /cms/categories PUT).
+    parent_id: str | None = None
 
 
 class UserPostCreateRequest(BaseModel):
@@ -441,6 +482,72 @@ def _require_consent(user_id: str) -> None:
         )
 
 
+# ── Debug reports (test-user diagnostics → email) ───────────────────
+
+def _format_debug_email(req: "DebugReportRequest", server_notes: List[str]) -> str:
+    """Render the diagnostic bundle as a readable plaintext email body."""
+    lines: List[str] = []
+    lines.append(f"user_id: {req.user_id or '(none)'}")
+    lines.append("")
+    lines.append("NOTE FROM USER:")
+    lines.append(req.note.strip() or "(none)")
+    if server_notes:
+        lines.append("")
+        lines.append("SERVER ENRICHMENT:")
+        lines.extend(f"  {n}" for n in server_notes)
+    if req.diagnostics:
+        lines.append("")
+        lines.append("CLIENT DIAGNOSTICS:")
+        for k, v in req.diagnostics.items():
+            lines.append(f"  {k}: {v}")
+    lines.append("")
+    lines.append("RECENT CLIENT LOGS:")
+    lines.append(req.logs.strip() or "(none)")
+    return "\n".join(lines)
+
+
+@app.post("/debug/report")
+async def debug_report(req: DebugReportRequest, http_request: Request):
+    """
+    Receive a test-user diagnostic bundle and email it to the developer.
+
+    Deliberately unauthenticated (the failures worth capturing include auth /
+    consent breakage), so it is rate-limited per source IP. Enriches the bundle
+    with server-side consent state — that line alone makes the common
+    'consent_required masquerading as a connection error' bug obvious.
+    """
+    rate_limit_enforce(client_ip_for(http_request), "debug")
+
+    server_notes: List[str] = []
+    if req.user_id:
+        try:
+            latest = storage_backend.latest_consent(req.user_id)
+            if latest and latest.get("agreement_version") == CONSENT_AGREEMENT_VERSION:
+                server_notes.append(f"consent: OK ({CONSENT_AGREEMENT_VERSION})")
+            elif latest:
+                server_notes.append(
+                    f"consent: STALE (has {latest.get('agreement_version')}, "
+                    f"need {CONSENT_AGREEMENT_VERSION})"
+                )
+            else:
+                server_notes.append(f"consent: NONE at {CONSENT_AGREEMENT_VERSION}")
+        except Exception as e:  # noqa: BLE001
+            server_notes.append(f"consent: lookup failed ({e})")
+
+    note_head = (req.note.strip().splitlines() or [""])[0][:80]
+    subject = f"[MVP debug] {req.user_id or 'anon'} — {note_head or 'no note'}"
+    body = _format_debug_email(req, server_notes)
+
+    # Always log the full bundle so reports are retrievable via `railway logs`
+    # even when no email/Slack delivery is configured. Filter with:
+    #   railway logs --filter "[debug-report]"
+    logger.info("[debug-report] %s\n%s", subject, body)
+
+    from starlette.concurrency import run_in_threadpool
+    sent = await run_in_threadpool(email_smtp.send_email, subject, body)
+    return {"ok": True, "emailed": sent}
+
+
 # ── Chat / onboarding (parent-facing, auth required) ────────────────
 
 @app.post("/chat")
@@ -484,9 +591,14 @@ def list_categories():
 
 
 @app.get("/content/articles")
-def list_articles(category: str | None = None, limit: int = 50):
-    """Return library articles, optionally filtered by category."""
-    return content_service.get_articles(category=category, limit=limit)
+def list_articles(category: str | None = None, tag: str | None = None, limit: int = 50):
+    """Return library articles, optionally filtered by category and/or tag.
+
+    `tag` matches against the article's `tags` array (case-sensitive exact
+    slug match). When both are provided, the filters are AND'd. Unknown tag
+    returns an empty list with 200.
+    """
+    return content_service.get_articles(category=category, tag=tag, limit=limit)
 
 
 @app.get("/content/articles/{article_id}")
@@ -574,6 +686,13 @@ def search_content(q: str, limit: int = 10):
 def relevant_content(topic: str, limit: int = 5):
     """Return content relevant to a topic (for contextual recommendations)."""
     return content_service.get_relevant_content(topic, limit=limit)
+
+
+@app.get("/profile")
+def get_profile(user_id: str = Depends(current_user)):
+    """Return the family profile (parent + kids) for the authenticated user, so
+    surfaces like the Settings → Profile screen can prefill an edit form."""
+    return profiling_service.get_family_profile(user_id) or {"parent": {}, "children": {}}
 
 
 @app.post("/profile/seed")
@@ -969,6 +1088,11 @@ async def generate_kid_stream(
     assistant_buffer = ""
     block_handled = False  # ensures lock/log/alert runs exactly once
 
+    # Voice is exclusively the ConvAI (v2) path's job now — /kid-chat streams
+    # text only. reply_id is pre-generated so the assistant row has a stable id.
+    import uuid as _uuid
+    reply_id = str(_uuid.uuid4())
+
     def _apply_block_side_effects() -> None:
         """Lock (on crisis) + log + alert for a blocked output. Must run BEFORE
         the replacement message is yielded so the agent is frozen before the
@@ -1058,6 +1182,7 @@ async def generate_kid_stream(
             storage_backend.append_kid_message(
                 agent_id=agent_id, thread_id=thread_id, role="assistant",
                 content=sm.assembled_output or assistant_buffer,
+                message_id=reply_id,
             )
 
         yield "data: [DONE]\n\n"
@@ -1084,6 +1209,176 @@ async def kid_chat_endpoint(request: KidChatRequest, user_id: str = Depends(curr
         ),
         media_type="text/event-stream",
     )
+
+
+@app.get("/kid-agent/status")
+def kid_agent_status(
+    kid_name: str,
+    user_id: str = Depends(current_user),
+):
+    """
+    Lightweight status probe for the kid surface. iOS calls this when a voice
+    session ends unexpectedly to distinguish a crisis end_call (frozen surface)
+    from a benign disconnect (text fallback).
+    """
+    config = storage_backend.get_kid_agent_config(user_id, kid_name)
+    if config is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    locked = storage_backend.is_kid_agent_crisis_locked(config["id"]) is not None
+    return {"enabled": bool(config.get("enabled")), "crisis_locked": locked}
+
+
+@app.get("/voice/convai-token")
+async def voice_convai_token(
+    kid_name: str,
+    user_id: str = Depends(current_user),
+    x_kid_pin: Optional[str] = Header(default=None, alias="X-Kid-Pin"),
+):
+    """
+    Issue a signed WebSocket URL for ElevenLabs Conversational AI.
+    iOS connects directly to this URL for real-time voice.
+    """
+    import httpx
+    _require_consent(user_id)
+
+    config = storage_backend.get_kid_agent_config(user_id, kid_name)
+    if config is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    agent_id = config["id"]
+
+    if not _verify_kid_pin(user_id, kid_name, x_kid_pin):
+        raise HTTPException(status_code=401, detail="PIN check failed")
+
+    if storage_backend.is_kid_agent_crisis_locked(agent_id) is not None:
+        raise HTTPException(status_code=403, detail="agent is crisis-locked")
+
+    elevenlabs_agent_id = os.getenv("ELEVENLABS_AGENT_ID")
+    elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+    if not elevenlabs_agent_id or not elevenlabs_api_key:
+        raise HTTPException(status_code=503, detail="ConvAI not configured")
+
+    invariants = config.get("invariants") or {}
+    first_message = None
+    persona_examples = invariants.get("personaExamples") or invariants.get("persona_examples") or []
+    if persona_examples:
+        first_message = persona_examples[0]
+
+    # Voice: intentionally NOT overridden here. By omitting the `tts.voice_id`
+    # override we let ElevenLabs use the voice configured on the agent in the
+    # dashboard. (Re-add a `"tts": {"voice_id": ...}` block below to restore
+    # per-kid voice selection from the allowlist.)
+    override: Dict[str, Any] = {
+        "agent": {
+            "prompt": {"prompt": config.get("system_prompt", "")},
+            "language": "en",
+        },
+        "conversation": {"client_events": [
+            "audio", "agent_response", "agent_chat_response_part", "user_transcript",
+            "interruption", "conversation_initiation_metadata",
+        ]},
+    }
+    if first_message:
+        override["agent"]["first_message"] = first_message
+
+    extra_body = {
+        "user_id": user_id,
+        "kid_name": kid_name,
+        "thread_id": "default",
+        "kid_pin": x_kid_pin or "",
+        "agent_id": agent_id,
+    }
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            "https://api.elevenlabs.io/v1/convai/conversation/token",
+            params={"agent_id": elevenlabs_agent_id},
+            headers={"xi-api-key": elevenlabs_api_key},
+        )
+        if resp.status_code != 200:
+            logger.error("[convai-token] ElevenLabs token failed: %s %s", resp.status_code, resp.text)
+            raise HTTPException(status_code=503, detail="failed to get conversation token")
+
+        token = resp.json().get("token")
+
+    # Persist the greeting: ElevenLabs speaks first_message client-side, so it
+    # never flows through our Custom LLM and would otherwise be missing from
+    # transcripts/history. Guard against stacking — a reconnect (e.g. the
+    # mic-retry path mints a fresh token) must not append the greeting twice.
+    if first_message:
+        last = storage_backend.get_last_kid_message(agent_id, thread_id="default")
+        already_last = last is not None and last.get("role") == "assistant" \
+            and last.get("content") == first_message
+        if not already_last:
+            storage_backend.append_kid_message(
+                agent_id=agent_id, thread_id="default",
+                role="assistant", content=first_message,
+            )
+
+    return {
+        "signed_url": token,
+        "conversation_config_override": override,
+        "custom_llm_extra_body": extra_body,
+    }
+
+
+@app.get("/voice/parent-convai-token")
+async def voice_parent_convai_token(user_id: str = Depends(current_user)):
+    """
+    Issue a ConvAI conversation token for the PARENT coaching agent. Mirrors the
+    kid token endpoint but: no PIN, no crisis lock, no first-message ritual. The
+    per-user system prompt (soul + family profile + content catalog) is sent as
+    an override so the dashboard agent personalizes per connection.
+    """
+    import httpx
+    from app.agent import build_system_prompt_for
+    # NOTE: no _require_consent here. The kid-agent informed-consent gate is
+    # COPPA-scoped to the child companion; the parent coach involves no child
+    # data and mirrors the parent text chat (/chat), which is also ungated.
+    # Gating this accidentally locked parents with no consented kid out of voice.
+
+    elevenlabs_agent_id = os.getenv("ELEVENLABS_PARENT_AGENT_ID")
+    elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+    if not elevenlabs_agent_id or not elevenlabs_api_key:
+        raise HTTPException(status_code=503, detail="parent ConvAI not configured")
+
+    # Voice directive: the spoken output must be clean (no markdown/headers/lists),
+    # but the agent MUST keep emitting [Title](mvp://...) links — the Custom-LLM
+    # endpoint strips them from speech and turns them into on-screen cards.
+    voice_directive = (
+        "\n\nVOICE MODE: You are being spoken aloud to the parent. Reply in short, "
+        "natural spoken sentences — no markdown, no headers, no bullet lists, no "
+        "asterisks or bold. Keep weaving content recommendations as "
+        "[Title](mvp://library/{id}) or [Title](mvp://community/{id}) exactly as "
+        "instructed: the link text is spoken naturally and the app shows the card."
+    )
+    override: Dict[str, Any] = {
+        "agent": {
+            "prompt": {"prompt": build_system_prompt_for(user_id) + voice_directive},
+            "language": "en",
+        },
+        "conversation": {"client_events": [
+            "audio", "agent_response", "agent_chat_response_part", "user_transcript",
+            "interruption", "conversation_initiation_metadata",
+        ]},
+    }
+    extra_body = {"user_id": user_id, "thread_id": "default"}
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            "https://api.elevenlabs.io/v1/convai/conversation/token",
+            params={"agent_id": elevenlabs_agent_id},
+            headers={"xi-api-key": elevenlabs_api_key},
+        )
+        if resp.status_code != 200:
+            logger.error("[parent-convai-token] ElevenLabs token failed: %s %s", resp.status_code, resp.text)
+            raise HTTPException(status_code=503, detail="failed to get conversation token")
+        token = resp.json().get("token")
+
+    return {
+        "signed_url": token,
+        "conversation_config_override": override,
+        "custom_llm_extra_body": extra_body,
+    }
 
 
 @app.get("/kid-chat/transcripts")
@@ -1271,7 +1566,12 @@ def cms_create_category(req: CategoryCreateRequest, _: None = Depends(require_ad
 
 @app.put("/cms/categories/{category_id}")
 def cms_update_category(category_id: str, req: CategoryUpdateRequest, _: None = Depends(require_admin_token)):
-    data = {k: v for k, v in req.model_dump().items() if v is not None}
+    # Drop unset fields (so the UPDATE only touches explicitly-sent columns),
+    # but KEEP explicit None — null on parent_id is how the CMS clears a
+    # category back to top-level ("— None (top-level) —"). model_fields_set
+    # distinguishes "client omitted the field" from "client sent null".
+    sent = req.model_fields_set
+    data = {k: getattr(req, k) for k in sent}
     result = content_service.update_category(category_id, data)
     if result is None:
         from fastapi.responses import JSONResponse

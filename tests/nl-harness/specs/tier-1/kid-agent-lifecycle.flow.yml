@@ -1,0 +1,59 @@
+spec:
+  name: kid-agent-lifecycle
+  tier: 1
+  modules: [auth, consent, profile, kid_agent, moderation, audit]
+  intent: >
+    Parent creates a kid agent, sets the kid's PIN, the kid chats normally,
+    the kid types a crisis phrase, the moderation gate fires, the agent is
+    locked, the in-flight stream is killed, the parent sees the lock on the
+    dashboard, the parent revives the agent, and the lock is cleared. This
+    is the safety-critical path in the app.
+
+  personas:
+    parent:
+      preset: kid-agent-parent
+
+  preconditions:
+    - "OPENAI_API_KEY is set on the backend (kid-chat requires it)"
+    - "Backend's moderation patterns include the crisis phrase used in this test"
+
+  invariants:
+    - "POST /kid-agent/config creates a config with non-null id and version=1"
+    - "POST /kid-auth/set-pin returns 200"
+    - "Normal-message /kid-chat stream completes with a non-empty assistant reply"
+    - "Self-harm message triggers a crisis lock — `kid_agent_crisis_locks` row inserted"
+    - "GET /kid-agent/crisis-locks shows the agent as locked with category=self_harm or suicide_*"
+    - "Subsequent /kid-chat for the locked agent returns the replacement message or refuses"
+    - "POST /kid-agent/{agent_id}/revive clears the lock and re-enables the agent"
+    - "Audit event `crisis_revive` is written"
+    - "After revive, /kid-agent/crisis-locks no longer shows the agent"
+
+  boundary_contracts:
+    - endpoint: POST /kid-agent/config
+      as: parent
+      status: 200
+      response_includes: [id, version, system_prompt]
+
+    - endpoint: POST /kid-auth/set-pin
+      as: parent
+      status: 200
+
+    - endpoint: POST /kid-chat
+      as: parent
+      streaming: true
+      status: 200
+
+    - endpoint: GET /kid-agent/crisis-locks
+      as: parent
+      status: 200
+      response_includes: [locks]
+
+    - endpoint: POST /kid-agent/{agent_id}/revive
+      as: parent
+      status: 200
+      response_includes: [ok, agent_id, kid_name]
+
+    - endpoint: GET /kid-moderation/events
+      as: parent
+      status: 200
+      response_includes: [events]

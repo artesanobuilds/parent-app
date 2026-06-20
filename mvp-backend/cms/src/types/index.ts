@@ -3,6 +3,7 @@ export interface Category {
   name: string;
   emoji: string;
   description: string;
+  parent_id?: string | null;
 }
 
 export interface Article {

@@ -5,6 +5,10 @@ struct HomeView: View {
     @EnvironmentObject private var contentVM: ContentViewModel
     @EnvironmentObject private var configuration: ServerConfiguration
     @Environment(\.triggerKidHandoff) private var triggerKidHandoff
+    // Set by KidsHomeSection's task hook after /kid-agent/list resolves.
+    // Drives whether the greeting's Hand-to-kid CTA renders.
+    @AppStorage("has_kid_companions") private var hasKidCompanions: Bool = false
+    @State private var isShowingSettings = false
 
     var body: some View {
         NavigationStack {
@@ -14,64 +18,114 @@ struct HomeView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 24) {
+                        VStack(alignment: .leading, spacing: .hearth800) {
                             greetingHeader
-                                .padding(.horizontal)
-                                .padding(.top, 8)
+                                .padding(.horizontal, .hearth700)
+                                .padding(.top, .hearth300)
 
                             featuredCard
-                                .padding(.horizontal)
+                                .padding(.horizontal, .hearth700)
 
                             if let baseURL = configuration.baseURL, !username.isEmpty {
                                 KidsHomeSection(userID: username, baseURL: baseURL)
-                                    .padding(.horizontal)
+                                    .padding(.horizontal, .hearth700)
                             }
 
                             CommunitySection(posts: contentVM.randomCommunityPosts())
-                                .padding(.leading)
+                                .padding(.leading, .hearth700)
 
                             LibrarySection(items: contentVM.randomLibraryItems())
-                                .padding(.leading)
+                                .padding(.leading, .hearth700)
 
                             categoriesSection
-                                .padding(.horizontal)
+                                .padding(.horizontal, .hearth700)
 
-                            Spacer(minLength: 20)
+                            Spacer(minLength: .hearth600)
                         }
                     }
                 }
             }
-            .background(Color.brandBackground.ignoresSafeArea())
-            .navigationBarHidden(true)
+            .background(Color.bgCanvas.ignoresSafeArea())
+            // iOS 17+: .navigationBarHidden(true) is deprecated and leaves
+            // the nav-bar's reserved vertical space visible as a band.
+            // The toolbar(.hidden) modifier fully collapses it.
+            .toolbar(.hidden, for: .navigationBar)
             .withContentNavigationDestinations()
+            .sheet(isPresented: $isShowingSettings) {
+                NavigationStack {
+                    SettingsView(configuration: configuration, userID: username)
+                        .navigationTitle("Settings")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { isShowingSettings = false }
+                            }
+                        }
+                }
+            }
         }
     }
 
     // MARK: - Greeting Header
 
     private var greetingHeader: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(greeting)
-                    .font(.caption)
-                    .foregroundColor(.brandGray)
-                Text(username.isEmpty ? "Welcome" : username)
-                    .font(.title2.weight(.bold))
-                    .foregroundColor(.white)
-            }
-            Spacer()
-            if !username.isEmpty {
-                HandoffEntryButton { triggerKidHandoff() }
-            }
-            Circle()
-                .fill(Color.brandGold.opacity(0.2))
-                .frame(width: 40, height: 40)
+        ZStack {
+            Image("HomeBanner")
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(height: 180)
+                .clipped()
                 .overlay(
-                    Text(username.isEmpty ? "?" : String(username.prefix(1)).uppercased())
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.brandGold)
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.55)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                 )
+
+            VStack {
+                // Top row: handoff + avatar
+                HStack {
+                    Spacer()
+                    if !username.isEmpty && hasKidCompanions {
+                        HandoffEntryButton { triggerKidHandoff() }
+                    }
+                    // Tap the initial to open Server Settings.
+                    Button {
+                        isShowingSettings = true
+                    } label: {
+                        Circle()
+                            .fill(Color.white.opacity(0.9))
+                            .frame(width: 36, height: 36)
+                            .overlay(
+                                Text(username.isEmpty ? "?" : String(username.prefix(1)).uppercased())
+                                    .font(.hearthLabel)
+                                    .foregroundColor(.accentDefault)
+                            )
+                    }
+                    .accessibilityLabel("Settings")
+                }
+
+                Spacer()
+
+                // Bottom: greeting
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(greeting)
+                            .font(.hearthCaptionMono)
+                            .foregroundColor(.white.opacity(0.85))
+                        Text(username.isEmpty ? "Welcome" : username)
+                            .font(.hearthDisplayMD)
+                            .foregroundColor(.white)
+                            .shadow(color: .black.opacity(0.6), radius: 3, x: 0, y: 1)
+                    }
+                    Spacer()
+                }
+            }
+            .padding(.hearth500)
         }
+        .frame(height: 180)
+        .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous))
     }
 
     // MARK: - Featured Card
@@ -82,51 +136,54 @@ struct HomeView: View {
             NavigationLink(value: ArticleRoute(id: item.id)) {
                 VStack(alignment: .leading, spacing: 0) {
                     ZStack(alignment: .bottomLeading) {
-                        LinearGradient(
-                            colors: [Color.brandGold.opacity(0.25), Color.brandGold.opacity(0.10)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                        .frame(height: 160)
-
-                        Text(item.emoji)
-                            .font(.system(size: 56))
-                            .padding(20)
+                        if let assetName = articleImageAssets[item.id] {
+                            Image(assetName)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(height: 160)
+                                .clipped()
+                        } else {
+                            Color.photoSaffron
+                                .frame(height: 160)
+                            Text(item.emoji)
+                                .font(.system(size: 56))
+                                .padding(.hearth600)
+                        }
                     }
+                    .frame(height: 160)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Start Here Today")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundColor(.brandGold)
+                    VStack(alignment: .leading, spacing: .hearth300) {
+                        Text("Start here today")
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
                             .textCase(.uppercase)
-                            .tracking(0.5)
 
                         Text(item.title)
-                            .font(.title3.weight(.bold))
-                            .foregroundColor(.brandNavy)
+                            .font(.hearthTitleLG)
+                            .foregroundColor(.inkPrimary)
                             .multilineTextAlignment(.leading)
 
                         Text(item.subtitle)
-                            .font(.subheadline)
-                            .foregroundColor(.brandGray)
+                            .font(.hearthBodyMD)
+                            .foregroundColor(.inkSecondary)
 
-                        Text("Start Here")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(.brandBlack)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
-                            .background(Color.brandGold)
+                        Text("Start here")
+                            .font(.hearthTitleMD)
+                            .foregroundColor(.inkOnPhotoLight)
+                            .padding(.horizontal, .hearth600)
+                            .padding(.vertical, .hearth400)
+                            .background(Color.accentDefault)
                             .clipShape(Capsule())
-                            .padding(.top, 4)
+                            .padding(.top, .hearth300)
                     }
-                    .padding(16)
+                    .padding(.hearth500)
                 }
-                .background(Color.brandCardBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+                .background(Color.bgElevated)
+                .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                        .stroke(Color.borderHairline, lineWidth: 1)
                 )
             }
             .buttonStyle(.plain)
@@ -136,40 +193,22 @@ struct HomeView: View {
     // MARK: - Categories Section
 
     private var categoriesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: .hearth400) {
             Text("Browse by topic")
-                .font(.footnote.weight(.semibold))
-                .foregroundColor(.brandGray)
+                .font(.hearthLabel)
+                .foregroundColor(.inkMuted)
+                .tracking(0.66)
                 .textCase(.uppercase)
-                .tracking(0.5)
-                .padding(.leading, 4)
+                .padding(.leading, .hearth300)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                ForEach(contentVM.categories) { category in
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: .hearth400) {
+                ForEach(contentVM.topLevelCategories) { category in
                     NavigationLink(value: category.id) {
-                        HStack(spacing: 8) {
-                            Text(category.emoji)
-                                .font(.system(size: 20))
-                            Text(category.name)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundColor(.brandNavy)
-                                .lineLimit(1)
-                            Spacer()
-                        }
-                        .padding(12)
-                        .background(Color.brandCardBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                        )
+                        CategoryTile(category: category)
                     }
                     .buttonStyle(.plain)
                 }
             }
-        }
-        .navigationDestination(for: String.self) { categoryId in
-            CategoryDetailView(categoryId: categoryId)
         }
     }
 
@@ -197,23 +236,23 @@ struct CategoryDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: .hearth600) {
                 let items = contentVM.libraryItems(for: categoryId)
                 let posts = contentVM.communityPosts(for: categoryId)
 
                 if !items.isEmpty {
                     Text("Articles")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundColor(.brandGray)
+                        .font(.hearthLabel)
+                        .foregroundColor(.inkMuted)
+                        .tracking(0.66)
                         .textCase(.uppercase)
-                        .tracking(0.5)
-                        .padding(.horizontal)
+                        .padding(.horizontal, .hearth700)
 
                     ForEach(items) { item in
                         NavigationLink(value: ArticleRoute(id: item.id)) {
                             LibraryItemCard(item: item)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal)
+                                .padding(.horizontal, .hearth700)
                         }
                         .buttonStyle(.plain)
                     }
@@ -221,30 +260,32 @@ struct CategoryDetailView: View {
 
                 if !posts.isEmpty {
                     Text("Community")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundColor(.brandGray)
+                        .font(.hearthLabel)
+                        .foregroundColor(.inkMuted)
+                        .tracking(0.66)
                         .textCase(.uppercase)
-                        .tracking(0.5)
-                        .padding(.horizontal)
-                        .padding(.top, 8)
+                        .padding(.horizontal, .hearth700)
+                        .padding(.top, .hearth300)
 
                     ForEach(posts) { post in
                         NavigationLink(value: PostRoute(id: post.id)) {
                             CommunityPostCard(post: post)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal)
+                                .padding(.horizontal, .hearth700)
                         }
                         .buttonStyle(.plain)
                     }
                 }
 
-                Spacer(minLength: 20)
+                Spacer(minLength: .hearth600)
             }
-            .padding(.top, 8)
+            .padding(.top, .hearth300)
         }
-        .background(Color.brandBackground.ignoresSafeArea())
+        .background(Color.bgCanvas.ignoresSafeArea())
         .navigationTitle(category.map { "\($0.emoji) \($0.name)" } ?? "Category")
         .navigationBarTitleDisplayMode(.large)
+        .toolbarBackground(Color.bgCanvas, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .withContentNavigationDestinations()
     }
 }

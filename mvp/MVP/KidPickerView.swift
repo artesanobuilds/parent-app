@@ -2,6 +2,10 @@ import SwiftUI
 
 /// Shown after the handoff gesture: a picker for which kid is using the device.
 /// PIN is selection convenience (parent set), not the security boundary.
+///
+/// Soft-sober treatment: this is a transient picker in front of the sober
+/// kid-agent surface, so it uses `bg/canvas` (not sober — the picker is part
+/// of the parent-mode chrome between handoff and child mode).
 struct KidPickerView: View {
     let userID: String
     let baseURL: URL
@@ -24,18 +28,18 @@ struct KidPickerView: View {
 
     var body: some View {
         ZStack {
-            Color.brandBackground.ignoresSafeArea()
+            Color.bgCanvas.ignoresSafeArea()
 
-            VStack(spacing: 24) {
+            VStack(spacing: .hearth700) {
                 if vm.isLoading {
-                    ProgressView().tint(.brandGold)
+                    ProgressView().tint(.accentDefault)
                 } else if let kid = vm.pinPromptFor {
                     pinPrompt(kid: kid)
                 } else {
                     picker
                 }
             }
-            .padding(20)
+            .padding(.hearth600)
 
             VStack {
                 HStack {
@@ -43,22 +47,23 @@ struct KidPickerView: View {
                     Button(action: onCancel) {
                         Image(systemName: "xmark")
                             .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.brandGray)
-                            .padding(10)
+                            .foregroundColor(.inkMuted)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                 }
                 Spacer()
             }
-            .padding()
+            .padding(.hearth500)
         }
         .task { await vm.load() }
     }
 
     private var picker: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: .hearth500) {
             Text("Who's using the device?")
-                .font(.title2.weight(.semibold))
-                .foregroundColor(.white)
+                .font(.hearthDisplayMD)
+                .foregroundColor(.inkPrimary)
 
             ForEach(vm.kids, id: \.kidName) { kid in
                 Button {
@@ -66,30 +71,34 @@ struct KidPickerView: View {
                     // selection closure directly — no NotificationCenter detour.
                     onSelected(kid)
                 } label: {
-                    HStack(spacing: 14) {
+                    HStack(spacing: .hearth500) {
                         Circle()
-                            .fill(bloomColor(for: kid).opacity(0.25))
+                            .fill(Color.accentTint)
                             .frame(width: 56, height: 56)
                             .overlay(
                                 Text(String(kid.kidName.prefix(1)))
-                                    .font(.title3.weight(.bold))
-                                    .foregroundColor(bloomColor(for: kid))
+                                    .font(.hearthTitleLG)
+                                    .foregroundColor(.accentDefault)
                             )
                         VStack(alignment: .leading, spacing: 2) {
                             Text(kid.kidName)
-                                .font(.headline)
-                                .foregroundColor(.white)
+                                .font(.hearthTitleMD)
+                                .foregroundColor(.inkPrimary)
                             Text(kid.invariants.agentDisplayName)
-                                .font(.caption)
-                                .foregroundColor(.brandGray)
+                                .font(.hearthBodySM)
+                                .foregroundColor(.inkMuted)
                         }
                         Spacer()
                         Image(systemName: "chevron.right")
-                            .foregroundColor(.brandGray)
+                            .foregroundColor(.inkMuted)
                     }
-                    .padding(14)
-                    .background(Color.brandSurface)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .padding(.hearth500)
+                    .background(Color.bgElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                            .stroke(Color.borderHairline, lineWidth: 1)
+                    )
                 }
                 .buttonStyle(.plain)
                 .disabled(!kid.enabled)
@@ -97,59 +106,49 @@ struct KidPickerView: View {
             }
             if vm.kids.contains(where: { !$0.enabled }) {
                 Text("Greyed-out companions haven't been set up yet — tap them on the Home tab first.")
-                    .font(.caption)
-                    .foregroundColor(.brandGray)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func pinPrompt(kid: KidAgentConfig) -> some View {
-        VStack(spacing: 16) {
+        VStack(spacing: .hearth500) {
             Text("PIN for \(kid.kidName)")
-                .font(.headline)
-                .foregroundColor(.white)
+                .font(.hearthTitleLG)
+                .foregroundColor(.inkPrimary)
             SecureField("• • • •", text: $pinDraft)
                 .keyboardType(.numberPad)
                 .multilineTextAlignment(.center)
                 .font(.system(size: 28, weight: .semibold, design: .rounded))
-                .foregroundColor(.white)
-                .padding(.vertical, 12).padding(.horizontal, 32)
-                .background(Color.brandSurface)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .foregroundColor(.inkPrimary)
+                .padding(.vertical, .hearth400).padding(.horizontal, .hearth800)
+                .background(Color.bgElevated)
+                .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                        .stroke(Color.borderStrong, lineWidth: 1)
+                )
             if let pinError {
-                Text(pinError).font(.footnote).foregroundColor(.red)
+                Text(pinError)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.statusError)
             }
             Button("Continue") {
                 // We don't validate the PIN client-side — backend rejects on mismatch.
                 onSelected(kid)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.brandGold)
+            .tint(.accentDefault)
 
             Button("Use a different kid") {
                 vm.pinPromptFor = nil
                 pinDraft = ""
             }
-            .font(.caption)
-            .foregroundColor(.brandGray)
+            .font(.hearthBodySM)
+            .foregroundColor(.inkMuted)
         }
-    }
-
-    /// Bloom color comes from the synthesized personality. v0 maps personality
-    /// keywords to a small palette — v1 will derive from the LLM's structured
-    /// output directly.
-    private func bloomColor(for kid: KidAgentConfig) -> Color {
-        let words = (kid.invariants.personalityDescription
-                     + " " + kid.invariants.voiceExamples.joined(separator: " "))
-            .lowercased()
-        if words.contains("playful") || words.contains("silly") {
-            return Color(red: 0.36, green: 0.65, blue: 0.62)  // muted teal
-        }
-        if words.contains("warm") || words.contains("cozy") {
-            return Color(red: 0.78, green: 0.45, blue: 0.34)  // terracotta
-        }
-        return .brandGold  // steady fallback
     }
 }
 

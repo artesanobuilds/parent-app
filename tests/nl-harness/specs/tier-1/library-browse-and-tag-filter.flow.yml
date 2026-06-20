@@ -1,0 +1,51 @@
+spec:
+  name: library-browse-and-tag-filter
+  tier: 1
+  modules: [content]
+  intent: >
+    A user browses the library: lists categories, lists all articles, narrows
+    by category, narrows by tag, narrows by both, and opens one article's
+    detail view. Guards the Phase 0 taxonomy work — `parent_id` on categories
+    and the new `?tag=` filter on /content/articles.
+
+  personas: {}  # all-anonymous flow; content reads do not require auth
+
+  preconditions:
+    - "Backend has at least one category and one article seeded"
+
+  invariants:
+    - "GET /content/categories returns category objects with an `id` and `name`"
+    - "Category response shape includes `parent_id` (nullable) on every item"
+    - "GET /content/articles returns articles with `id`, `category`, `tags` (list)"
+    - "Filtering by `?category=<id>` returns only articles where article.category == id"
+    - "Filtering by `?tag=<slug>` returns only articles whose tags contain the slug"
+    - "Filtering by `?category=X&tag=Y` AND-composes both filters"
+    - "Unknown tag returns [] (not 404)"
+    - "GET /content/articles/{id} returns the same article shape with `content` populated"
+
+  boundary_contracts:
+    - endpoint: GET /content/categories
+      as: anonymous
+      status: 200
+      response_array_min_length: 1
+
+    - endpoint: GET /content/articles
+      as: anonymous
+      status: 200
+      response_array_min_length: 1
+
+    - endpoint: GET /content/articles
+      as: anonymous
+      params: {tag: __dynamic_first_tag__}
+      status: 200
+
+    - endpoint: GET /content/articles
+      as: anonymous
+      params: {tag: this-tag-definitely-does-not-exist}
+      status: 200
+      response_array_min_length: 0
+
+    - endpoint: GET /content/articles/{article_id}
+      as: anonymous
+      status: 200
+      response_includes: [id, category, title]

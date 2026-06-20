@@ -10,3 +10,21 @@ mvp-backend/data/*.duckdb.wal
 mvp-backend/data/.last-sync-summary.json
 mvp-backend/data/.remote-checksums.json
 mvp-backend/data/.sync-audit.log
+
+# Runtime / user-state / credential parquets — never commit. Only the seed
+# content parquets below are tracked.
+mvp-backend/data/*.parquet
+!mvp-backend/data/articles.parquet
+!mvp-backend/data/categories.parquet
+!mvp-backend/data/community_posts.parquet
+!mvp-backend/data/mvp.parquet
+!mvp-backend/data/post_replies.parquet
+
+# Generated eval report dumps
+mvp-backend/data/eval_reports/
+
+# Editor / agent tooling
+.vscode/
+.vix/
+mvp-backend/.vix/
+mvp/MVP/.vix/

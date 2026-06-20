@@ -15,9 +15,11 @@ import logging
 import os
 import threading
 from collections import defaultdict
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 import urllib.request
+
+TTSFallbackReason = Literal["quota", "network", "crisis", "key_missing", "partial_stream"]
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,23 @@ def incr(metric: str, by: int = 1) -> None:
 def snapshot() -> Dict[str, int]:
     with _counter_lock:
         return dict(_counters)
+
+
+# ── TTS counters ─────────────────────────────────────────────────────
+
+
+def incr_tts_chars(provider: str, user_id: str, n: int) -> None:
+    """Track characters synthesized per provider. provider is 'elevenlabs' or 'system'."""
+    if n <= 0:
+        return
+    incr(f"tts.{provider}.chars", n)
+    logger.info("[tts] chars provider=%s user=%s n=%d", provider, user_id, n)
+
+
+def incr_tts_fallback(reason: TTSFallbackReason, user_id: str) -> None:
+    """Track fallback events with a structured reason tag."""
+    incr(f"tts.fallback.{reason}")
+    logger.info("[tts] fallback reason=%s user=%s", reason, user_id)
 
 
 # ── Slack alerts ─────────────────────────────────────────────────────

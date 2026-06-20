@@ -118,7 +118,8 @@ class DuckDBStorage(StorageBackend):
         id          TEXT PRIMARY KEY,
         name        TEXT NOT NULL,
         emoji       TEXT NOT NULL,
-        description TEXT NOT NULL DEFAULT ''
+        description TEXT NOT NULL DEFAULT '',
+        parent_id   TEXT  -- soft self-ref to categories.id (Phase 0), NULL = top-level
     );
 
     CREATE TABLE IF NOT EXISTS articles (
@@ -307,6 +308,240 @@ class DuckDBStorage(StorageBackend):
 
     CREATE INDEX IF NOT EXISTS idx_audit_events_user
         ON audit_events (user_id, created_at);
+
+    -- LEGACY (voice v1): per-user, per-day TTS character counter. The v1 TTS
+    -- endpoints and cap logic were removed with the ConvAI (v2) migration but
+    -- the table DDL stays so existing deployments keep bootstrapping cleanly.
+    -- (Avoid semicolons inside comments here - the bootstrap splits this DDL
+    -- string on the semicolon character.)
+    CREATE TABLE IF NOT EXISTS tts_usage_daily (
+        user_id  VARCHAR NOT NULL,
+        date     DATE    NOT NULL,
+        chars    INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_id, date)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tts_usage_daily_date
+        ON tts_usage_daily (date);
+    """
+
+    # Activity planning + Chief-of-Staff. Brand-new tables, added the same way
+    # as KID_DDL (CREATE IF NOT EXISTS in this string + bootstrap below) — no
+    # migration rows are needed because these tables don't pre-exist on any
+    # deployment, so CREATE IF NOT EXISTS converges every DB on next boot. The
+    # migration framework is only for ALTERs on already-shipped tables (v4/v5).
+    # (No semicolons inside comments - the bootstrap splits this DDL on ';'.)
+    ACTIVITY_DDL = """
+    -- Durable background-job state for a deep-research discovery run.
+    CREATE TABLE IF NOT EXISTS research_runs (
+        id              TEXT PRIMARY KEY,           -- run_id (uuid)
+        user_id         TEXT NOT NULL,
+        status          TEXT NOT NULL DEFAULT 'queued',  -- queued|running|done|failed|canceled
+        location_json   JSON NOT NULL,              -- {postal_code, country, radius_km}
+        kids_json       JSON NOT NULL,              -- snapshot of kid profiles used (audit/repro)
+        params_json     JSON,                       -- season, categories, max_queries, etc.
+        progress_json   JSON,                       -- {phase, queries_total, queries_done, candidates_found}
+        candidate_count INTEGER NOT NULL DEFAULT 0,
+        error           TEXT,
+        created_at      TIMESTAMPTZ DEFAULT now(),
+        started_at      TIMESTAMPTZ,
+        finished_at     TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_research_runs_user ON research_runs (user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_research_runs_status ON research_runs (status);
+
+    -- Discovered candidates - the durable output of the research graph.
+    CREATE TABLE IF NOT EXISTS activity_candidates (
+        id            TEXT PRIMARY KEY,             -- uuid
+        run_id        TEXT NOT NULL,                -- references research_runs.id
+        user_id       TEXT NOT NULL,
+        kid_name      TEXT,                         -- best-fit kid, NULL = family-wide
+        name          TEXT NOT NULL,
+        provider      TEXT,
+        category      TEXT,                         -- camp|class|program|event|weekend
+        age_min       DOUBLE,
+        age_max       DOUBLE,
+        start_date    DATE,
+        end_date      DATE,
+        schedule_text TEXT,
+        price_text    TEXT,
+        price_amount  DOUBLE,
+        location_text TEXT,
+        signup_url    TEXT,
+        source_url    TEXT,                         -- provenance page we extracted from
+        contact_json  JSON,                         -- {name, phone, email, person}
+        fit_score     DOUBLE,
+        raw_json      JSON,                         -- full extracted blob (audit)
+        created_at    TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_activity_candidates_run ON activity_candidates (run_id);
+    CREATE INDEX IF NOT EXISTS idx_activity_candidates_user ON activity_candidates (user_id, created_at);
+
+    -- Parent's selections, with the artifact's granular confirmed/pending status.
+    CREATE TABLE IF NOT EXISTS tracked_activities (
+        id                TEXT PRIMARY KEY,
+        user_id           TEXT NOT NULL,
+        kid_name          TEXT,
+        candidate_id      TEXT,                     -- nullable: may be added manually / from ingest
+        name              TEXT NOT NULL,
+        provider          TEXT,
+        week_start        DATE,
+        status            TEXT NOT NULL DEFAULT 'interested',
+            -- reference|interested|signed_up|confirmed|pending_eligibility|waitlisted|declined|done
+        pending_reason    TEXT,
+        price_amount      DOUBLE,
+        price_status      TEXT NOT NULL DEFAULT 'tbd',  -- confirmed|tbd
+        signup_url        TEXT,
+        contact_json      JSON,
+        carpool_with      TEXT,
+        details_json      JSON,                     -- dates/price/location snapshot at track time
+        notes             TEXT,
+        decision_rationale TEXT,                    -- the artifact's "decision log"
+        created_at        TIMESTAMPTZ DEFAULT now(),
+        updated_at        TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tracked_activities_user_status ON tracked_activities (user_id, status);
+    CREATE INDEX IF NOT EXISTS idx_tracked_activities_user_week ON tracked_activities (user_id, week_start);
+
+    -- Week-keyed calendar. The side-by-side weekly grid and the per-child daily
+    -- views are both queries over this one table.
+    CREATE TABLE IF NOT EXISTS calendar_entries (
+        id            TEXT PRIMARY KEY,
+        user_id       TEXT NOT NULL,
+        kid_name      TEXT,
+        activity_id   TEXT,                         -- nullable link to tracked_activities.id
+        title         TEXT NOT NULL,
+        week_start    DATE,
+        start_ts      TIMESTAMPTZ,
+        end_ts        TIMESTAMPTZ,
+        all_day       BOOLEAN NOT NULL DEFAULT FALSE,
+        location_text TEXT,
+        kind          TEXT NOT NULL DEFAULT 'camp', -- camp|class|appointment|therapy|blackout|holiday
+        status        TEXT NOT NULL DEFAULT 'confirmed',  -- confirmed|pending|tbd
+        source        TEXT NOT NULL DEFAULT 'manual',     -- manual|research|email|photo|cos_agent
+        created_at    TIMESTAMPTZ DEFAULT now(),
+        updated_at    TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_calendar_entries_user ON calendar_entries (user_id, start_ts);
+    CREATE INDEX IF NOT EXISTS idx_calendar_entries_user_week ON calendar_entries (user_id, week_start);
+
+    -- Standing/recurring appointments (e.g. weekly therapy). Cancellations and
+    -- make-ups are recorded as calendar_entries overrides referencing this row.
+    CREATE TABLE IF NOT EXISTS recurring_appointments (
+        id            TEXT PRIMARY KEY,
+        user_id       TEXT NOT NULL,
+        kid_name      TEXT,                         -- or 'both'
+        title         TEXT NOT NULL,
+        provider_name TEXT,
+        weekday       INTEGER,                      -- 0=Mon .. 6=Sun
+        start_time    TEXT,                         -- 'HH:MM'
+        end_time      TEXT,
+        transporter   TEXT,
+        notes         TEXT,
+        active_from   DATE,
+        active_to     DATE,
+        created_at    TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_recurring_appointments_user ON recurring_appointments (user_id);
+
+    -- People who transport/attend (parent, nanny, therapist, carpool parents).
+    CREATE TABLE IF NOT EXISTS caregivers (
+        id                      TEXT PRIMARY KEY,
+        user_id                 TEXT NOT NULL,
+        name                    TEXT NOT NULL,
+        role                    TEXT NOT NULL DEFAULT 'other',  -- parent|nanny|therapist|family_friend|other
+        contact_json            JSON,
+        default_availability_json JSON,
+        notes                   TEXT,
+        created_at              TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_caregivers_user ON caregivers (user_id);
+
+    -- Per-week coverage. A status='gap' row is the artifact's red COVERAGE GAP flag.
+    CREATE TABLE IF NOT EXISTS logistics_assignments (
+        id                TEXT PRIMARY KEY,
+        user_id           TEXT NOT NULL,
+        week_start        DATE,
+        kid_name          TEXT,
+        calendar_entry_id TEXT,                     -- nullable link to calendar_entries.id
+        task              TEXT NOT NULL,            -- dropoff|pickup|transport|attend
+        caregiver_id      TEXT,                     -- nullable until assigned
+        status            TEXT NOT NULL DEFAULT 'tbd',  -- assigned|gap|tbd
+        notes             TEXT,
+        created_at        TIMESTAMPTZ DEFAULT now(),
+        updated_at        TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_logistics_user_week ON logistics_assignments (user_id, week_start);
+
+    -- To-dos / follow-ups (payments due, forms, welcome-letter actions).
+    CREATE TABLE IF NOT EXISTS todo_items (
+        id                 TEXT PRIMARY KEY,
+        user_id            TEXT NOT NULL,
+        kid_name           TEXT,
+        activity_id        TEXT,                    -- nullable link to tracked_activities.id
+        kind               TEXT NOT NULL DEFAULT 'task',  -- payment|form|action|task
+        title              TEXT NOT NULL,
+        detail             TEXT,
+        due_date           DATE,
+        status             TEXT NOT NULL DEFAULT 'open',  -- open|done|snoozed|dismissed
+        source             TEXT NOT NULL DEFAULT 'manual',  -- manual|email|photo|research|cos_agent
+        source_artifact_id TEXT,                    -- nullable link to ingest_artifacts.id
+        created_at         TIMESTAMPTZ DEFAULT now(),
+        updated_at         TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_todo_items_user ON todo_items (user_id, status, due_date);
+
+    -- Ingested artifacts - multimodal (text paste, forwarded iMessage, flyer
+    -- photo, screenshot, signed-form pdf, gmail). raw_text for text sources,
+    -- blob_ref for stored images.
+    CREATE TABLE IF NOT EXISTS ingest_artifacts (
+        id             TEXT PRIMARY KEY,
+        user_id        TEXT NOT NULL,
+        source         TEXT NOT NULL,               -- paste|imessage|photo|screenshot|pdf|gmail|forward
+        media_type     TEXT NOT NULL DEFAULT 'text',  -- text|image|pdf
+        blob_ref       TEXT,                        -- path/key for stored image, NULL for text
+        subject        TEXT,
+        sender         TEXT,
+        received_at    TIMESTAMPTZ,
+        raw_text       TEXT,
+        extracted_json JSON,                        -- structured ExtractedActivity dump
+        extract_status TEXT NOT NULL DEFAULT 'pending',  -- pending|extracted|failed
+        links_json     JSON,                        -- [{label, url}]
+        created_at     TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ingest_artifacts_user ON ingest_artifacts (user_id, created_at);
+
+    -- Chief-of-staff chat transcript (append-only, mirrors kid_messages).
+    CREATE TABLE IF NOT EXISTS cos_messages (
+        id          TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL,
+        thread_id   TEXT NOT NULL DEFAULT 'default',
+        role        TEXT NOT NULL,                  -- user|assistant|system
+        content     TEXT NOT NULL,
+        created_at  TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_cos_messages_user_thread ON cos_messages (user_id, thread_id, created_at);
+
+    -- Google OAuth tokens (Phase 3). Refresh token encrypted at rest.
+    CREATE TABLE IF NOT EXISTS google_oauth_tokens (
+        user_id                 TEXT PRIMARY KEY,
+        encrypted_refresh_token TEXT NOT NULL,
+        scopes                  TEXT,
+        email                   TEXT,
+        connected_at            TIMESTAMPTZ DEFAULT now(),
+        last_sync_at            TIMESTAMPTZ,
+        revoked_at              TIMESTAMPTZ
+    );
     """
 
     # Every table that must survive a volume rebuild, mapped to its parquet
@@ -327,11 +562,32 @@ class DuckDBStorage(StorageBackend):
         ("daily_summaries", "daily_summaries.parquet"),
         ("audit_events", "audit_events.parquet"),
         ("auth_tokens", "auth_tokens.parquet"),
+        ("tts_usage_daily", "tts_usage_daily.parquet"),
+        # Activity planning + Chief-of-Staff (user state — exclude from image
+        # build context in .dockerignore so local data never overwrites prod).
+        ("research_runs", "research_runs.parquet"),
+        ("activity_candidates", "activity_candidates.parquet"),
+        ("tracked_activities", "tracked_activities.parquet"),
+        ("calendar_entries", "calendar_entries.parquet"),
+        ("recurring_appointments", "recurring_appointments.parquet"),
+        ("caregivers", "caregivers.parquet"),
+        ("logistics_assignments", "logistics_assignments.parquet"),
+        ("todo_items", "todo_items.parquet"),
+        ("ingest_artifacts", "ingest_artifacts.parquet"),
+        ("cos_messages", "cos_messages.parquet"),
+        ("google_oauth_tokens", "google_oauth_tokens.parquet"),
     ]
 
     def __init__(self, db_path: Path | str | None = None) -> None:
         if db_path is None:
-            db_path = Path(__file__).resolve().parent.parent / "data" / "mvp.duckdb"
+            # Env override lets tests / ephemeral runs point at a throwaway DB
+            # without editing server wiring (avoids the single-writer lock on the
+            # real data/mvp.duckdb held by a running dev server).
+            env_path = os.getenv("MVP_DUCKDB_PATH")
+            if env_path:
+                db_path = Path(env_path)
+            else:
+                db_path = Path(__file__).resolve().parent.parent / "data" / "mvp.duckdb"
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.parquet_dir = self.db_path.parent
@@ -344,6 +600,10 @@ class DuckDBStorage(StorageBackend):
             if stmt:
                 self._con.execute(stmt + ";")
         for stmt in self.KID_DDL.strip().split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                self._con.execute(stmt + ";")
+        for stmt in self.ACTIVITY_DDL.strip().split(";"):
             stmt = stmt.strip()
             if stmt:
                 self._con.execute(stmt + ";")
@@ -363,15 +623,54 @@ class DuckDBStorage(StorageBackend):
             if not pq.exists():
                 continue
             try:
+                # SELECT * blows up when a migration adds a column that the
+                # snapshot parquet doesn't have yet (e.g. categories.parent_id
+                # after migration v4). Compute the intersection of parquet
+                # columns × table columns and INSERT with an explicit column
+                # list — the missing columns get their default (NULL for
+                # nullable cols, which is what we want for additive migrations).
+                parquet_cols = [
+                    r[0] for r in self._con.execute(
+                        "SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet(?))",
+                        [str(pq)],
+                    ).fetchall()
+                ]
+                table_cols = [
+                    r[0] for r in self._con.execute(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = ? ORDER BY ordinal_position",
+                        [table],
+                    ).fetchall()
+                ]
+                shared = [c for c in table_cols if c in parquet_cols]
+                if not shared:
+                    logger.warning(
+                        f"[duckdb] bootstrap of {table} from {pq_name} skipped: "
+                        f"no shared columns (parquet={parquet_cols}, table={table_cols})"
+                    )
+                    continue
+                cols_sql = ", ".join(f'"{c}"' for c in shared)
                 self._con.execute(
-                    f"INSERT OR IGNORE INTO {table} SELECT * FROM read_parquet(?)",
+                    f"INSERT OR IGNORE INTO {table} ({cols_sql}) "
+                    f"SELECT {cols_sql} FROM read_parquet(?)",
                     [str(pq)],
                 )
-                logger.info(f"[duckdb] bootstrap-merged {table} from {pq_name}")
+                dropped = set(parquet_cols) - set(shared)
+                added = set(table_cols) - set(parquet_cols)
+                drift_note = ""
+                if dropped or added:
+                    drift_note = (
+                        f" (drift: parquet-only={sorted(dropped)}, "
+                        f"table-only={sorted(added)})"
+                    )
+                logger.info(
+                    f"[duckdb] bootstrap-merged {table} from {pq_name}{drift_note}"
+                )
             except Exception as exc:
-                # A schema-mismatched snapshot (older column set) shouldn't take
-                # the whole boot down — log and continue. The live table keeps
-                # whatever it has.
+                # Any remaining failure — disk-full, corrupt parquet — shouldn't
+                # take the whole boot down. The live table keeps whatever it
+                # already has (which on a fresh deploy is "empty"; on a warm
+                # restart is "the last committed state").
                 logger.warning(f"[duckdb] bootstrap of {table} from {pq_name} skipped: {exc}")
 
         logger.info(f"[duckdb] opened {self.db_path}")
@@ -421,23 +720,37 @@ class DuckDBStorage(StorageBackend):
 
     def get_categories(self) -> List[Dict[str, Any]]:
         rows = self._con.execute(
-            "SELECT id, name, emoji, description FROM categories ORDER BY id"
+            "SELECT id, name, emoji, description, parent_id FROM categories ORDER BY id"
         ).fetchall()
-        return [{"id": r[0], "name": r[1], "emoji": r[2], "description": r[3]} for r in rows]
+        return [
+            {"id": r[0], "name": r[1], "emoji": r[2], "description": r[3], "parent_id": r[4]}
+            for r in rows
+        ]
 
-    def get_articles(self, category: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_articles(
+        self,
+        category: Optional[str] = None,
+        tag: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        # Compose WHERE dynamically with bound params — never f-string user
+        # input. `? = ANY(tags)` is DuckDB's array-membership test (case-
+        # sensitive exact match on each element).
+        clauses: List[str] = []
+        params: List[Any] = []
         if category:
-            rows = self._con.execute(
-                "SELECT id, category, title, subtitle, emoji, author, read_time, summary, tags "
-                "FROM articles WHERE category = ? ORDER BY id LIMIT ?",
-                [category, limit],
-            ).fetchall()
-        else:
-            rows = self._con.execute(
-                "SELECT id, category, title, subtitle, emoji, author, read_time, summary, tags "
-                "FROM articles ORDER BY id LIMIT ?",
-                [limit],
-            ).fetchall()
+            clauses.append("category = ?")
+            params.append(category)
+        if tag:
+            clauses.append("? = ANY(tags)")
+            params.append(tag)
+        where = f"WHERE {' AND '.join(clauses)} " if clauses else ""
+        params.append(limit)
+        rows = self._con.execute(
+            "SELECT id, category, title, subtitle, emoji, author, read_time, summary, tags "
+            f"FROM articles {where}ORDER BY id LIMIT ?",
+            params,
+        ).fetchall()
         return [
             {"id": r[0], "category": r[1], "title": r[2], "subtitle": r[3],
              "emoji": r[4], "author": r[5], "read_time": r[6], "summary": r[7],
@@ -682,10 +995,11 @@ class DuckDBStorage(StorageBackend):
 
     def create_category(self, data: Dict[str, Any]) -> Dict[str, Any]:
         self._con.execute(
-            "INSERT INTO categories (id, name, emoji, description) VALUES (?, ?, ?, ?)",
-            [data["id"], data["name"], data.get("emoji", ""), data.get("description", "")],
+            "INSERT INTO categories (id, name, emoji, description, parent_id) VALUES (?, ?, ?, ?, ?)",
+            [data["id"], data["name"], data.get("emoji", ""),
+             data.get("description", ""), data.get("parent_id")],
         )
-        return {"id": data["id"], "name": data["name"], "emoji": data.get("emoji", ""), "description": data.get("description", "")}
+        return self._get_category(data["id"])
 
     def update_category(self, category_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         row = self._con.execute("SELECT id FROM categories WHERE id = ?", [category_id]).fetchone()
@@ -693,7 +1007,9 @@ class DuckDBStorage(StorageBackend):
             return None
         fields = []
         values = []
-        for key in ("name", "emoji", "description"):
+        # parent_id is included so callers can clear it by passing None — the
+        # CMS dropdown's "— None (top-level) —" option round-trips that way.
+        for key in ("name", "emoji", "description", "parent_id"):
             if key in data:
                 fields.append(f"{key} = ?")
                 values.append(data[key])
@@ -714,11 +1030,13 @@ class DuckDBStorage(StorageBackend):
 
     def _get_category(self, category_id: str) -> Optional[Dict[str, Any]]:
         row = self._con.execute(
-            "SELECT id, name, emoji, description FROM categories WHERE id = ?", [category_id]
+            "SELECT id, name, emoji, description, parent_id FROM categories WHERE id = ?",
+            [category_id],
         ).fetchone()
         if row is None:
             return None
-        return {"id": row[0], "name": row[1], "emoji": row[2], "description": row[3]}
+        return {"id": row[0], "name": row[1], "emoji": row[2], "description": row[3],
+                "parent_id": row[4]}
 
     def get_content_stats(self) -> Dict[str, Any]:
         articles_count = self._con.execute("SELECT count(*) FROM articles").fetchone()[0]
@@ -859,10 +1177,17 @@ class DuckDBStorage(StorageBackend):
         age_score: Optional[float] = None,
         voice_score: Optional[float] = None,
         parent_flagged: bool = False,
+        message_id: Optional[str] = None,
     ) -> str:
-        """Append a kid-chat message; returns the new message id."""
+        """Append a kid-chat message; returns the new message id.
+
+        `message_id` may be pre-supplied by the caller — used by the kid-chat
+        voice path which needs to reference the assistant `reply_id` in
+        streamed voice_fragment events before the row is finalised.
+        """
         import uuid
-        message_id = str(uuid.uuid4())
+        if message_id is None:
+            message_id = str(uuid.uuid4())
         self._con.execute(
             """
             INSERT INTO kid_messages (
@@ -908,6 +1233,25 @@ class DuckDBStorage(StorageBackend):
             }
             for r in rows
         ]
+
+    def get_last_kid_message(
+        self, agent_id: str, thread_id: str = "default"
+    ) -> Optional[Dict[str, Any]]:
+        """Most recent message in a kid thread, or None. Used by the ConvAI
+        token endpoint's greeting-persistence guard (don't stack greetings on
+        reconnect)."""
+        row = self._con.execute(
+            """
+            SELECT role, content FROM kid_messages
+            WHERE agent_id = ? AND thread_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            [agent_id, thread_id],
+        ).fetchone()
+        if row is None:
+            return None
+        return {"role": row[0], "content": row[1]}
 
     def set_kid_pin(self, user_id: str, kid_name: str, pin_hash: str) -> None:
         """Upsert a kid PIN. Caller must provide a bcrypt hash."""
@@ -1470,6 +1814,803 @@ class DuckDBStorage(StorageBackend):
         """Export content tables to separate parquet files (atomic)."""
         for table in ("categories", "articles", "community_posts", "post_replies"):
             self._export_table_atomic(table, self.parquet_dir / f"{table}.parquet")
+
+    # ── Activity planning: research runs + candidates ────────────────────
+    #
+    # The research_runs row is the durable background-job record (the phone never
+    # holds the job). The worker claims a queued run atomically, executes the
+    # deep-research graph, and writes candidates. A startup sweeper re-queues any
+    # run left 'running' by a crash/restart; re-runs are idempotent because
+    # insert_activity_candidates deletes prior rows for the run_id first.
+
+    def create_research_run(
+        self,
+        *,
+        user_id: str,
+        location: Dict[str, Any],
+        kids: List[Dict[str, Any]],
+        params: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Insert a queued run and return its run_id."""
+        import uuid
+        run_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO research_runs (
+                id, user_id, status, location_json, kids_json, params_json,
+                progress_json, candidate_count, created_at
+            ) VALUES (?, ?, 'queued', ?, ?, ?, ?, 0, now())
+            """,
+            [
+                run_id, user_id,
+                json.dumps(location, ensure_ascii=False),
+                json.dumps(kids, ensure_ascii=False),
+                json.dumps(params or {}, ensure_ascii=False),
+                json.dumps({"phase": "queued"}, ensure_ascii=False),
+            ],
+        )
+        return run_id
+
+    def claim_next_queued_run(self) -> Optional[Dict[str, Any]]:
+        """Atomically pick the oldest queued run, flip it to running, and return
+        it. Single UPDATE...RETURNING so two workers can't claim the same row."""
+        row = self._con.execute(
+            """
+            UPDATE research_runs
+               SET status = 'running', started_at = now(),
+                   progress_json = json_object('phase', 'starting')
+             WHERE id = (
+                 SELECT id FROM research_runs
+                  WHERE status = 'queued'
+                  ORDER BY created_at
+                  LIMIT 1
+             )
+            RETURNING id
+            """,
+        ).fetchone()
+        if row is None:
+            return None
+        return self.get_research_run(row[0])
+
+    def update_research_run(
+        self,
+        run_id: str,
+        *,
+        status: Optional[str] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        candidate_count: Optional[int] = None,
+        error: Optional[str] = None,
+        finished: bool = False,
+    ) -> None:
+        """Patch mutable fields on a run. `finished=True` stamps finished_at."""
+        sets: List[str] = []
+        params: List[Any] = []
+        if status is not None:
+            sets.append("status = ?"); params.append(status)
+        if progress is not None:
+            sets.append("progress_json = ?"); params.append(json.dumps(progress, ensure_ascii=False))
+        if candidate_count is not None:
+            sets.append("candidate_count = ?"); params.append(candidate_count)
+        if error is not None:
+            sets.append("error = ?"); params.append(error)
+        if finished:
+            sets.append("finished_at = now()")
+        if not sets:
+            return
+        params.append(run_id)
+        self._con.execute(
+            f"UPDATE research_runs SET {', '.join(sets)} WHERE id = ?",
+            params,
+        )
+
+    def requeue_stale_running_runs(self) -> int:
+        """Startup sweeper: a restart kills the in-flight worker thread, so any
+        run still 'running' is orphaned. Re-queue it (re-runs are idempotent).
+        Returns how many were re-queued."""
+        rows = self._con.execute(
+            """
+            UPDATE research_runs
+               SET status = 'queued', started_at = NULL,
+                   progress_json = json_object('phase', 'requeued_after_restart')
+             WHERE status = 'running'
+            RETURNING id
+            """,
+        ).fetchall()
+        if rows:
+            logger.warning("[research] re-queued %d stale running run(s) after restart", len(rows))
+        return len(rows)
+
+    def get_research_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            """
+            SELECT id, user_id, status, location_json, kids_json, params_json,
+                   progress_json, candidate_count, error,
+                   created_at, started_at, finished_at
+            FROM research_runs WHERE id = ?
+            """,
+            [run_id],
+        ).fetchone()
+        return self._research_run_row_to_dict(row) if row else None
+
+    def list_research_runs(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            """
+            SELECT id, user_id, status, location_json, kids_json, params_json,
+                   progress_json, candidate_count, error,
+                   created_at, started_at, finished_at
+            FROM research_runs
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            [user_id, limit],
+        ).fetchall()
+        return [self._research_run_row_to_dict(r) for r in rows]
+
+    @staticmethod
+    def _research_run_row_to_dict(row: Any) -> Dict[str, Any]:
+        return {
+            "id": row[0],
+            "user_id": row[1],
+            "status": row[2],
+            "location": json.loads(row[3]) if row[3] else {},
+            "kids": json.loads(row[4]) if row[4] else [],
+            "params": json.loads(row[5]) if row[5] else {},
+            "progress": json.loads(row[6]) if row[6] else {},
+            "candidate_count": row[7],
+            "error": row[8],
+            "created_at": row[9].isoformat() if row[9] else None,
+            "started_at": row[10].isoformat() if row[10] else None,
+            "finished_at": row[11].isoformat() if row[11] else None,
+        }
+
+    def insert_activity_candidates(
+        self,
+        *,
+        run_id: str,
+        user_id: str,
+        candidates: List[Dict[str, Any]],
+    ) -> int:
+        """Replace this run's candidates with `candidates` in one transaction.
+        Delete-then-insert keeps a re-run (after a restart) idempotent. Returns
+        the number inserted."""
+        import uuid
+        cols = (
+            "id", "run_id", "user_id", "kid_name", "name", "provider", "category",
+            "age_min", "age_max", "start_date", "end_date", "schedule_text",
+            "price_text", "price_amount", "location_text", "signup_url",
+            "source_url", "contact_json", "fit_score", "raw_json",
+        )
+        placeholders = ", ".join(["?"] * len(cols))
+        with self._con.transaction() as con:
+            con.execute("DELETE FROM activity_candidates WHERE run_id = ?", [run_id])
+            for c in candidates:
+                con.execute(
+                    f"INSERT INTO activity_candidates ({', '.join(cols)}) VALUES ({placeholders})",
+                    [
+                        str(uuid.uuid4()), run_id, user_id,
+                        c.get("kid_name"), c.get("name") or "Untitled", c.get("provider"),
+                        c.get("category"), c.get("age_min"), c.get("age_max"),
+                        c.get("start_date"), c.get("end_date"), c.get("schedule_text"),
+                        c.get("price_text"), c.get("price_amount"), c.get("location_text"),
+                        c.get("signup_url"), c.get("source_url"),
+                        json.dumps(c.get("contact") or {}, ensure_ascii=False) if c.get("contact") else None,
+                        c.get("fit_score"),
+                        json.dumps(c.get("raw") or c, ensure_ascii=False),
+                    ],
+                )
+        return len(candidates)
+
+    def list_candidates(
+        self,
+        *,
+        run_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        kid_name: Optional[str] = None,
+        category: Optional[str] = None,
+        limit: int = 500,
+    ) -> List[Dict[str, Any]]:
+        where: List[str] = []
+        params: List[Any] = []
+        if run_id is not None:
+            where.append("run_id = ?"); params.append(run_id)
+        if user_id is not None:
+            where.append("user_id = ?"); params.append(user_id)
+        if kid_name is not None:
+            where.append("kid_name = ?"); params.append(kid_name)
+        if category is not None:
+            where.append("category = ?"); params.append(category)
+        clause = ("WHERE " + " AND ".join(where)) if where else ""
+        params.append(limit)
+        rows = self._con.execute(
+            f"""
+            SELECT id, run_id, user_id, kid_name, name, provider, category,
+                   age_min, age_max, start_date, end_date, schedule_text,
+                   price_text, price_amount, location_text, signup_url,
+                   source_url, contact_json, fit_score, raw_json, created_at
+            FROM activity_candidates
+            {clause}
+            ORDER BY fit_score DESC NULLS LAST, created_at
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            out.append({
+                "id": r[0], "run_id": r[1], "user_id": r[2], "kid_name": r[3],
+                "name": r[4], "provider": r[5], "category": r[6],
+                "age_min": r[7], "age_max": r[8],
+                "start_date": r[9].isoformat() if r[9] else None,
+                "end_date": r[10].isoformat() if r[10] else None,
+                "schedule_text": r[11], "price_text": r[12], "price_amount": r[13],
+                "location_text": r[14], "signup_url": r[15], "source_url": r[16],
+                "contact": json.loads(r[17]) if r[17] else None,
+                "fit_score": r[18],
+                "raw": json.loads(r[19]) if r[19] else None,
+                "created_at": r[20].isoformat() if r[20] else None,
+            })
+        return out
+
+    # ── Chief-of-Staff CRUD ──────────────────────────────────────────
+    #
+    # Small shared helpers keep the per-table methods terse. JSON columns are
+    # stored under a *_json name in the DDL but exposed to callers under a clean
+    # key (contact_json -> contact, etc.); ts/date columns are serialised to
+    # ISO strings on read.
+
+    def _cos_update(
+        self,
+        table: str,
+        row_id: str,
+        fields: Dict[str, Any],
+        *,
+        json_cols: Iterable[str] = (),
+        touch_updated: bool = True,
+    ) -> None:
+        """Build a dynamic UPDATE ... SET for a Chief-of-Staff row.
+
+        Skips keys whose value is None (so callers pass **fields and only the
+        present ones land). Keys in `json_cols` are json.dumps'd. When
+        `touch_updated` is True an `updated_at = now()` is appended (tables that
+        have no updated_at column pass touch_updated=False)."""
+        json_set = set(json_cols)
+        sets: List[str] = []
+        params: List[Any] = []
+        for key, value in fields.items():
+            if value is None:
+                continue
+            sets.append(f"{key} = ?")
+            if key in json_set:
+                params.append(json.dumps(value, ensure_ascii=False))
+            else:
+                params.append(value)
+        if not sets:
+            return
+        if touch_updated:
+            sets.append("updated_at = now()")
+        params.append(row_id)
+        self._con.execute(
+            f"UPDATE {table} SET {', '.join(sets)} WHERE id = ?", params
+        )
+
+    @staticmethod
+    def _row_to_dict(
+        cols: Iterable[str],
+        row: Any,
+        *,
+        json_cols: Iterable[str] = (),
+        ts_cols: Iterable[str] = (),
+    ) -> Dict[str, Any]:
+        """Zip a column list with a row tuple into a JSON-friendly dict.
+
+        `json_cols` is a mapping-as-tuples of (db_col, clean_key) so a column
+        like `contact_json` is parsed and re-keyed to `contact`. `ts_cols` are
+        ISO-serialised."""
+        json_map = dict(json_cols)
+        ts_set = set(ts_cols)
+        out: Dict[str, Any] = {}
+        for col, val in zip(cols, row):
+            if col in json_map:
+                out[json_map[col]] = json.loads(val) if val else None
+            elif col in ts_set:
+                out[col] = val.isoformat() if val else None
+            else:
+                out[col] = val
+        return out
+
+    # tracked_activities ----------------------------------------------------
+
+    _TRACKED_COLS = (
+        "id", "user_id", "kid_name", "candidate_id", "name", "provider",
+        "week_start", "status", "pending_reason", "price_amount", "price_status",
+        "signup_url", "contact_json", "carpool_with", "details_json", "notes",
+        "decision_rationale", "created_at", "updated_at",
+    )
+
+    def track_activity(
+        self,
+        user_id: str,
+        *,
+        name: str,
+        kid_name: Optional[str] = None,
+        candidate_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        week_start: Optional[str] = None,
+        status: str = "interested",
+        pending_reason: Optional[str] = None,
+        price_amount: Optional[float] = None,
+        price_status: str = "tbd",
+        signup_url: Optional[str] = None,
+        contact: Optional[Dict[str, Any]] = None,
+        carpool_with: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        notes: Optional[str] = None,
+        decision_rationale: Optional[str] = None,
+    ) -> str:
+        import uuid
+        activity_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO tracked_activities (
+                id, user_id, kid_name, candidate_id, name, provider, week_start,
+                status, pending_reason, price_amount, price_status, signup_url,
+                contact_json, carpool_with, details_json, notes, decision_rationale,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+            """,
+            [
+                activity_id, user_id, kid_name, candidate_id, name, provider,
+                week_start, status, pending_reason, price_amount, price_status,
+                signup_url,
+                json.dumps(contact, ensure_ascii=False) if contact else None,
+                carpool_with,
+                json.dumps(details, ensure_ascii=False) if details else None,
+                notes, decision_rationale,
+            ],
+        )
+        return activity_id
+
+    def get_tracked_activity(self, activity_id: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {', '.join(self._TRACKED_COLS)} FROM tracked_activities WHERE id = ?",
+            [activity_id],
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(
+            self._TRACKED_COLS, row,
+            json_cols=(("contact_json", "contact"), ("details_json", "details")),
+            ts_cols=("week_start", "created_at", "updated_at"),
+        )
+
+    def list_tracked_activities(
+        self, user_id: str, status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        where = "WHERE user_id = ?"
+        params: List[Any] = [user_id]
+        if status is not None:
+            where += " AND status = ?"
+            params.append(status)
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._TRACKED_COLS)} FROM tracked_activities "
+            f"{where} ORDER BY created_at",
+            params,
+        ).fetchall()
+        return [
+            self._row_to_dict(
+                self._TRACKED_COLS, r,
+                json_cols=(("contact_json", "contact"), ("details_json", "details")),
+                ts_cols=("week_start", "created_at", "updated_at"),
+            )
+            for r in rows
+        ]
+
+    def update_tracked_activity(self, activity_id: str, **fields: Any) -> None:
+        allowed = {
+            "status", "pending_reason", "price_amount", "price_status",
+            "signup_url", "week_start", "notes", "decision_rationale",
+            "carpool_with", "contact", "details",
+        }
+        patch: Dict[str, Any] = {}
+        for key, value in fields.items():
+            if key not in allowed:
+                continue
+            if key == "contact":
+                patch["contact_json"] = value
+            elif key == "details":
+                patch["details_json"] = value
+            else:
+                patch[key] = value
+        self._cos_update(
+            "tracked_activities", activity_id, patch,
+            json_cols=("contact_json", "details_json"),
+        )
+
+    # calendar_entries ------------------------------------------------------
+
+    _CALENDAR_COLS = (
+        "id", "user_id", "kid_name", "activity_id", "title", "week_start",
+        "start_ts", "end_ts", "all_day", "location_text", "kind", "status",
+        "source", "created_at", "updated_at",
+    )
+
+    def add_calendar_entry(
+        self,
+        user_id: str,
+        *,
+        title: str,
+        kid_name: Optional[str] = None,
+        activity_id: Optional[str] = None,
+        week_start: Optional[str] = None,
+        start_ts: Optional[str] = None,
+        end_ts: Optional[str] = None,
+        all_day: bool = False,
+        location_text: Optional[str] = None,
+        kind: str = "camp",
+        status: str = "confirmed",
+        source: str = "manual",
+    ) -> str:
+        import uuid
+        entry_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO calendar_entries (
+                id, user_id, kid_name, activity_id, title, week_start,
+                start_ts, end_ts, all_day, location_text, kind, status, source,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+            """,
+            [
+                entry_id, user_id, kid_name, activity_id, title, week_start,
+                start_ts, end_ts, all_day, location_text, kind, status, source,
+            ],
+        )
+        return entry_id
+
+    def get_calendar_entry(self, entry_id: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {', '.join(self._CALENDAR_COLS)} FROM calendar_entries WHERE id = ?",
+            [entry_id],
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(
+            self._CALENDAR_COLS, row,
+            ts_cols=("week_start", "start_ts", "end_ts", "created_at", "updated_at"),
+        )
+
+    def list_calendar_entries(
+        self,
+        user_id: str,
+        *,
+        week_start: Optional[str] = None,
+        kid_name: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        where = "WHERE user_id = ?"
+        params: List[Any] = [user_id]
+        if week_start is not None:
+            where += " AND week_start = ?"
+            params.append(week_start)
+        if kid_name is not None:
+            where += " AND kid_name = ?"
+            params.append(kid_name)
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._CALENDAR_COLS)} FROM calendar_entries "
+            f"{where} ORDER BY start_ts NULLS LAST, week_start",
+            params,
+        ).fetchall()
+        return [
+            self._row_to_dict(
+                self._CALENDAR_COLS, r,
+                ts_cols=("week_start", "start_ts", "end_ts", "created_at", "updated_at"),
+            )
+            for r in rows
+        ]
+
+    def update_calendar_entry(self, entry_id: str, **fields: Any) -> None:
+        allowed = {
+            "title", "kid_name", "week_start", "start_ts", "end_ts", "all_day",
+            "location_text", "kind", "status",
+        }
+        patch = {k: v for k, v in fields.items() if k in allowed}
+        self._cos_update("calendar_entries", entry_id, patch)
+
+    def delete_calendar_entry(self, entry_id: str) -> None:
+        self._con.execute("DELETE FROM calendar_entries WHERE id = ?", [entry_id])
+
+    # recurring_appointments ------------------------------------------------
+
+    _RECURRING_COLS = (
+        "id", "user_id", "kid_name", "title", "provider_name", "weekday",
+        "start_time", "end_time", "transporter", "notes", "active_from",
+        "active_to", "created_at",
+    )
+
+    def add_recurring_appointment(
+        self,
+        user_id: str,
+        *,
+        title: str,
+        kid_name: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        weekday: Optional[int] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        transporter: Optional[str] = None,
+        notes: Optional[str] = None,
+        active_from: Optional[str] = None,
+        active_to: Optional[str] = None,
+    ) -> str:
+        import uuid
+        appt_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO recurring_appointments (
+                id, user_id, kid_name, title, provider_name, weekday,
+                start_time, end_time, transporter, notes, active_from, active_to,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+            """,
+            [
+                appt_id, user_id, kid_name, title, provider_name, weekday,
+                start_time, end_time, transporter, notes, active_from, active_to,
+            ],
+        )
+        return appt_id
+
+    def list_recurring_appointments(self, user_id: str) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._RECURRING_COLS)} FROM recurring_appointments "
+            "WHERE user_id = ? ORDER BY created_at",
+            [user_id],
+        ).fetchall()
+        return [
+            self._row_to_dict(
+                self._RECURRING_COLS, r,
+                ts_cols=("active_from", "active_to", "created_at"),
+            )
+            for r in rows
+        ]
+
+    def delete_recurring_appointment(self, appt_id: str) -> None:
+        self._con.execute(
+            "DELETE FROM recurring_appointments WHERE id = ?", [appt_id]
+        )
+
+    # caregivers ------------------------------------------------------------
+
+    _CAREGIVER_COLS = (
+        "id", "user_id", "name", "role", "contact_json",
+        "default_availability_json", "notes", "created_at",
+    )
+
+    def add_caregiver(
+        self,
+        user_id: str,
+        *,
+        name: str,
+        role: str = "other",
+        contact: Optional[Dict[str, Any]] = None,
+        default_availability: Optional[Dict[str, Any]] = None,
+        notes: Optional[str] = None,
+    ) -> str:
+        import uuid
+        caregiver_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO caregivers (
+                id, user_id, name, role, contact_json,
+                default_availability_json, notes, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, now())
+            """,
+            [
+                caregiver_id, user_id, name, role,
+                json.dumps(contact, ensure_ascii=False) if contact else None,
+                json.dumps(default_availability, ensure_ascii=False) if default_availability else None,
+                notes,
+            ],
+        )
+        return caregiver_id
+
+    def list_caregivers(self, user_id: str) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._CAREGIVER_COLS)} FROM caregivers "
+            "WHERE user_id = ? ORDER BY created_at",
+            [user_id],
+        ).fetchall()
+        return [
+            self._row_to_dict(
+                self._CAREGIVER_COLS, r,
+                json_cols=(
+                    ("contact_json", "contact"),
+                    ("default_availability_json", "default_availability"),
+                ),
+                ts_cols=("created_at",),
+            )
+            for r in rows
+        ]
+
+    def update_caregiver(self, caregiver_id: str, **fields: Any) -> None:
+        allowed = {"name", "role", "notes", "contact", "default_availability"}
+        patch: Dict[str, Any] = {}
+        for key, value in fields.items():
+            if key not in allowed:
+                continue
+            if key == "contact":
+                patch["contact_json"] = value
+            elif key == "default_availability":
+                patch["default_availability_json"] = value
+            else:
+                patch[key] = value
+        self._cos_update(
+            "caregivers", caregiver_id, patch,
+            json_cols=("contact_json", "default_availability_json"),
+            touch_updated=False,
+        )
+
+    # logistics_assignments -------------------------------------------------
+
+    _LOGISTICS_COLS = (
+        "id", "user_id", "week_start", "kid_name", "calendar_entry_id", "task",
+        "caregiver_id", "status", "notes", "created_at", "updated_at",
+    )
+
+    def add_logistics_assignment(
+        self,
+        user_id: str,
+        *,
+        task: str,
+        week_start: Optional[str] = None,
+        kid_name: Optional[str] = None,
+        calendar_entry_id: Optional[str] = None,
+        caregiver_id: Optional[str] = None,
+        status: str = "tbd",
+        notes: Optional[str] = None,
+    ) -> str:
+        import uuid
+        assignment_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO logistics_assignments (
+                id, user_id, week_start, kid_name, calendar_entry_id, task,
+                caregiver_id, status, notes, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+            """,
+            [
+                assignment_id, user_id, week_start, kid_name, calendar_entry_id,
+                task, caregiver_id, status, notes,
+            ],
+        )
+        return assignment_id
+
+    def list_logistics_assignments(
+        self, user_id: str, *, week_start: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        where = "WHERE user_id = ?"
+        params: List[Any] = [user_id]
+        if week_start is not None:
+            where += " AND week_start = ?"
+            params.append(week_start)
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._LOGISTICS_COLS)} FROM logistics_assignments "
+            f"{where} ORDER BY created_at",
+            params,
+        ).fetchall()
+        return [
+            self._row_to_dict(
+                self._LOGISTICS_COLS, r,
+                ts_cols=("week_start", "created_at", "updated_at"),
+            )
+            for r in rows
+        ]
+
+    def update_logistics_assignment(self, assignment_id: str, **fields: Any) -> None:
+        allowed = {"task", "caregiver_id", "status", "notes", "week_start", "kid_name"}
+        patch = {k: v for k, v in fields.items() if k in allowed}
+        self._cos_update("logistics_assignments", assignment_id, patch)
+
+    # todo_items ------------------------------------------------------------
+
+    _TODO_COLS = (
+        "id", "user_id", "kid_name", "activity_id", "kind", "title", "detail",
+        "due_date", "status", "source", "source_artifact_id", "created_at",
+        "updated_at",
+    )
+
+    def add_todo(
+        self,
+        user_id: str,
+        *,
+        title: str,
+        kid_name: Optional[str] = None,
+        activity_id: Optional[str] = None,
+        kind: str = "task",
+        detail: Optional[str] = None,
+        due_date: Optional[str] = None,
+        status: str = "open",
+        source: str = "manual",
+        source_artifact_id: Optional[str] = None,
+    ) -> str:
+        import uuid
+        todo_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO todo_items (
+                id, user_id, kid_name, activity_id, kind, title, detail,
+                due_date, status, source, source_artifact_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+            """,
+            [
+                todo_id, user_id, kid_name, activity_id, kind, title, detail,
+                due_date, status, source, source_artifact_id,
+            ],
+        )
+        return todo_id
+
+    def list_todos(
+        self, user_id: str, status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        where = "WHERE user_id = ?"
+        params: List[Any] = [user_id]
+        if status is not None:
+            where += " AND status = ?"
+            params.append(status)
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._TODO_COLS)} FROM todo_items "
+            f"{where} ORDER BY due_date NULLS LAST, created_at",
+            params,
+        ).fetchall()
+        return [
+            self._row_to_dict(
+                self._TODO_COLS, r,
+                ts_cols=("due_date", "created_at", "updated_at"),
+            )
+            for r in rows
+        ]
+
+    def update_todo(self, todo_id: str, **fields: Any) -> None:
+        allowed = {"title", "detail", "due_date", "status", "kind"}
+        patch = {k: v for k, v in fields.items() if k in allowed}
+        self._cos_update("todo_items", todo_id, patch)
+
+    # cos_messages ----------------------------------------------------------
+
+    _COS_MESSAGE_COLS = (
+        "id", "user_id", "thread_id", "role", "content", "created_at",
+    )
+
+    def append_cos_message(
+        self,
+        user_id: str,
+        *,
+        thread_id: str = "default",
+        role: str,
+        content: str,
+    ) -> str:
+        import uuid
+        message_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO cos_messages (id, user_id, thread_id, role, content, created_at)
+            VALUES (?, ?, ?, ?, ?, now())
+            """,
+            [message_id, user_id, thread_id, role, content],
+        )
+        return message_id
+
+    def get_cos_messages(
+        self, user_id: str, thread_id: str = "default", limit: int = 200
+    ) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._COS_MESSAGE_COLS)} FROM cos_messages "
+            "WHERE user_id = ? AND thread_id = ? ORDER BY created_at ASC LIMIT ?",
+            [user_id, thread_id, limit],
+        ).fetchall()
+        return [
+            self._row_to_dict(self._COS_MESSAGE_COLS, r, ts_cols=("created_at",))
+            for r in rows
+        ]
 
     def export_all_parquet(self) -> None:
         """

@@ -28,26 +28,26 @@ export default function CMSLayout() {
   };
 
   return (
-    <div className="flex min-h-screen">
-      {/* Sidebar */}
-      <aside className="w-[240px] shrink-0 bg-[#1C1C1E] flex flex-col text-white">
-        <div className="px-5 py-6">
-          <h1 className="text-lg font-bold tracking-wide text-[#C9A84C]">
+    <div className="flex min-h-screen bg-canvas">
+      {/* Sidebar — 240px, canvas bg, hairline right edge */}
+      <aside className="w-[240px] shrink-0 bg-canvas border-r border-hairline flex flex-col">
+        <div className="px-500 py-700">
+          <h1 className="font-display text-title-lg text-ink-primary">
             MVP CMS
           </h1>
         </div>
 
-        <nav className="flex-1 flex flex-col gap-1 px-3">
+        <nav className="flex-1 flex flex-col gap-100 px-400">
           {navItems.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
               end={to === "/"}
               className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                `flex items-center gap-400 rounded-md px-400 py-300 text-body-md font-medium transition-colors duration-fast ${
                   isActive
-                    ? "bg-[#C9A84C]/15 text-[#C9A84C]"
-                    : "text-gray-400 hover:bg-[#2B2B2E] hover:text-white"
+                    ? "bg-accent-tint text-accent"
+                    : "text-ink-muted hover:bg-sober hover:text-ink-primary"
                 }`
               }
             >
@@ -57,10 +57,10 @@ export default function CMSLayout() {
           ))}
         </nav>
 
-        <div className="px-3 pb-5">
+        <div className="px-400 pb-500">
           <button
             onClick={handleExportParquet}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-400 transition-colors hover:bg-[#2B2B2E] hover:text-white"
+            className="flex w-full items-center gap-400 rounded-md px-400 py-300 text-body-md font-medium text-ink-muted transition-colors duration-fast hover:bg-sober hover:text-ink-primary"
           >
             <Download size={18} />
             Export Parquet
@@ -68,11 +68,10 @@ export default function CMSLayout() {
         </div>
       </aside>
 
-      {/* Content area */}
-      <main className="flex-1 overflow-y-auto bg-gray-50 min-h-screen">
+      {/* Content area — elevated bg, dense page gutter */}
+      <main className="flex-1 overflow-y-auto bg-elevated min-h-screen">
         <Outlet />
       </main>
-
     </div>
   );
 }

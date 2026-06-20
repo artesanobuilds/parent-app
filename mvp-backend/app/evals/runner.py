@@ -24,10 +24,16 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from langgraph.checkpoint.memory import MemorySaver
+
+# Make sure OPENAI_API_KEY / TAVILY_API_KEY are picked up when the runner is
+# launched standalone (pytest, CLI). The server's `load_dotenv()` only fires
+# when app.server is imported.
+load_dotenv()
 
 from app.prompt_synthesis import build_system_prompt
 from app.evals.judge import Verdict, judge
@@ -127,7 +133,10 @@ def _build_synthetic_agent(case: Dict[str, Any]):
         "topics_blocked": parent_config.get("topics_blocked", []),
         "tools_enabled": parent_config.get("tools_enabled", {}),
         "goals": parent_config.get("goals", []),
-        "voice_examples": parent_config.get("voice_examples", []),
+        "persona_examples": parent_config.get(
+            "persona_examples",
+            parent_config.get("voice_examples", []),
+        ),
     }
     kid_profile = case.get("kid_profile") or {
         "name": case.get("kid_name", "the kid"),
@@ -277,6 +286,8 @@ def write_report(results: Dict[str, CategoryResult], report_dir: Path = DEFAULT_
                         {
                             "case_id": c.case_id, "passed": c.passed,
                             "severity": c.severity, "reasoning": c.reasoning,
+                            "kid_message": c.kid_message,
+                            "agent_response": c.agent_response,
                             "elapsed_ms": c.elapsed_ms,
                         } for c in cr.cases
                     ],

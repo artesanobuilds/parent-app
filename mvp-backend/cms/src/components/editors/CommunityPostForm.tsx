@@ -35,13 +35,13 @@ export default function CommunityPostForm({
     onChange(updated);
   };
 
-  const labelClass = 'block text-sm font-medium text-gray-700 mb-1';
+  const labelClass = 'block text-body-sm font-medium text-ink-secondary mb-200';
   const inputClass =
-    'w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none';
+    'w-full rounded-md border border-strong bg-elevated px-400 py-300 text-body-md text-ink-primary placeholder:text-ink-placeholder shadow-e0 focus:border-accent focus:ring-1 focus:ring-accent outline-none';
 
   return (
     <form
-      className="space-y-5"
+      className="space-y-600"
       onSubmit={(e) => {
         e.preventDefault();
         onSave();
@@ -52,7 +52,7 @@ export default function CommunityPostForm({
         <label className={labelClass}>ID</label>
         <input
           type="text"
-          className={`${inputClass} ${isEditing ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+          className={`${inputClass} ${isEditing ? 'bg-hairline cursor-not-allowed' : ''}`}
           value={post.id ?? ''}
           disabled={isEditing}
           onChange={(e) => field('id', e.target.value)}
@@ -78,7 +78,7 @@ export default function CommunityPostForm({
       </div>
 
       {/* Name + Initials row */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-500">
         <div className="col-span-2">
           <label className={labelClass}>Name</label>
           <input
@@ -127,11 +127,11 @@ export default function CommunityPostForm({
       </div>
 
       {/* Save */}
-      <div className="pt-2">
+      <div className="pt-300">
         <button
           type="submit"
           disabled={saving}
-          className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center rounded-md bg-accent px-500 py-300 text-title-md font-medium text-ink-on-photo-light shadow-e1 hover:bg-accent-press transition-colors duration-fast disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? 'Saving...' : 'Save Post'}
         </button>

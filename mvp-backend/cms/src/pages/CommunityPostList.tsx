@@ -35,30 +35,30 @@ export function CommunityPostList() {
   );
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Community Posts</h1>
+    <div className="p-800 max-w-5xl mx-auto">
+      <div className="flex items-center justify-between mb-700">
+        <h1 className="font-display text-display-sm text-ink-primary">Community Posts</h1>
         <Link
           to="/community/new"
-          className="rounded-lg bg-[#C9A84C] px-4 py-2 text-sm font-medium text-white hover:bg-[#B8973F] transition-colors"
+          className="rounded-md bg-accent px-500 py-300 text-title-md font-medium text-ink-on-photo-light hover:bg-accent-press transition-colors duration-fast"
         >
           New Post
         </Link>
       </div>
 
       {/* Filters */}
-      <div className="flex gap-4 mb-6">
+      <div className="flex gap-500 mb-700">
         <input
           type="text"
           placeholder="Search by title..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm focus:border-[#C9A84C] focus:outline-none focus:ring-1 focus:ring-[#C9A84C]"
+          className="flex-1 rounded-md border border-hairline bg-elevated px-500 py-300 text-body-md text-ink-primary placeholder:text-ink-placeholder focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
         />
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
-          className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm focus:border-[#C9A84C] focus:outline-none focus:ring-1 focus:ring-[#C9A84C]"
+          className="rounded-md border border-hairline bg-elevated px-500 py-300 text-body-md text-ink-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
         >
           <option value="">All Categories</option>
           {categories.map((c) => (
@@ -71,46 +71,46 @@ export function CommunityPostList() {
 
       {/* Table */}
       {loading ? (
-        <div className="text-center py-12 text-gray-400 text-sm">Loading...</div>
+        <div className="text-center py-1000 text-ink-muted text-body-sm">Loading...</div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-12 text-gray-400 text-sm">No posts found.</div>
+        <div className="text-center py-1000 text-ink-muted text-body-sm">No posts found.</div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-          <table className="w-full text-sm">
+        <div className="overflow-hidden rounded-lg border border-hairline bg-elevated">
+          <table className="w-full text-body-md">
             <thead>
-              <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                <th className="px-4 py-3 w-16">Initials</th>
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Title</th>
-                <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3 w-20">Actions</th>
+              <tr className="border-b border-hairline bg-canvas text-left text-label font-semibold uppercase tracking-wider text-ink-muted">
+                <th className="px-500 py-400 w-16">Initials</th>
+                <th className="px-500 py-400">Name</th>
+                <th className="px-500 py-400">Title</th>
+                <th className="px-500 py-400">Category</th>
+                <th className="px-500 py-400 w-20">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-hairline">
               {filtered.map((post) => (
                 <tr
                   key={post.id}
-                  className="hover:bg-gray-50/50 transition-colors"
+                  className="hover:bg-canvas transition-colors duration-fast"
                 >
-                  <td className="px-4 py-3">
-                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#C9A84C]/10 text-xs font-semibold text-[#C9A84C]">
+                  <td className="px-500 py-400">
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-accent-tint text-body-sm font-semibold text-accent">
                       {post.initials}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-700">{post.name}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-500 py-400 text-ink-secondary">{post.name}</td>
+                  <td className="px-500 py-400">
                     <Link
                       to={`/community/${post.id}`}
-                      className="font-medium text-gray-900 hover:text-[#C9A84C] transition-colors"
+                      className="font-medium text-ink-primary hover:text-accent transition-colors duration-fast"
                     >
                       {post.title}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-gray-500">{post.category}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-500 py-400 text-ink-muted">{post.category}</td>
+                  <td className="px-500 py-400">
                     <Link
                       to={`/community/${post.id}`}
-                      className="text-[#C9A84C] hover:text-[#B8973F] font-medium transition-colors"
+                      className="text-accent hover:text-accent-press font-medium transition-colors duration-fast"
                     >
                       Edit
                     </Link>

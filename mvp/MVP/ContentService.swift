@@ -7,6 +7,16 @@ struct APICategory: Codable, Identifiable, Hashable {
     let name: String
     let emoji: String
     let description: String
+    /// Soft self-reference into another category's `id`. `nil` = top-level
+    /// parent; non-nil = child. Phase 0 added the column server-side; iOS
+    /// uses it to filter browse views to top-level only until the
+    /// hierarchical browse UX (Phase 3) lands.
+    let parentID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, emoji, description
+        case parentID = "parent_id"
+    }
 }
 
 struct APIArticle: Codable, Identifiable, Hashable {
@@ -115,10 +125,17 @@ enum ContentService {
         try await getDecoded(baseURL.appendingPathComponent("content/categories"))
     }
 
-    static func fetchArticles(baseURL: URL, category: String? = nil) async throws -> [APIArticle] {
+    static func fetchArticles(baseURL: URL, category: String? = nil, tag: String? = nil) async throws -> [APIArticle] {
         var components = URLComponents(url: baseURL.appendingPathComponent("content/articles"), resolvingAgainstBaseURL: false)!
+        var items: [URLQueryItem] = []
         if let category = category {
-            components.queryItems = [URLQueryItem(name: "category", value: category)]
+            items.append(URLQueryItem(name: "category", value: category))
+        }
+        if let tag = tag {
+            items.append(URLQueryItem(name: "tag", value: tag))
+        }
+        if !items.isEmpty {
+            components.queryItems = items
         }
         guard let url = components.url else { throw ContentServiceError.invalidResponse }
         return try await getDecoded(url)

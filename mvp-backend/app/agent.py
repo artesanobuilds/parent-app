@@ -201,3 +201,13 @@ def get_agent(user_name: str = "0"):
     )
     _agent_cache[user_name] = {"agent": agent_executor, "profile": profile_context}
     return agent_executor
+
+
+def build_system_prompt_for(user_name: str = "0") -> str:
+    """Public: assemble the parent agent's per-user system prompt (soul + family
+    profile + content catalog). Used by the ConvAI token endpoint to override the
+    dashboard agent's prompt per connection, mirroring get_agent's assembly."""
+    raw_profile = profiling_service.get_family_profile(user_name)
+    pruned_profile = _prune_empty(raw_profile)
+    profile_context = json.dumps(pruned_profile, ensure_ascii=False, indent=2) if pruned_profile else None
+    return _build_system_prompt(user_name, profile_context)

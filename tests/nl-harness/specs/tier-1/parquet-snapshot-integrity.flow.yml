@@ -1,0 +1,54 @@
+spec:
+  name: parquet-snapshot-integrity
+  tier: 1
+  modules: [data_export, content, cms]
+  intent: >
+    Verify the public-readable bootstrap tables are populated AND that admin
+    parquet snapshots/exports stay schema-consistent with the live tables.
+    This is the flow-level guard for the May 2026 regression where migration
+    v4 added `categories.parent_id` but the snapshot parquet still had four
+    columns — bootstrap silently skipped on warm DBs (live API stayed green)
+    but would have empty-stripped a fresh deploy where the parquet is the
+    source of truth.
+
+  personas:
+    admin:
+      preset: admin
+
+  preconditions:
+    - "Backend is reachable"
+    - "ADMIN_TOKEN is set in the harness AND backend envs (admin assertions skip otherwise)"
+
+  invariants:
+    - "GET /content/categories returns >=1 row (bootstrap populated the table)"
+    - "Every category response includes a `parent_id` key (nullable, but present)"
+    - "GET /content/articles returns >=1 row"
+    - "GET /content/community returns a list (possibly empty in prod, populated locally)"
+    - "Admin POST /cms/export-parquet succeeds (200) and writes the snapshot"
+    - "Admin GET /data/export returns a `checksums` dict with every expected parquet name"
+    - "After re-export, /content/categories still returns the same N>=1 rows (round-trip)"
+    - "Categories endpoint shape is stable across the re-export (parent_id survives)"
+
+  boundary_contracts:
+    - endpoint: GET /content/categories
+      as: anonymous
+      status: 200
+      response_array_min_length: 1
+
+    - endpoint: GET /content/articles
+      as: anonymous
+      status: 200
+      response_array_min_length: 1
+
+    - endpoint: GET /content/community
+      as: anonymous
+      status: 200
+
+    - endpoint: POST /cms/export-parquet
+      as: admin
+      status: 200
+
+    - endpoint: GET /data/export
+      as: admin
+      status: 200
+      response_includes: [checksums]

@@ -4,11 +4,26 @@
 <dict>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>UILaunchScreen</key>
-	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>MVP never uses the camera. This permission key is required by the real-time voice framework, which also supports video calls; the app will never ask for camera access.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Used to set up the real-time voice connection for your kid's companion.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Used to talk to your kid's companion when they're in Kid Mode.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Used to turn your kid's voice into text so the companion can respond.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>InterVariable.ttf</string>
+		<string>Fraunces[SOFT,WONK,opsz,wght].ttf</string>
+		<string>JetBrainsMono[wght].ttf</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIImageName</key>
+		<string>LaunchHero</string>
+		<key>UIImageRespectsSafeAreaInsets</key>
+		<false/>
+	</dict>
 </dict>
 </plist>

@@ -33,6 +33,39 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
      "ALTER TABLE auth_tokens ADD COLUMN expires_at TIMESTAMPTZ"),
     (3, "auth_tokens.add_last_used_at",
      "ALTER TABLE auth_tokens ADD COLUMN last_used_at TIMESTAMPTZ"),
+    # Phase 0 taxonomy redesign: categories gain a soft self-reference for
+    # 2-level hierarchy. parent_id is nullable; top-level rows have NULL.
+    # DuckDB doesn't enforce FKs, so this is a soft reference to categories.id,
+    # following the same convention as articles.category today.
+    #
+    # Callable instead of a bare ALTER because CONTENT_DDL was also updated to
+    # include parent_id (so fresh DBs get it via CREATE-IF-NOT-EXISTS) — the
+    # framework runs migrations after the DDL, and DuckDB would otherwise
+    # raise "Column with name parent_id already exists". The column-presence
+    # check makes the migration idempotent against both fresh and legacy DBs.
+    (4, "categories.add_parent_id",
+     lambda con: (
+         None if "parent_id" in {
+             r[0] for r in con.execute(
+                 "SELECT column_name FROM information_schema.columns "
+                 "WHERE table_name = 'categories'"
+             ).fetchall()
+         }
+         else con.execute("ALTER TABLE categories ADD COLUMN parent_id TEXT")
+     )),
+    # Voice fragments persisted alongside the assistant message. The /voice/
+    # synthesize/{reply_id}/{fragment_id} endpoint reads from this column;
+    # generate_kid_stream populates it during streaming on sentence boundaries.
+    (5, "kid_messages.add_fragments_json",
+     lambda con: (
+         None if "fragments_json" in {
+             r[0] for r in con.execute(
+                 "SELECT column_name FROM information_schema.columns "
+                 "WHERE table_name = 'kid_messages'"
+             ).fetchall()
+         }
+         else con.execute("ALTER TABLE kid_messages ADD COLUMN fragments_json JSON")
+     )),
 ]
 
 _MIGRATIONS_DDL = """
@@ -79,15 +112,24 @@ def run_migrations(con) -> None:
             "WHERE table_name = 'user_data'"
         ).fetchone()[0] > 0
         if has_user_data and "expires_at" in cols and "last_used_at" in cols:
-            # Existing DB already at the latest pre-framework schema — stamp it.
-            top = max(v for v, _, _ in MIGRATIONS)
+            # Existing DB already at the latest pre-framework schema — stamp it
+            # only up through v3 (the boundary at which the framework was
+            # introduced). Migrations added after v3 must still run on these
+            # legacy DBs — they describe net-new schema changes, not the
+            # pre-existing baseline. Detecting "is this a pre-framework DB"
+            # only proves the v1-v3 columns are present; it says nothing about
+            # later migrations, and stamping them as applied would silently
+            # skip required work.
+            PRE_FRAMEWORK_MAX = 3
             for v, desc, _ in MIGRATIONS:
+                if v > PRE_FRAMEWORK_MAX:
+                    continue
                 con.execute(
                     "INSERT INTO schema_migrations (version, description) VALUES (?, ?)",
                     [v, desc],
                 )
-            applied = {v for v, _, _ in MIGRATIONS}
-            logger.info(f"[migrations] stamped pre-framework DB at v{top}")
+            applied = {v for v, _, _ in MIGRATIONS if v <= PRE_FRAMEWORK_MAX}
+            logger.info(f"[migrations] stamped pre-framework DB at v{PRE_FRAMEWORK_MAX}")
 
     for version, description, body in sorted(MIGRATIONS, key=lambda m: m[0]):
         if version in applied:

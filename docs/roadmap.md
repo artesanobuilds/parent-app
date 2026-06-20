@@ -2,6 +2,54 @@
 
 Living list of next-up work. Order is a rough priority, not a commitment. Items move to `docs/history/NNN.md` when shipped.
 
+## Activity Planning / Chief of Staff (new, 2026-06-19)
+
+Branch `feat/activity-planning-chief-of-staff`. A deep-research background agent (deepagents) discovers camps/activities by location + kid profile; an isolated chief-of-staff agent + planning service builds the calendar, to-dos, logistics/coverage, and cost. Surfaced on a new iOS **Plan** tab and a new **parent web dashboard** (`mvp-backend/parent-dashboard/`). Full design: `~/.claude/plans/we-are-going-to-frolicking-candy.md`; system diagram: `docs/system-architecture.md`.
+
+### Shipped (backend + both surfaces)
+- Adopting `deepagents` forced a langchain/langgraph stack bump — guarded by `mvp-backend/tests/agents/` (offline) + `tests/nl-harness/` (live). 11 new DuckDB tables; `/research/*` (run/poll/candidates) + `/cos/*` (chat SSE, calendar/todo/caregiver/logistics CRUD, `/cos/plan/summary`) + `GET /profile`.
+- Discovery shows a **live progress feed** (Thinking / Searching for … / Found …, with `N of 25 found` target) via a `BaseCallbackHandler` writing `progress_json`; **fit-kids** chips (age-matched, multi-kid); ZIP override + profile prefill; iOS Settings → Profile editor.
+
+### Yet to do
+- **Latency optimization (priority).** A full run is ~140s for ~25 candidates because the agent records **one candidate per LLM turn** (~26 sequential round-trips). Add a **batch record tool** (`record_activity_candidates(list)`) so many land in one call, and/or lower the default `max_candidates`, and/or a cheaper model for the record/extract turns. The per-run profiler line (`[research] discovered N in Xs | LLM …x/…s | …`) confirms where the time goes.
+- **Phase 3 — multimodal ingestion**: `/ingest/text` + `/ingest/image` (vision over flyer/form photos) → `ExtractedActivity` → pending activities/todos/calendar; then **Gmail OAuth** (`gmail.readonly` — start Google verification + CASA early). Tables (`ingest_artifacts`, `google_oauth_tokens`) already exist.
+- **Phase 3b — export/share**: regenerate the workbook-style xlsx/pdf (openpyxl), scoped nanny/therapist share links, two-way Google Calendar sync.
+- **Surfacing the COS coordination on the clients** (the CRUD exists; calendar/logistics editing UI is thin) and porting the export.
+- **Web dashboard isn't wired into deploy** — no `/dashboard/*` static route in `server.py`, no build step in the Docker/entrypoint. Decide: serve from the backend (like CMS) or deploy separately.
+- **Phase 5 acceptance replay**: feed the original Alvarado artifacts (iMessage/flyer photos/forms) through the live pipeline and score against `Alvarado_Summer_2026_Camps.xlsx`.
+- Incremental progress `candidates_found` only updates on tool events (cosmetic); profile **kid ages can be stale** (Ceiba showed 7) — editable in Settings → Profile.
+
+## Voice (ElevenLabs ConvAI v2)
+
+**Architecture today (v1 TTS-proxy fully removed 2026-06-12).** Real-time voice over ElevenLabs Conversational AI (WebRTC / LiveKit transport, sub-150ms). Our backend stays the brain as a **Custom LLM**; ElevenLabs does STT / turn-taking / TTS / transport. One agent serves all kids (per-kid voice/prompt/greeting via `conversation_config_override` at connect); a second agent serves the parent coach. Full console setup + gotchas live in `docs/voice-v2-elevenlabs-setup.md`.
+
+> The old v1 plan (`~/.claude/plans/look-at-our-onboarding-optimized-candle.md`) — sentence-fragment proxy, `/voice/synthesize/*`, `AVPlayer` queue, `TTSProvider`, `tts_usage_daily`, char caps — is **dead**. It was deleted end-to-end in the v2 failure-mode redesign. Don't resurrect those endpoints/files.
+
+### Shipped
+
+- **Kid companion voice (v2).** `convai_endpoint.py` Custom LLM (`/v1/chat/completions`) keeps the LangGraph kid agent + 5-layer moderation + crisis locks; a crisis fires the built-in `end_call` system tool to hang up. `/voice/convai-token` is parent-token + kid-PIN + crisis-lock gated; the greeting is persisted at mint. iOS: `KidVoiceSessionManager` (process singleton — owns the session, LiveKit `AudioManager.setEngineAvailability` engine resets, serialized teardown, fresh-token retry, 15s watchdog) → `KidCompanionCoordinator` (phase machine: connecting / voiceLive / textFallback / crisisLocked) → `KidAgentView`. Fallback is **text-only and silent** by design.
+- **Parent coach voice "call" mode (v2, 2026-06-17).** Opt-in waveform button in `AgentView` → `ParentVoiceView`. A second ElevenLabs agent + `/v1/parent/chat/completions` (`parent_convai_endpoint.py`) runs the parent agent — **no moderation/crisis/PIN** (adult). The endpoint strips `[Title](mvp://library|community/{id})` links from the spoken text and emits `show_article` / `show_community_post` **client-tool** deltas; `ParentCompanionCoordinator` resolves the ids via `ContentViewModel`, renders `LibraryItemCard`/`CommunityPostCard`, then `sendToolResult`. On **End**, the session transcript is captured and imported into the text chat (`ChatViewModel.importMessages`); voice + text share one LangGraph thread so agent memory is continuous.
+- **Live transcript + reactive orb/mute.** The live-call view observes the SDK `Conversation` as `@ObservedObject` (the earlier bug was passing it as a plain value → no updates).
+- **Client-side transcript "streaming."** Voice transcripts arrive whole-turn — ElevenLabs does not stream tokens in voice mode (`agent_chat_response_part` is text-only and never fires in voice). `StreamingText` reveals them progressively, driven by per-character **audio alignment** when available (`[parent-voice] ✅ audio alignment available` logs on first alignment) with a fixed-rate typewriter fallback. "Good enough for now" per Miguel.
+
+### Yet to do
+
+- **Persist parent voice turns into `chat_memory`** (Miguel said yes; not built). Backend: append the user + raw assistant turns to `chat_memory` + `persist_state` inside `parent_convai_endpoint`. iOS: load `/memory/{user_id}` on `AgentView` appear so voice history survives app restart / fresh load (today it only carries in-session via `importMessages`).
+- **Tune transcript-reveal pacing** once a device confirms the alignment log fires. If alignment never arrives over WebRTC for these agents, decide whether the typewriter fallback is the permanent path.
+- **Bring the streaming reveal to the kid surface** (parent has it; the kid surface still renders whole-turn).
+- **Per-kid voice picker.** ConvAI passes `voice_id` at connect via `conversation_config_override.tts.voice_id`, so the picker is a connection-time override, not a synthesis change. (`app/voice/allowlist.py` was deleted with v1 — re-curate a small `(age_band, mood) → voice_id` map.) Surface in `ReviewLetterView`; optionally let invariant synthesis suggest a default.
+- **ConvAI-era cost guardrails + observability.** v1's per-char caps / `tts_usage_daily` / `voice_synth` rate bucket are gone. ConvAI bills **per minute**; the only guard today is the dashboard **max conversation duration (~15 min)**. Add a per-user/day *minutes* rollup + a global kill-switch + a parent-visible health signal; reframe `/admin/voice/usage` for minutes, not chars.
+- **Targeted dedup of kid/parent voice code** (assessed, not decided): a `VoiceLevelSmoothing` VAD→orb helper + a `VoiceCallCoordinating` protocol shared by both coordinators — **not** a god-component merge.
+- **Crisis STT perturbation evals** (see iOS backlog): ElevenLabs STT mishears crisis language; assert detection still fires on misreads.
+- **Consent copy** must mention voice-transcript retention (`ConsentView.swift`).
+
+### Known constraints (do not regress)
+
+- `ELEVENLABS_API_KEY` is backend-only (App Store safety) and must carry the **`convai_write`** permission to mint conversation tokens.
+- Voice does **not** work in the iOS Simulator (no usable mic → WebRTC mic-publish times out); test on a physical device.
+- `kid_pin` + crisis-lock gating on the kid token endpoint; the parent path is deliberately ungated (adult).
+- Fallback to text must be a deliberate path, never a silent fallthrough.
+
 ## iOS / SwiftUI backlog (2026-05-11 Vix review)
 
 Surgical fixes shipped in `7e33828` (HomeView config, streamTask cancel, ContentService HTTP status, NotificationCenter removal, @MainActor ServerConfiguration, etc.). Deferred from that review:

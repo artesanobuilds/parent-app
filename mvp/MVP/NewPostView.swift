@@ -21,34 +21,37 @@ struct NewPostView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: .hearth600) {
                     // Category picker
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: .hearth300) {
                         Text("Category")
-                            .font(.caption.weight(.medium))
-                            .foregroundColor(.brandGray)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
                         ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
+                            HStack(spacing: .hearth300) {
                                 ForEach(contentVM.categories) { cat in
                                     Button {
                                         selectedCategory = cat.id
                                     } label: {
-                                        HStack(spacing: 4) {
+                                        HStack(spacing: .hearth300) {
                                             Text(cat.emoji).font(.system(size: 14))
                                             Text(cat.name)
-                                                .font(.caption.weight(.medium))
+                                                .font(.hearthBodySM)
                                                 .lineLimit(1)
                                         }
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(selectedCategory == cat.id ? Color.brandGold : Color.brandSurface)
-                                        .foregroundColor(selectedCategory == cat.id ? .brandBlack : .white)
+                                        .padding(.horizontal, .hearth400)
+                                        .padding(.vertical, .hearth300)
+                                        .background(selectedCategory == cat.id ? Color.accentDefault : Color.accentTint)
+                                        .foregroundColor(selectedCategory == cat.id ? .inkOnPhotoLight : .inkPrimary)
                                         .clipShape(Capsule())
                                         .overlay(
                                             Capsule()
-                                                .stroke(selectedCategory == cat.id ? Color.clear : Color.brandStroke, lineWidth: 1)
+                                                .stroke(selectedCategory == cat.id ? Color.clear : Color.borderHairline, lineWidth: 1)
                                         )
+                                        .frame(minHeight: 44)
                                     }
                                 }
                             }
@@ -56,56 +59,60 @@ struct NewPostView: View {
                     }
 
                     // Title
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: .hearth300) {
                         Text("Title")
-                            .font(.caption.weight(.medium))
-                            .foregroundColor(.brandGray)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
-                        TextField("", text: $title, prompt: Text("What's on your mind?").foregroundColor(.brandGray))
-                            .font(.body)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
-                            .background(Color.brandSurface)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        TextField("", text: $title, prompt: Text("What's on your mind?").foregroundColor(.inkPlaceholder))
+                            .font(.hearthBodyMD)
+                            .foregroundColor(.inkPrimary)
+                            .padding(.horizontal, .hearth500)
+                            .padding(.vertical, .hearth500)
+                            .background(Color.bgElevated)
+                            .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.brandStroke, lineWidth: 1)
+                                RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                                    .stroke(Color.borderStrong, lineWidth: 1)
                             )
                     }
 
                     // Body
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: .hearth300) {
                         Text("Your post")
-                            .font(.caption.weight(.medium))
-                            .foregroundColor(.brandGray)
+                            .font(.hearthLabel)
+                            .foregroundColor(.inkMuted)
+                            .tracking(0.66)
+                            .textCase(.uppercase)
 
                         TextEditor(text: $postBody)
-                            .font(.body)
-                            .foregroundColor(.white)
+                            .font(.hearthBodyMD)
+                            .foregroundColor(.inkPrimary)
                             .scrollContentBackground(.hidden)
                             .frame(minHeight: 150)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(Color.brandSurface)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .padding(.horizontal, .hearth400)
+                            .padding(.vertical, .hearth400)
+                            .background(Color.bgElevated)
+                            .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.brandStroke, lineWidth: 1)
+                                RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                                    .stroke(Color.borderStrong, lineWidth: 1)
                             )
                     }
                 }
-                .padding()
+                .padding(.hearth700)
             }
-            .background(Color.brandBackground.ignoresSafeArea())
+            .background(Color.bgCanvas.ignoresSafeArea())
             .navigationTitle("New Post")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.brandBackground, for: .navigationBar)
+            .toolbarBackground(Color.bgCanvas, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                        .foregroundColor(.brandGold)
+                        .foregroundColor(.inkPrimary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -116,14 +123,13 @@ struct NewPostView: View {
                                 .scaleEffect(0.8)
                         } else {
                             Text("Post")
-                                .fontWeight(.semibold)
+                                .font(.hearthTitleMD)
                         }
                     }
-                    .foregroundColor(canPost ? .brandGold : .brandGray)
+                    .foregroundColor(canPost ? .accentDefault : .inkPlaceholder)
                     .disabled(!canPost)
                 }
             }
-            .preferredColorScheme(.dark)
         }
     }
 

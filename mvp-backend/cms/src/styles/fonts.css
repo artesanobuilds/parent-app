@@ -1,0 +1,29 @@
+/* Self-hosted Hearth fonts — never load from a CDN at runtime.
+   Files vendored from spec/look-and-feel/fonts/. */
+
+@font-face {
+  font-family: 'Fraunces';
+  src: url('/cms/fonts/Fraunces.ttf') format('truetype-variations'),
+       url('/cms/fonts/Fraunces.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/cms/fonts/Inter.ttf') format('truetype-variations'),
+       url('/cms/fonts/Inter.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/cms/fonts/JetBrainsMono.ttf') format('truetype-variations'),
+       url('/cms/fonts/JetBrainsMono.ttf') format('truetype');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}

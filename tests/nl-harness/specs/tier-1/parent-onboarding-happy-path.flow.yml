@@ -1,0 +1,51 @@
+spec:
+  name: parent-onboarding-happy-path
+  tier: 1
+  modules: [auth, consent, profile, content]
+  intent: >
+    A new parent issues a bearer token, submits consent, seeds a profile with
+    one child, and the Home screen's first load returns categories and
+    articles. This is the first impression of the app — if it breaks, the app
+    is unusable.
+
+  personas:
+    parent:
+      preset: new-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "CONSENT_AGREEMENT_VERSION matches the backend's current value"
+
+  invariants:
+    - "A bearer token is issued for the parent's user_id"
+    - "Consent is recorded with the current agreement_version"
+    - "Profile seed persists parent_name + one child"
+    - "GET /content/categories returns >=1 category, each with id/name/emoji/description"
+    - "GET /content/articles returns >=1 article, each with id/category/title"
+    - "Profile is retrievable post-seed (round-trip)"
+
+  boundary_contracts:
+    - endpoint: POST /auth/issue-token
+      as: anonymous
+      status: 200
+      response_includes: [token, user_id]
+
+    - endpoint: POST /consent/submit
+      as: parent
+      status: 200
+      response_includes: [id, agreement_version, user_id]
+
+    - endpoint: POST /profile/seed
+      as: parent
+      status: 200
+      response_includes: [parent, children]
+
+    - endpoint: GET /content/categories
+      as: anonymous
+      status: 200
+      response_array_min_length: 1
+
+    - endpoint: GET /content/articles
+      as: anonymous
+      status: 200
+      response_array_min_length: 1

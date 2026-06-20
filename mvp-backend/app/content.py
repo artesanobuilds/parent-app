@@ -29,8 +29,12 @@ def get_categories() -> List[Dict]:
     return _db().get_categories()
 
 
-def get_articles(category: Optional[str] = None, limit: int = 50) -> List[Dict]:
-    return _db().get_articles(category=category, limit=limit)
+def get_articles(
+    category: Optional[str] = None,
+    tag: Optional[str] = None,
+    limit: int = 50,
+) -> List[Dict]:
+    return _db().get_articles(category=category, tag=tag, limit=limit)
 
 
 def get_article(article_id: str) -> Optional[Dict]:

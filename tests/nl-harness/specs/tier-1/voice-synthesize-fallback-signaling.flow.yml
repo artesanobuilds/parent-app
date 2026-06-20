@@ -1,0 +1,48 @@
+spec:
+  name: voice-synthesize-fallback-signaling
+  tier: 1
+  modules: [auth, voice, telemetry]
+  intent: >
+    When ELEVENLABS_API_KEY is unset on the backend, /voice/synthesize must
+    return 503 with a structured `{detail: {fallback_reason: "key_missing"}}`
+    body — this is the contract iOS reads to switch to AVSpeechSynthesizer
+    on a per-agent basis. It is NOT an opaque 500. This spec only runs when
+    ELEVENLABS_API_KEY is intentionally absent on the backend (admin probe
+    confirms via a usage echo); otherwise it skips. Admin gating ensures we
+    don't accidentally run this against a real production EL-enabled box.
+
+  personas:
+    parent:
+      preset: kid-agent-parent
+    admin:
+      preset: admin
+
+  preconditions:
+    - "OPENAI_API_KEY is set on the backend (kid-chat is the source of the reply_id)"
+    - "ELEVENLABS_API_KEY is UNSET on the backend (this is the failure mode being tested)"
+    - "ADMIN_TOKEN is set on both the harness and backend envs (admin assertions skip otherwise)"
+    - "Backend exposes an admin GET /admin/voice/health that reports {elevenlabs_enabled: bool}. If absent the spec skips."
+    - "Kid agent is configured with voice_mode=true"
+
+  invariants:
+    - "Admin GET /admin/voice/health returns {elevenlabs_enabled: false} — precondition for this spec running"
+    - "GET /voice/synthesize/{reply_id}/{fragment_id} with valid auth returns 503"
+    - "503 body is JSON with `detail.fallback_reason == \"key_missing\"`"
+    - "Response is NOT audio/mpeg (Content-Type is application/json)"
+    - "tts_usage_daily is NOT incremented on key_missing — failed synth doesn't burn the user's daily char budget"
+
+  boundary_contracts:
+    - endpoint: POST /kid-chat
+      as: parent
+      streaming: true
+      status: 200
+
+    - endpoint: GET /admin/voice/health
+      as: admin
+      status: 200
+      response_includes: [elevenlabs_enabled]
+
+    - endpoint: GET /voice/synthesize/{reply_id}/{fragment_id}
+      as: parent
+      status: 503
+      response_includes: [detail]

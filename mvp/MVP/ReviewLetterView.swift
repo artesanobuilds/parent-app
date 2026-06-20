@@ -28,7 +28,7 @@ struct ReviewLetterView: View {
 
     var body: some View {
         ZStack {
-            Color.brandBackground.ignoresSafeArea()
+            Color.bgCanvas.ignoresSafeArea()
 
             if vm.needsConsent {
                 ConsentView(
@@ -38,13 +38,13 @@ struct ReviewLetterView: View {
                     onAccepted: { Task { await vm.load() } }
                 )
             } else if vm.isLoading {
-                ProgressView().tint(.brandGold)
+                ProgressView().tint(.accentDefault)
             } else if let config = vm.config {
                 content(config: config)
             } else if let error = vm.error {
                 errorBanner(error)
             } else {
-                ProgressView().tint(.brandGold)
+                ProgressView().tint(.accentDefault)
             }
         }
         .task { await vm.load() }
@@ -76,7 +76,7 @@ struct ReviewLetterView: View {
             HStack(spacing: 8) {
                 TextField("name", text: $vm.agentName)
                     .font(.system(.title2, design: .serif).weight(.semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(.inkPrimary)
                     .padding(.vertical, 6)
                     .padding(.horizontal, 8)
                     .background(Color.brandSurface)
@@ -85,9 +85,9 @@ struct ReviewLetterView: View {
                 if config.enabled {
                     Text("active")
                         .font(.caption2.weight(.semibold))
-                        .foregroundColor(.brandBlack)
+                        .foregroundColor(.inkOnPhotoLight)
                         .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color.brandGold)
+                        .background(Color.accentDefault)
                         .clipShape(Capsule())
                 } else {
                     Text("draft")
@@ -142,7 +142,7 @@ struct ReviewLetterView: View {
                                 .font(.system(size: 10, weight: .bold))
                         }
                         .font(.subheadline)
-                        .foregroundColor(.white)
+                        .foregroundColor(.inkPrimary)
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .background(Color.brandSurface)
                         .clipShape(Capsule())
@@ -173,7 +173,7 @@ struct ReviewLetterView: View {
                 Toggle(isOn: vm.toolBinding(for: key)) {
                     Text(ReviewLetterViewModel.toolLabel(for: key))
                         .font(.subheadline)
-                        .foregroundColor(.white)
+                        .foregroundColor(.inkPrimary)
                 }
                 .toggleStyle(.switch)
                 .tint(.brandGold)
@@ -200,7 +200,7 @@ struct ReviewLetterView: View {
                             )
                         Text(line)
                             .font(.system(.callout, design: .serif))
-                            .foregroundColor(.white)
+                            .foregroundColor(.inkPrimary)
                             .padding(10)
                             .background(Color.brandSurface)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -223,34 +223,34 @@ struct ReviewLetterView: View {
         Button {
             Task { await vm.saveAndIntroduce(dismiss: dismiss) }
         } label: {
-            HStack(spacing: 8) {
-                if vm.isSaving { ProgressView().tint(.brandBlack) }
+            HStack(spacing: .hearth300) {
+                if vm.isSaving { ProgressView().tint(.inkOnPhotoLight) }
                 Text(vm.isSaving ? "Saving…" : "Introduce them")
-                    .font(.headline.weight(.semibold))
+                    .font(.hearthTitleMD)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(Color.brandGold)
-            .foregroundColor(.brandBlack)
-            .clipShape(Capsule())
+            .padding(.vertical, .hearth500)
+            .background(Color.accentDefault)
+            .foregroundColor(.inkOnPhotoLight)
+            .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
         }
         .disabled(vm.isSaving)
-        .padding(.top, 8)
+        .padding(.top, .hearth300)
     }
 
     private func sectionHeader(_ text: String) -> some View {
         Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundColor(.brandGold)
+            .font(.hearthLabel)
+            .foregroundColor(.inkMuted)
             .textCase(.uppercase)
-            .tracking(0.6)
+            .tracking(0.66)
     }
 
     private func errorBanner(_ message: String) -> some View {
         VStack(spacing: 12) {
             Text(message)
                 .multilineTextAlignment(.center)
-                .foregroundColor(.white)
+                .foregroundColor(.inkPrimary)
                 .padding()
             Button("Try again") { Task { await vm.load() } }
                 .buttonStyle(.bordered)

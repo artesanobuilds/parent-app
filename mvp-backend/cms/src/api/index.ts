@@ -2,13 +2,53 @@ import type { Article, Category, CommunityPost, ContentStats } from '../types';
 
 const API = '';
 
-async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
+// Admin token for /cms/* writes. Read once at module load.
+const ADMIN_TOKEN: string = (() => {
+  const t = import.meta.env.VITE_ADMIN_TOKEN as string | undefined;
+  if (!t) {
+    console.warn(
+      '[cms/api] VITE_ADMIN_TOKEN is not set; /cms/* requests will be sent with an empty X-Admin-Token and will fail with 401.',
+    );
+    return '';
   }
-  return res.json();
+  return t;
+})();
+
+function withAdminHeaders(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers ?? {});
+  headers.set('X-Admin-Token', ADMIN_TOKEN);
+  if (init?.body !== undefined && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  return { ...init, headers };
+}
+
+async function fetchJSON<T>(url: string, init?: RequestInit, retries = 3): Promise<T> {
+  const finalInit = url.startsWith('/cms/') || url.includes(`${API}/cms/`)
+    ? withAdminHeaders(init)
+    : init;
+  let lastError: Error = new Error('Request failed');
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) {
+      await new Promise<void>(resolve => setTimeout(resolve, 2 ** (attempt - 1) * 200));
+    }
+    let res: Response;
+    try {
+      res = await fetch(url, finalInit);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      continue;
+    }
+    if (res.ok) {
+      return res.json();
+    }
+    const body = await res.text();
+    lastError = new Error(`${res.status}: ${body}`);
+    if (res.status < 500 && res.status !== 429) {
+      throw lastError;
+    }
+  }
+  throw lastError;
 }
 
 // Categories

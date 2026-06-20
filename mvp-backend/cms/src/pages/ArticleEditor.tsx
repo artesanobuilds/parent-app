@@ -106,7 +106,7 @@ export function ArticleEditor() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <span className="text-gray-400 text-sm">Loading...</span>
+        <span className="text-ink-muted text-body-sm">Loading...</span>
       </div>
     );
   }
@@ -114,23 +114,23 @@ export function ArticleEditor() {
   return (
     <div className="flex h-full">
       {/* Left: Form */}
-      <div className="flex-1 overflow-y-auto p-8">
+      <div className="flex-1 overflow-y-auto p-800">
         <div className="max-w-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-bold text-gray-900">
+          <div className="flex items-center justify-between mb-700">
+            <h1 className="font-display text-display-sm text-ink-primary">
               {isEditing ? 'Edit Article' : 'New Article'}
             </h1>
-            <div className="flex gap-3">
+            <div className="flex gap-400">
               <button
                 onClick={() => navigate('/articles')}
-                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                className="rounded-md border border-hairline bg-elevated px-500 py-300 text-title-md font-medium text-ink-primary hover:bg-sober transition-colors duration-fast"
               >
                 Cancel
               </button>
               {isEditing && (
                 <button
                   onClick={() => setShowDeleteConfirm(true)}
-                  className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+                  className="rounded-md border border-error bg-elevated px-500 py-300 text-title-md font-medium text-error hover:bg-error-tint transition-colors duration-fast"
                 >
                   Delete
                 </button>
@@ -138,7 +138,7 @@ export function ArticleEditor() {
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="rounded-lg bg-[#C9A84C] px-6 py-2 text-sm font-medium text-white hover:bg-[#B8973F] transition-colors disabled:opacity-50"
+                className="rounded-md bg-accent px-700 py-300 text-title-md font-medium text-ink-on-photo-light hover:bg-accent-press transition-colors duration-fast disabled:opacity-50"
               >
                 {saving ? 'Saving...' : 'Save'}
               </button>
@@ -156,37 +156,37 @@ export function ArticleEditor() {
       </div>
 
       {/* Right: Preview */}
-      <div className="w-[380px] shrink-0 border-l border-gray-200 bg-gray-100 overflow-y-auto">
-        <div className="sticky top-0 z-10 bg-gray-100 px-4 pt-4 pb-2">
-          <div className="flex rounded-lg bg-white border border-gray-200 p-0.5">
+      <div className="w-[380px] shrink-0 border-l border-hairline bg-canvas overflow-y-auto">
+        <div className="sticky top-0 z-10 bg-canvas px-500 pt-500 pb-300">
+          <div className="flex rounded-md bg-elevated border border-hairline p-100">
             <button
               onClick={() => setPreviewMode('detail')}
-              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`flex-1 rounded-md px-400 py-200 text-body-sm font-medium transition-colors duration-fast ${
                 previewMode === 'detail'
-                  ? 'bg-[#C9A84C] text-white'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'bg-accent text-ink-on-photo-light'
+                  : 'text-ink-muted hover:text-ink-primary'
               }`}
             >
               Detail
             </button>
             <button
               onClick={() => setPreviewMode('card')}
-              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`flex-1 rounded-md px-400 py-200 text-body-sm font-medium transition-colors duration-fast ${
                 previewMode === 'card'
-                  ? 'bg-[#C9A84C] text-white'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'bg-accent text-ink-on-photo-light'
+                  : 'text-ink-muted hover:text-ink-primary'
               }`}
             >
               Card
             </button>
           </div>
         </div>
-        <div className="px-4 pb-4">
+        <div className="px-500 pb-500">
           <PhoneFrame>
             {previewMode === 'detail' ? (
               <ArticlePreview article={previewData} />
             ) : (
-              <div className="p-4 bg-[#1C1C1E]">
+              <div className="p-500 bg-canvas">
                 <ArticleCardPreview article={previewData} />
               </div>
             )}
@@ -197,24 +197,24 @@ export function ArticleEditor() {
       {/* Delete confirmation dialog */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="text-lg font-semibold text-gray-900 mb-2">
+          <div className="w-full max-w-sm rounded-xl bg-elevated p-700 shadow-e3">
+            <h2 className="text-title-lg font-semibold text-ink-primary mb-200">
               Delete Article
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
+            <p className="text-body-sm text-ink-muted mb-700">
               Are you sure you want to delete this article? This action cannot be
               undone.
             </p>
-            <div className="flex justify-end gap-3">
+            <div className="flex justify-end gap-400">
               <button
                 onClick={() => setShowDeleteConfirm(false)}
-                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                className="rounded-md border border-hairline bg-elevated px-500 py-300 text-title-md font-medium text-ink-primary hover:bg-sober transition-colors duration-fast"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDelete}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors"
+                className="rounded-md border border-error bg-elevated px-500 py-300 text-title-md font-medium text-error hover:bg-error-tint transition-colors duration-fast"
               >
                 Delete
               </button>
