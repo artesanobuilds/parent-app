@@ -20,6 +20,12 @@ struct CosChatView: View {
             messageList
             inputArea
         }
+        // Lift the input bar clear of MainTabView's floating custom tab bar.
+        // Pushed NavigationStack destinations don't inherit the tab-bar bottom
+        // padding the way the tab's root content does (see PlanView). hearth800
+        // clears the bar while keeping the gap below the field ~symmetric with
+        // the gap above it (divider line).
+        .padding(.bottom, .hearth800)
         .navigationTitle("Chief of Staff")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.bgCanvas, for: .navigationBar)
@@ -55,7 +61,10 @@ struct CosChatView: View {
                         }
                     }
                 }
-                .padding(.vertical, .hearth300)
+                .padding(.top, .hearth300)
+                // Extra bottom room so the last card / message clears the input
+                // bar and can always be scrolled fully into view.
+                .padding(.bottom, .hearth700)
             }
             .background(Color.bgCanvas)
             .contentShape(Rectangle())
@@ -74,16 +83,68 @@ struct CosChatView: View {
     }
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: .hearth400) {
-            Text("Ask your chief of staff")
-                .font(.hearthDisplayMD)
-                .foregroundColor(.inkPrimary)
-            Text("Track an activity, sort out coverage gaps, or get help deciding between camps. The chief of staff sees your family's plan.")
-                .font(.hearthBodyMD)
-                .foregroundColor(.inkSecondary)
+        VStack(alignment: .leading, spacing: .hearth500) {
+            Circle()
+                .fill(Color.accentDefault.opacity(0.12))
+                .frame(width: 56, height: 56)
+                .overlay(
+                    Image(systemName: "calendar.badge.clock")
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundColor(.accentDefault)
+                )
+
+            VStack(alignment: .leading, spacing: .hearth300) {
+                Text("Ask your chief of staff")
+                    .font(.hearthDisplayMD)
+                    .foregroundColor(.inkPrimary)
+                Text("Track an activity, sort out coverage gaps, or get help deciding between camps. The chief of staff sees your family's plan.")
+                    .font(.hearthBodyMD)
+                    .foregroundColor(.inkSecondary)
+            }
+
+            VStack(alignment: .leading, spacing: .hearth300) {
+                Text("TRY ASKING")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+                    .tracking(0.6)
+                    .padding(.top, .hearth300)
+
+                ForEach(Self.starterPrompts, id: \.text) { prompt in
+                    Button {
+                        sendSuggestion(prompt.text)
+                    } label: {
+                        HStack(spacing: .hearth400) {
+                            Image(systemName: prompt.icon)
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(.accentDefault)
+                                .frame(width: 22)
+                            Text(prompt.text)
+                                .font(.hearthBodyMD)
+                                .foregroundColor(.inkPrimary)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.inkMuted)
+                        }
+                        .padding(.horizontal, .hearth500)
+                        .padding(.vertical, .hearth400)
+                        .background(
+                            RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                                .fill(Color.bgElevated)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                                        .stroke(Color.borderHairline, lineWidth: 1)
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isSending || viewModel.isUserIDMissing)
+                }
+            }
         }
         .padding(.horizontal, .hearth700)
-        .padding(.top, .hearth900)
+        .padding(.top, .hearth500)
     }
 
     // MARK: - User Message (pill)
@@ -153,7 +214,7 @@ struct CosChatView: View {
     // MARK: - Input Area
 
     private var inputArea: some View {
-        VStack(spacing: .hearth300) {
+        VStack(spacing: 0) {
             Divider().background(Color.borderHairline)
 
             HStack(alignment: .bottom, spacing: .hearth400) {
@@ -191,10 +252,31 @@ struct CosChatView: View {
                 .disabled(!canSend)
             }
             .padding(.horizontal, .hearth500)
-            .padding(.top, .hearth300)
-            .padding(.bottom, .hearth400)
+            // Symmetric breathing room above & below the field (divider→field
+            // equals field→bottom of the input band).
+            .padding(.vertical, .hearth500)
         }
         .background(Color.bgCanvas)
+    }
+
+    // MARK: - Starter prompts (empty state)
+
+    private struct StarterPrompt {
+        let icon: String
+        let text: String
+    }
+
+    private static let starterPrompts: [StarterPrompt] = [
+        .init(icon: "magnifyingglass", text: "What camps did we find for my kids?"),
+        .init(icon: "exclamationmark.triangle", text: "Where are my coverage gaps this summer?"),
+        .init(icon: "checklist", text: "What's still pending or needs confirming?"),
+        .init(icon: "arrow.left.arrow.right", text: "Help me decide between two camps"),
+    ]
+
+    private func sendSuggestion(_ text: String) {
+        guard !viewModel.isSending, !viewModel.isUserIDMissing else { return }
+        messageText = ""
+        viewModel.send(text)
     }
 
     // MARK: - Helpers
