@@ -31,6 +31,8 @@ from langchain_core.callbacks import BaseCallbackHandler
 from pydantic import BaseModel, Field
 from deepagents import create_deep_agent
 
+from app.cost_logging import CostLoggingCallbackHandler, new_workflow_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -288,7 +290,7 @@ def build_research_agent(tools: List[Any]):
     """Construct the deepagents research agent with an explicit OpenAI model
     (deepagents would otherwise default to Anthropic, which we have no key for)."""
     return create_deep_agent(
-        model=ChatOpenAI(model=RESEARCH_MODEL),
+        model=ChatOpenAI(model=RESEARCH_MODEL, stream_usage=True),
         tools=tools,
         system_prompt=_SYSTEM_PROMPT,
     )
@@ -300,6 +302,8 @@ def discover_activities(
     kids: List[Dict[str, Any]],
     params: Optional[Dict[str, Any]] = None,
     progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
+    run_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Run one discovery pass and return the list of structured candidate dicts.
 
@@ -318,7 +322,16 @@ def discover_activities(
     except (TypeError, ValueError):
         target = 25
     profiler = _ResearchProfiler()
-    callbacks: List[BaseCallbackHandler] = [profiler]
+    # Cost: tag every LLM + Tavily call with the run_id so a whole "find
+    # activities" workflow's spend aggregates under one workflow id.
+    cost = CostLoggingCallbackHandler(
+        feature="research",
+        workflow=run_id or new_workflow_id(),
+        session=run_id,
+        user=user_id,
+        search_depth="advanced",
+    )
+    callbacks: List[BaseCallbackHandler] = [profiler, cost]
     if progress_cb:
         callbacks.append(_ProgressReporter(collector, progress_cb, target=target))
 

@@ -139,8 +139,11 @@ Today's transcript:
 """
 
     llm = ChatOpenAI(model=SUMMARY_MODEL, temperature=0.2).with_structured_output(_StructuredSummary)
+    from app.cost_logging import cost_config
     try:
-        result: _StructuredSummary = llm.invoke(prompt)
+        result: _StructuredSummary = llm.invoke(
+            prompt, config=cost_config("summary", user=user_id)
+        )
     except Exception as exc:
         logger.exception("[summary] LLM failed: %s", exc)
         return _empty_summary(user_id, kid_name, date_iso, message_count=len(messages))

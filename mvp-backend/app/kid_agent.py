@@ -107,7 +107,7 @@ def get_kid_agent(user_id: str, kid_name: str):
         return cached["agent"], config
 
     agent_executor = create_agent(
-        model=ChatOpenAI(model=KID_RUNTIME_MODEL),
+        model=ChatOpenAI(model=KID_RUNTIME_MODEL, stream_usage=True),
         tools=_wire_tools(config["invariants"]),
         checkpointer=_kid_checkpointer,
         system_prompt=config["system_prompt"],
@@ -150,6 +150,7 @@ def upsert_kid_agent_config(
         kid_profile=kid_profile,
         parent_profile_summary=parent_summary,
         prior_config=prior,
+        cost_user=user_id,
     )
 
     saved = storage.save_kid_agent_config(
@@ -204,6 +205,7 @@ def _bootstrap_default_config(
         kid_profile=kid_profile,
         parent_profile_summary=parent_summary,
         prior_config=None,
+        cost_user=user_id,
     )
 
     return storage.save_kid_agent_config(

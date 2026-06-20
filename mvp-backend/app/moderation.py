@@ -295,7 +295,13 @@ class _AgeAppropriateVerdict(BaseModel):
     )
 
 
-def classify_age_appropriate(text: str, age_band: str) -> _AgeAppropriateVerdict:
+def classify_age_appropriate(
+    text: str,
+    age_band: str,
+    *,
+    cost_workflow: Optional[str] = None,
+    cost_user: Optional[str] = None,
+) -> _AgeAppropriateVerdict:
     """
     Age-band aware judge. Catches legal-but-inappropriate content (e.g., a
     detailed discussion of war for a 5-year-old).
@@ -338,7 +344,9 @@ Content to classify:
 \"\"\""""
 
     try:
-        return llm.invoke(rubric)
+        from app.cost_logging import cost_config
+        cfg = cost_config("moderation", workflow=cost_workflow, user=cost_user) if cost_workflow else None
+        return llm.invoke(rubric, config=cfg)
     except Exception as exc:
         logger.exception("[moderation] age classifier failed: %s", exc)
         # Fail closed — assume not appropriate.
@@ -359,6 +367,8 @@ def moderate_input(
     agent_id: str,
     age_band: str,
     text: str,
+    cost_workflow: Optional[str] = None,
+    cost_user: Optional[str] = None,
 ) -> ModerationResult:
     """
     Run before any kid input reaches the agent.
@@ -392,7 +402,9 @@ def moderate_input(
     if openai_result.flagged:
         return openai_result
 
-    age_verdict = classify_age_appropriate(text, age_band)
+    age_verdict = classify_age_appropriate(
+        text, age_band, cost_workflow=cost_workflow, cost_user=cost_user
+    )
     if not age_verdict.age_appropriate:
         return ModerationResult(
             flagged=True,
@@ -457,6 +469,8 @@ class StreamingModerator:
     kid_name: str
     agent_id: str
     age_band: str
+    cost_workflow: Optional[str] = None
+    cost_user: Optional[str] = None
     state: StreamingState = StreamingState.BUFFERING
     _buffer: str = ""              # held characters before initial gate fires
     _emitted: str = ""             # full assembled output that crossed the gate
@@ -578,7 +592,9 @@ class StreamingModerator:
         oa = moderate_with_openai(text)
         if oa.flagged:
             return oa
-        age = classify_age_appropriate(text, self.age_band)
+        age = classify_age_appropriate(
+            text, self.age_band, cost_workflow=self.cost_workflow, cost_user=self.cost_user
+        )
         if not age.age_appropriate:
             return ModerationResult(
                 flagged=True,
@@ -605,6 +621,8 @@ def constitutional_critique(
     *,
     response_text: str,
     invariants_summary: str,
+    cost_workflow: Optional[str] = None,
+    cost_user: Optional[str] = None,
 ) -> _ConstitutionalVerdict:
     """
     Off-line check: did the response respect the parent's invariants and the
@@ -637,7 +655,9 @@ If off-brand, drift_notes is one short phrase like "praised effort that \
 wasn't there" or "discussed blocked topic: violence" or "tried to keep a secret".\
 """
     try:
-        return llm.invoke(prompt)
+        from app.cost_logging import cost_config
+        cfg = cost_config("moderation", workflow=cost_workflow, user=cost_user) if cost_workflow else None
+        return llm.invoke(prompt, config=cfg)
     except Exception as exc:
         logger.exception("[moderation] constitutional pass failed: %s", exc)
         return _ConstitutionalVerdict(on_brand=True, drift_notes="critic_unavailable")

@@ -149,9 +149,13 @@ async def parent_convai_chat_completions(
 async def _stream_response(user_id: str, thread_id: str, message: str):
     chat_id = uuid.uuid4().hex[:12]
     agent = get_agent(user_id)
+    from app.cost_logging import CostLoggingCallbackHandler, new_workflow_id
+    _voice_cost = CostLoggingCallbackHandler(
+        feature="parent_voice", workflow=new_workflow_id(), session=thread_id, user=user_id
+    )
     # Share the thread with the text /chat path so the agent remembers across
     # voice and text (same memory_key convention as server.generate_stream).
-    config = {"configurable": {"thread_id": f"{user_id}:{thread_id}"}}
+    config = {"configurable": {"thread_id": f"{user_id}:{thread_id}"}, "callbacks": [_voice_cost]}
     stripper = _LinkStripper()
 
     try:

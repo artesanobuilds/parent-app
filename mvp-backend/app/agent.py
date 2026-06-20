@@ -20,9 +20,10 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# Initialize LLM
+# Initialize LLM. stream_usage=True so token usage surfaces during streaming
+# (needed by the cost-logging callback).
 model_name = os.getenv("OPENAI_MODEL_NAME", "gpt-5.2")
-llm = ChatOpenAI(model=model_name)
+llm = ChatOpenAI(model=model_name, stream_usage=True)
 
 # Initialize Tools
 search = TavilySearch(max_results=2)

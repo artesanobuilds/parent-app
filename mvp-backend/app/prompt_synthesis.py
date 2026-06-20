@@ -121,6 +121,7 @@ def synthesize(
     kid_profile: Dict[str, Any],
     parent_profile_summary: Optional[Dict[str, Any]] = None,
     prior_config: Optional[Dict[str, Any]] = None,
+    cost_user: Optional[str] = None,
 ) -> SynthesisResult:
     """
     Stage 1 then Stage 2. Returns everything kid_agent.py needs to instantiate
@@ -137,6 +138,7 @@ def synthesize(
         kid_profile=kid_profile,
         parent_profile_summary=parent_profile_summary,
         prior_config=prior_config,
+        cost_user=cost_user,
     )
 
     system_prompt = build_system_prompt(
@@ -194,6 +196,7 @@ def _llm_extract_invariants(
     kid_profile: Dict[str, Any],
     parent_profile_summary: Optional[Dict[str, Any]],
     prior_config: Optional[Dict[str, Any]],
+    cost_user: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Call the synthesis LLM with structured output. Returns a plain dict."""
     llm = ChatOpenAI(
@@ -233,8 +236,11 @@ def _llm_extract_invariants(
 
     user_msg = "\n".join(parts)
 
+    from app.cost_logging import cost_config
     try:
-        result: SynthesizedInvariants = llm.invoke(user_msg)
+        result: SynthesizedInvariants = llm.invoke(
+            user_msg, config=cost_config("synthesis", user=cost_user)
+        )
         return result.model_dump()
     except Exception as exc:
         logger.exception("[prompt_synthesis] LLM call failed: %s", exc)

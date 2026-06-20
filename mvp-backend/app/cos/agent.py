@@ -31,7 +31,7 @@ load_dotenv()
 # Own model — COS_MODEL overrides, else the shared default. Separate instance
 # from app.agent.llm on purpose.
 _cos_model_name = os.getenv("COS_MODEL", os.getenv("OPENAI_MODEL_NAME", "gpt-5.2"))
-_cos_llm = ChatOpenAI(model=_cos_model_name)
+_cos_llm = ChatOpenAI(model=_cos_model_name, stream_usage=True)
 
 # Own checkpointer — must NOT be shared with the parent coach.
 _cos_checkpointer = MemorySaver()

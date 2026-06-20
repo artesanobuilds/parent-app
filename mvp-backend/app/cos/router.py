@@ -54,7 +54,11 @@ async def _cos_chat_stream(user_id: str, thread_id: str, message: str):
 
     agent = get_cos_agent(user_id)
     memory_key = f"cos:{user_id}:{thread_id}"
-    config = {"configurable": {"thread_id": memory_key}}
+    from app.cost_logging import CostLoggingCallbackHandler, new_workflow_id
+    cost_cb = CostLoggingCallbackHandler(
+        feature="cos", workflow=new_workflow_id(), session=thread_id, user=user_id
+    )
+    config = {"configurable": {"thread_id": memory_key}, "callbacks": [cost_cb]}
     assistant_buffer = ""
 
     try:

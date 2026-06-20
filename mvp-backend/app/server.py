@@ -26,6 +26,7 @@ from app import email_smtp
 from app import summary as kid_summary
 from app.auth import current_user, authorize_user_match, issue_token as auth_issue_token
 from app.rate_limit import enforce as rate_limit_enforce
+from app.cost_logging import CostLoggingCallbackHandler, new_workflow_id
 from app.prompt_synthesis import _age_band as _kid_age_band, synthesize as kid_synthesize
 
 
@@ -322,7 +323,11 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
     agent = get_agent(user_id)
     # Memory is scoped per user + thread to isolate conversations by user
     memory_key = f"{user_id}:{thread_id}"
-    config = {"configurable": {"thread_id": memory_key}}
+    # Cost: one coach turn = one workflow; session groups the whole thread.
+    cost_cb = CostLoggingCallbackHandler(
+        feature="coach", workflow=new_workflow_id(), session=thread_id, user=user_id
+    )
+    config = {"configurable": {"thread_id": memory_key}, "callbacks": [cost_cb]}
 
     thread_messages = chat_memory.get_thread_messages(user_id, thread_id)
     thread_messages.append({"role": "user", "content": message})
@@ -376,7 +381,10 @@ async def generate_onboarding_stream(message: str, thread_id: str, user_id: str)
         logger.debug(f"[onboarding] start user_id={user_id} thread_id={thread_id} message={message[:200]}")
     agent = get_onboarding_agent(user_id)
     memory_key = f"onboarding:{user_id}:{thread_id}"
-    config = {"configurable": {"thread_id": memory_key}}
+    cost_cb = CostLoggingCallbackHandler(
+        feature="onboarding", workflow=new_workflow_id(), session=thread_id, user=user_id
+    )
+    config = {"configurable": {"thread_id": memory_key}, "callbacks": [cost_cb]}
 
     thread_messages = onboarding_memory.get_thread_messages(user_id, thread_id)
     thread_messages.append({"role": "user", "content": message})
@@ -942,7 +950,8 @@ def _generate_preview_messages(*, kid_profile, invariants, system_prompt) -> lis
             f"non-negotiable rule. Output ONLY the three lines, one per line, no numbering.\n\n"
             f"=== SYSTEM PROMPT ===\n{system_prompt[:3500]}\n=== END ===\n"
         )
-        out = llm.invoke(prompt).content
+        from app.cost_logging import cost_config
+        out = llm.invoke(prompt, config=cost_config("kid_preview")).content
         lines = [ln.strip() for ln in out.splitlines() if ln.strip()][:3]
         if len(lines) == 3:
             return lines
@@ -1017,10 +1026,15 @@ async def generate_kid_stream(
     kid_profile = (family.get("children") or {}).get(kid_name) or {}
     age_band = _kid_age_band(kid_profile.get("age"))
 
+    # One workflow id for the whole kid turn — the agent LLM, the input/output
+    # moderation LLM, and any tool/search all log cost under it (feature varies).
+    kid_wf = new_workflow_id()
+
     # Pre-input gate
     pre = moderation.moderate_input(
         user_id=user_id, kid_name=kid_name, agent_id=agent_id,
         age_band=age_band, text=message,
+        cost_workflow=kid_wf, cost_user=user_id,
     )
     if pre.flagged:
         msg_id = storage_backend.append_kid_message(
@@ -1080,10 +1094,14 @@ async def generate_kid_stream(
     )
 
     memory_key = f"kid:{user_id}:{kid_name}:{thread_id}"
-    config_lg = {"configurable": {"thread_id": memory_key}}
+    kid_cost_cb = CostLoggingCallbackHandler(
+        feature="kid", workflow=kid_wf, session=thread_id, user=user_id
+    )
+    config_lg = {"configurable": {"thread_id": memory_key}, "callbacks": [kid_cost_cb]}
 
     sm = moderation.StreamingModerator(
         user_id=user_id, kid_name=kid_name, agent_id=agent_id, age_band=age_band,
+        cost_workflow=kid_wf, cost_user=user_id,
     )
     assistant_buffer = ""
     block_handled = False  # ensures lock/log/alert runs exactly once
@@ -1314,6 +1332,13 @@ async def voice_convai_token(
                 role="assistant", content=first_message,
             )
 
+    # Cost: count voice sessions. ElevenLabs bills per CONVERSATION MINUTE — the
+    # exact minutes live on the EL dashboard / post-call webhook, not here; this
+    # marker counts sessions (× avg minutes = estimate). The per-turn OpenAI token
+    # cost of the call is logged separately as feature=kid_voice.
+    from app.cost_logging import log_cost as _log_cost, new_workflow_id as _wf
+    _log_cost("VOICE", feature="kid_voice", workflow=_wf(), user=user_id,
+              provider="elevenlabs", event="session_token_issued", kid=kid_name)
     return {
         "signed_url": token,
         "conversation_config_override": override,
@@ -1374,6 +1399,9 @@ async def voice_parent_convai_token(user_id: str = Depends(current_user)):
             raise HTTPException(status_code=503, detail="failed to get conversation token")
         token = resp.json().get("token")
 
+    from app.cost_logging import log_cost as _log_cost, new_workflow_id as _wf
+    _log_cost("VOICE", feature="parent_voice", workflow=_wf(), user=user_id,
+              provider="elevenlabs", event="session_token_issued")
     return {
         "signed_url": token,
         "conversation_config_override": override,
@@ -1654,6 +1682,24 @@ if _cms_dist.is_dir():
     @app.get("/cms")
     def cms_root():
         return FileResponse(_cms_dist / "index.html")
+
+
+# ── Serve built parent dashboard (Vite SPA, base=/dashboard/) ─────────
+# In prod the dashboard is same-origin with the API, so its relative fetches
+# (/research, /cos, /auth, /profile) hit this backend directly — no proxy.
+
+_dashboard_dist = Path(__file__).resolve().parent.parent / "parent-dashboard" / "dist"
+if _dashboard_dist.is_dir():
+    @app.get("/dashboard/{full_path:path}")
+    def dashboard_spa_fallback(full_path: str):
+        file_path = _dashboard_dist / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(_dashboard_dist / "index.html")
+
+    @app.get("/dashboard")
+    def dashboard_root():
+        return FileResponse(_dashboard_dist / "index.html")
 
 
 if __name__ == "__main__":

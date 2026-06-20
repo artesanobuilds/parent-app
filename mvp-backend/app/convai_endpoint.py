@@ -156,9 +156,13 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
     kid_profile = (family.get("children") or {}).get(kid_name) or {}
     age_band = _kid_age_band(kid_profile.get("age"))
 
+    from app.cost_logging import CostLoggingCallbackHandler, new_workflow_id
+    voice_wf = new_workflow_id()  # one id for the whole voice turn (agent + moderation)
+
     pre = moderation.moderate_input(
         user_id=user_id, kid_name=kid_name, agent_id=agent_id,
         age_band=age_band, text=message,
+        cost_workflow=voice_wf, cost_user=user_id,
     )
 
     user_msg_id = storage.append_kid_message(
@@ -207,10 +211,14 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
             return
 
     memory_key = f"kid:{user_id}:{kid_name}:{thread_id}"
-    config_lg = {"configurable": {"thread_id": memory_key}}
+    _voice_cost = CostLoggingCallbackHandler(
+        feature="kid_voice", workflow=voice_wf, session=thread_id, user=user_id
+    )
+    config_lg = {"configurable": {"thread_id": memory_key}, "callbacks": [_voice_cost]}
 
     sm = moderation.StreamingModerator(
         user_id=user_id, kid_name=kid_name, agent_id=agent_id, age_band=age_band,
+        cost_workflow=voice_wf, cost_user=user_id,
     )
     assistant_buffer = ""
     block_handled = False

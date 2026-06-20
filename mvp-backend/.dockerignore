@@ -5,6 +5,8 @@ __pycache__
 local-storage/
 cms/node_modules
 cms/dist
+parent-dashboard/node_modules
+parent-dashboard/dist
 .git
 data/*.duckdb
 data/*.duckdb.wal

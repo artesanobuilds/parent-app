@@ -88,6 +88,8 @@ class ResearchWorker:
                 kids=run.get("kids") or [],
                 params=run.get("params") or {},
                 progress_cb=lambda p: self._storage.update_research_run(run_id, progress=p),
+                run_id=run_id,
+                user_id=user_id,
             )
             n = self._storage.insert_activity_candidates(
                 run_id=run_id, user_id=user_id, candidates=candidates
