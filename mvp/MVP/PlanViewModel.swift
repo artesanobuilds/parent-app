@@ -30,6 +30,11 @@ final class PlanViewModel: ObservableObject {
 
     @Published var errorMessage: String?
 
+    // Ingestion (paste a message / pick a flyer photo).
+    @Published private(set) var isIngesting = false
+    @Published var ingestResult: IngestResponse?
+    @Published var ingestError: String?
+
     private var pollTask: Task<Void, Never>?
 
     /// Phase string for the progress UI (e.g. "searching", "ranking").
@@ -162,5 +167,57 @@ final class PlanViewModel: ObservableObject {
         } catch {
             print("[PlanViewModel] planSummary failed: \(error)")
         }
+    }
+
+    // MARK: - Ingestion
+
+    /// Extract from a pasted email / forwarded iMessage, then refresh the plan so
+    /// the new pending activity + to-dos appear.
+    func ingestText(_ text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let baseURL = baseURL,
+              !userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !trimmed.isEmpty else { return }
+
+        isIngesting = true
+        ingestError = nil
+        ingestResult = nil
+        defer { isIngesting = false }
+
+        do {
+            ingestResult = try await PlanService.ingestText(
+                baseURL: baseURL, userID: userId, text: trimmed
+            )
+            await loadPlan()
+        } catch {
+            ingestError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Extract from a flyer / form / screenshot photo (already normalized to JPEG
+    /// + size-capped by the view), then refresh the plan.
+    func ingestImage(_ data: Data) async {
+        guard let baseURL = baseURL,
+              !userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        isIngesting = true
+        ingestError = nil
+        ingestResult = nil
+        defer { isIngesting = false }
+
+        do {
+            ingestResult = try await PlanService.ingestImage(
+                baseURL: baseURL, userID: userId, imageData: data
+            )
+            await loadPlan()
+        } catch {
+            ingestError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Clear ingest state (called when the sheet is dismissed/reset).
+    func resetIngest() {
+        ingestResult = nil
+        ingestError = nil
     }
 }

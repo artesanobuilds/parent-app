@@ -10,11 +10,14 @@ struct PlanView: View {
     let configuration: ServerConfiguration
     let userID: String
 
+    @State private var showIngest = false
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: .hearth900) {
                     header
+                    ingestEntry
                     discoverySection
                     if let summary = viewModel.summary {
                         planSummarySection(summary)
@@ -26,6 +29,9 @@ struct PlanView: View {
                 .padding(.top, .hearth700)
             }
             .background(Color.bgCanvas.ignoresSafeArea())
+            .sheet(isPresented: $showIngest) {
+                IngestView(viewModel: viewModel)
+            }
             .navigationDestination(for: CandidateRoute.self) { route in
                 CandidateDetailView(candidate: route.candidate)
             }
@@ -56,6 +62,39 @@ struct PlanView: View {
                 .foregroundColor(.inkPrimary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Ingest entry
+
+    private var ingestEntry: some View {
+        Button {
+            viewModel.resetIngest()
+            showIngest = true
+        } label: {
+            HStack(spacing: .hearth400) {
+                Image(systemName: "doc.text.viewfinder")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(.inkOnPhotoLight)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(Color.accentDefault))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Add from a message or photo")
+                        .font(.hearthBodyMD.weight(.semibold))
+                        .foregroundColor(.inkPrimary)
+                    Text("Paste a camp email or snap a flyer — we'll pull out the details")
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkSecondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.inkMuted)
+            }
+            .padding(.hearth500)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(cardBackground)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Discovery

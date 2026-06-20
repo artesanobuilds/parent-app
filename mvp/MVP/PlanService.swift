@@ -213,6 +213,65 @@ struct PendingEligibility: Codable, Hashable, Identifiable {
     }
 }
 
+// MARK: - Ingestion (POST /ingest/text, POST /ingest/image)
+
+/// What the extractor pulled out of a pasted message or photo. Mirrors the
+/// backend `ExtractedActivity` (app/ingest/extract.py); only the fields the UI
+/// surfaces are decoded — JSONDecoder ignores the rest.
+struct IngestExtraction: Codable, Hashable {
+    let provider: String?
+    let activityName: String?
+    let kidFit: String?
+    let location: String?
+    let hours: String?
+    let dates: [String]?
+    let amountDue: Double?
+    let actionItems: [String]?
+    let confidence: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case provider, location, hours, dates, confidence
+        case activityName = "activity_name"
+        case kidFit = "kid_fit"
+        case amountDue = "amount_due"
+        case actionItems = "action_items"
+    }
+
+    /// Best display label: the activity name, else the provider.
+    var displayName: String { activityName ?? provider ?? "Activity" }
+}
+
+/// What Stage-2 materialization spawned (counts the UI shows back to the parent).
+struct IngestCreated: Codable, Hashable {
+    let activityId: String?
+    let todoIds: [String]?
+    let calendarIds: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case activityId = "activity_id"
+        case todoIds = "todo_ids"
+        case calendarIds = "calendar_ids"
+    }
+
+    var madeActivity: Bool { activityId != nil }
+    var todoCount: Int { todoIds?.count ?? 0 }
+    var calendarCount: Int { calendarIds?.count ?? 0 }
+}
+
+/// POST /ingest/{text,image} response.
+struct IngestResponse: Codable, Hashable {
+    let artifactId: String
+    let extractStatus: String
+    let extracted: IngestExtraction
+    let created: IngestCreated
+
+    enum CodingKeys: String, CodingKey {
+        case extracted, created
+        case artifactId = "artifact_id"
+        case extractStatus = "extract_status"
+    }
+}
+
 // MARK: - Plan Service
 
 enum PlanServiceError: LocalizedError {
@@ -328,6 +387,71 @@ enum PlanService {
         return try await sendDecoded(await authedGET(url, userID: userID, baseURL: baseURL))
     }
 
+    // MARK: Ingestion
+
+    /// Extract structured activity info from a pasted email / forwarded iMessage.
+    static func ingestText(
+        baseURL: URL,
+        userID: String,
+        text: String,
+        source: String = "paste"
+    ) async throws -> IngestResponse {
+        let url = baseURL.appendingPathComponent("ingest/text")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 90
+        for (k, v) in await authHeader(userID: userID, baseURL: baseURL) {
+            request.setValue(v, forHTTPHeaderField: k)
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "user_id": userID, "text": text, "source": source,
+        ])
+        return try await sendDecoded(request)
+    }
+
+    /// Extract from a photo (flyer / form / screenshot) via multipart upload.
+    /// `imageData` should be a JPEG/PNG already normalized + size-capped by the
+    /// caller (the backend rejects >8 MB and non-image MIME types).
+    static func ingestImage(
+        baseURL: URL,
+        userID: String,
+        imageData: Data,
+        mimeType: String = "image/jpeg",
+        filename: String = "upload.jpg",
+        caption: String? = nil,
+        source: String = "photo"
+    ) async throws -> IngestResponse {
+        let url = baseURL.appendingPathComponent("ingest/image")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        let boundary = "Boundary-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        for (k, v) in await authHeader(userID: userID, baseURL: baseURL) {
+            request.setValue(v, forHTTPHeaderField: k)
+        }
+
+        var body = Data()
+        func textField(_ name: String, _ value: String) {
+            body.appendString("--\(boundary)\r\n")
+            body.appendString("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
+            body.appendString("\(value)\r\n")
+        }
+        textField("user_id", userID)
+        textField("source", source)
+        if let caption = caption, !caption.isEmpty { textField("caption", caption) }
+        body.appendString("--\(boundary)\r\n")
+        body.appendString("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n")
+        body.appendString("Content-Type: \(mimeType)\r\n\r\n")
+        body.append(imageData)
+        body.appendString("\r\n")
+        body.appendString("--\(boundary)--\r\n")
+        request.httpBody = body
+
+        return try await sendDecoded(request)
+    }
+
     // MARK: Chief-of-Staff chat (SSE)
     //
     // Mirrors ChatService.streamResponse: POST /cos/chat, parse `data: {...}`
@@ -408,4 +532,11 @@ enum PlanService {
     private struct RunsEnvelope: Decodable { let runs: [ResearchRunSummary] }
     private struct ActivitiesEnvelope: Decodable { let activities: [TrackedActivity] }
     private struct TodosEnvelope: Decodable { let todos: [PlanTodo] }
+}
+
+private extension Data {
+    /// Append a UTF-8 string — used to build multipart/form-data bodies.
+    mutating func appendString(_ string: String) {
+        if let data = string.data(using: .utf8) { append(data) }
+    }
 }
