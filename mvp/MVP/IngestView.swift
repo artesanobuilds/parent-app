@@ -319,6 +319,13 @@ struct IngestView: View {
     }
 }
 
+/// Resign first responder app-wide — dismisses any active keyboard.
+func hideKeyboard() {
+    UIApplication.shared.sendAction(
+        #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
+    )
+}
+
 private extension UIImage {
     /// Downscale to a max dimension and bake in orientation so the upload stays
     /// well under the backend's 8 MB cap and vision cost is bounded. Camera

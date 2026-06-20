@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
-import { createResearchRun, getCandidates, getProfile, getResearchRun } from '../api';
-import type { Candidate, ResearchProgress } from '../types';
+import { Bookmark, BookmarkCheck, Loader2 } from 'lucide-react';
+import {
+  createResearchRun,
+  getActivities,
+  getCandidates,
+  getProfile,
+  getResearchRun,
+  trackActivity,
+} from '../api';
+import type { Candidate, ResearchProgress, TrackedActivity } from '../types';
 
 export default function Discovery() {
   const [progress, setProgress] = useState<ResearchProgress | null>(null);
@@ -10,6 +17,53 @@ export default function Discovery() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const pollRef = useRef<number | undefined>(undefined);
+
+  // R1 — "Exploring" shortlist.
+  const [exploring, setExploring] = useState<TrackedActivity[]>([]);
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
+
+  async function refreshShortlist() {
+    try {
+      const acts = await getActivities();
+      setExploring(acts.filter((a) => a.status === 'exploring'));
+      setSavedIds(
+        new Set(acts.map((a) => a.candidate_id).filter((x): x is string => !!x)),
+      );
+    } catch {
+      /* shortlist is best-effort */
+    }
+  }
+
+  useEffect(() => {
+    refreshShortlist();
+  }, []);
+
+  async function saveCandidate(c: Candidate) {
+    if (savedIds.has(c.id) || savingIds.has(c.id)) return;
+    setSavingIds((s) => new Set(s).add(c.id));
+    try {
+      const kid = c.fit_kids?.[0] ?? c.kid_name ?? undefined;
+      await trackActivity({
+        name: c.name,
+        candidate_id: c.id,
+        kid_name: kid,
+        provider: c.provider,
+        price_amount: c.price_amount,
+        signup_url: c.signup_url,
+      });
+      setSavedIds((s) => new Set(s).add(c.id));
+      await refreshShortlist();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not save to shortlist');
+    } finally {
+      setSavingIds((s) => {
+        const n = new Set(s);
+        n.delete(c.id);
+        return n;
+      });
+    }
+  }
 
   useEffect(
     () => () => {
@@ -123,6 +177,45 @@ export default function Discovery() {
       )}
       {err && <div className="text-error mb-600">{err}</div>}
 
+      {exploring.length > 0 && (
+        <div className="mb-700">
+          <div className="flex items-baseline justify-between mb-300">
+            <h2 className="font-display text-2xl text-ink-primary">Exploring</h2>
+            <span className="text-ink-muted font-mono text-sm">{exploring.length}</span>
+          </div>
+          <p className="text-ink-secondary text-sm mb-400">
+            Camps you’re considering. Ask your chief of staff to weigh the tradeoffs and help
+            you decide.
+          </p>
+          <div className="flex flex-col gap-300">
+            {exploring.map((a) => (
+              <div
+                key={a.id}
+                className="bg-elevated border border-hairline rounded-xl p-500 flex items-center justify-between gap-400"
+              >
+                <div className="flex items-center gap-300 min-w-0">
+                  <BookmarkCheck className="text-accent shrink-0" size={16} />
+                  <span className="font-medium text-ink-primary truncate">{a.name}</span>
+                  {a.kid_name && (
+                    <span className="bg-accent-tint rounded px-300 py-100 text-sm text-ink-secondary shrink-0">
+                      {a.kid_name}
+                    </span>
+                  )}
+                  {a.provider && (
+                    <span className="text-ink-secondary text-sm truncate">{a.provider}</span>
+                  )}
+                </div>
+                {a.price_amount != null && (
+                  <span className="font-mono text-sm text-ink-secondary shrink-0">
+                    ${Math.round(a.price_amount)}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-500">
         {candidates.map((c) => (
           <div key={c.id} className="bg-elevated border border-hairline rounded-xl p-600">
@@ -158,16 +251,36 @@ export default function Discovery() {
             <div className="text-ink-muted text-sm mt-300">
               {[c.start_date, c.end_date].filter(Boolean).join(' – ') || c.schedule_text}
             </div>
-            {c.signup_url && (
-              <a
-                href={c.signup_url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-accent text-sm mt-400 inline-block"
+            <div className="flex items-center justify-between mt-400">
+              {c.signup_url ? (
+                <a
+                  href={c.signup_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-accent text-sm"
+                >
+                  Open signup ↗
+                </a>
+              ) : (
+                <span />
+              )}
+              <button
+                onClick={() => saveCandidate(c)}
+                disabled={savedIds.has(c.id) || savingIds.has(c.id)}
+                className="flex items-center gap-200 text-sm rounded-lg px-300 py-200 border border-hairline disabled:opacity-100 hover:border-accent"
               >
-                Open signup ↗
-              </a>
-            )}
+                {savingIds.has(c.id) ? (
+                  <Loader2 className="animate-spin" size={15} />
+                ) : savedIds.has(c.id) ? (
+                  <BookmarkCheck className="text-accent" size={15} />
+                ) : (
+                  <Bookmark size={15} />
+                )}
+                <span className={savedIds.has(c.id) ? 'text-accent' : 'text-ink-secondary'}>
+                  {savedIds.has(c.id) ? 'Exploring' : 'Save'}
+                </span>
+              </button>
+            </div>
           </div>
         ))}
       </div>

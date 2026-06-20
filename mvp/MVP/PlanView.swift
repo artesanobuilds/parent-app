@@ -19,6 +19,7 @@ struct PlanView: View {
                     header
                     ingestEntry
                     discoverySection
+                    exploringSection
                     if let summary = viewModel.summary {
                         planSummarySection(summary)
                     }
@@ -28,6 +29,9 @@ struct PlanView: View {
                 .padding(.horizontal, .hearth700)
                 .padding(.top, .hearth700)
             }
+            // Any scroll drag dismisses the keyboard (the numeric ZIP keyboard
+            // has no return key); the field's own "Done" bar is the explicit tap.
+            .scrollDismissesKeyboard(.immediately)
             .background(Color.bgCanvas.ignoresSafeArea())
             .sheet(isPresented: $showIngest) {
                 IngestView(viewModel: viewModel)
@@ -134,6 +138,16 @@ struct PlanView: View {
                 .foregroundColor(.inkPrimary)
                 .keyboardType(.numbersAndPunctuation)
                 .textInputAutocapitalization(.never)
+                // Numeric keyboards have no return key, so give an explicit
+                // dismiss affordance above the keyboard.
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") { hideKeyboard() }
+                            .font(.hearthBodyMD.weight(.semibold))
+                            .foregroundColor(.accentDefault)
+                    }
+                }
                 .padding(.horizontal, .hearth500)
                 .padding(.vertical, .hearth400)
                 .background(
@@ -219,12 +233,104 @@ struct PlanView: View {
                 }
             }
             ForEach(viewModel.candidates) { candidate in
-                NavigationLink(value: CandidateRoute(candidate: candidate)) {
-                    CandidateRow(candidate: candidate)
+                HStack(alignment: .center, spacing: .hearth300) {
+                    NavigationLink(value: CandidateRoute(candidate: candidate)) {
+                        CandidateRow(candidate: candidate)
+                    }
+                    .buttonStyle(.plain)
+                    saveButton(for: candidate)
                 }
-                .buttonStyle(.plain)
             }
         }
+    }
+
+    /// Bookmark/pin a candidate onto the Exploring shortlist. A sibling of the
+    /// NavigationLink (not nested) so the two taps never conflict.
+    private func saveButton(for candidate: ActivityCandidate) -> some View {
+        let saved = viewModel.isSaved(candidate)
+        let saving = viewModel.isSaving(candidate)
+        return Button {
+            Task { await viewModel.saveCandidate(candidate) }
+        } label: {
+            Group {
+                if saving {
+                    ProgressView()
+                } else {
+                    Image(systemName: saved ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(saved ? .accentDefault : .inkMuted)
+                }
+            }
+            .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .disabled(saved || saving)
+        .accessibilityLabel(saved ? "Saved to shortlist" : "Save to shortlist")
+    }
+
+    // MARK: - Exploring shortlist (R1)
+
+    @ViewBuilder
+    private var exploringSection: some View {
+        let items = viewModel.exploringActivities
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: .hearth400) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Exploring")
+                        .font(.hearthDisplayMD)
+                        .foregroundColor(.inkPrimary)
+                    Spacer()
+                    Text("\(items.count)")
+                        .font(.hearthCaptionMono)
+                        .foregroundColor(.inkMuted)
+                }
+                Text("Camps you're considering. Ask your chief of staff to weigh the tradeoffs and help you decide.")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkSecondary)
+                ForEach(items) { activity in
+                    exploringRow(activity)
+                }
+            }
+        }
+    }
+
+    private func exploringRow(_ activity: TrackedActivity) -> some View {
+        VStack(alignment: .leading, spacing: .hearth300) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(activity.name)
+                    .font(.hearthBodyLG.weight(.semibold))
+                    .foregroundColor(.inkPrimary)
+                    .multilineTextAlignment(.leading)
+                Spacer()
+                Image(systemName: "bookmark.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.accentDefault)
+            }
+            HStack(spacing: .hearth300) {
+                if let kid = activity.kidName {
+                    Text(kid)
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkSecondary)
+                        .padding(.horizontal, .hearth400)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Color.accentTint))
+                }
+                if let provider = activity.provider {
+                    Text(provider)
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkSecondary)
+                }
+                Spacer(minLength: 0)
+                if let price = activity.priceAmount {
+                    Text("$\(Int(price))")
+                        .font(.hearthCaptionMono)
+                        .foregroundColor(.inkSecondary)
+                }
+            }
+        }
+        .padding(.hearth500)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground)
     }
 
     // MARK: - Plan summary

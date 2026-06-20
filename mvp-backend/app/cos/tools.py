@@ -52,7 +52,7 @@ def _make_track_activity_tool(user_id: str):
     def TrackActivity(
         name: str,
         kid_name: Optional[str] = None,
-        status: str = "interested",
+        status: str = "exploring",
         week_start: Optional[str] = None,
         price_amount: Optional[float] = None,
         price_status: str = "tbd",
@@ -64,9 +64,11 @@ def _make_track_activity_tool(user_id: str):
     ) -> str:
         """Track a camp/class/activity the parent is considering or has committed to.
 
-        Keep PENDING vs CONFIRMED explicit via ``status`` (e.g. "interested",
-        "pending_eligibility", "confirmed", "declined"). ``price_status`` is
-        "tbd" or "confirmed". Returns a short confirmation including the new id.
+        Default status is "exploring" (on the shortlist, considering — not yet
+        decided). Keep the decision explicit via ``status`` ("exploring",
+        "pending_eligibility", "signed_up", "confirmed", "declined"). Move items
+        off "exploring" once the parent settles. ``price_status`` is "tbd" or
+        "confirmed". Returns a short confirmation including the new id.
         """
         try:
             activity_id = _storage().track_activity(

@@ -73,6 +73,22 @@ export const getCandidates = (id: string) =>
 export const getActivities = () =>
   api<{ activities: TrackedActivity[] }>('/cos/activities').then((r) => r.activities);
 
+// Pin/save an activity. Defaults to the "exploring" shortlist (R1). Pass
+// candidate_id when saving a discovery candidate so it links back.
+export const trackActivity = (body: {
+  name: string;
+  candidate_id?: string;
+  kid_name?: string | null;
+  provider?: string | null;
+  status?: string;
+  price_amount?: number | null;
+  signup_url?: string | null;
+}) =>
+  api<{ id: string }>('/cos/activities/track', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: uid(), status: 'exploring', ...body }),
+  });
+
 export const getTodos = (status?: string) =>
   api<{ todos: Todo[] }>(`/cos/todos${status ? `?status=${status}` : ''}`).then(
     (r) => r.todos,

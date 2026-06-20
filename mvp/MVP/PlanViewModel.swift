@@ -28,6 +28,14 @@ final class PlanViewModel: ObservableObject {
     @Published private(set) var summary: PlanSummary?
     @Published private(set) var isLoadingPlan = false
 
+    // R1 — "Exploring" shortlist. `savedCandidateIds` tracks which discovery
+    // candidates are already pinned, so their Save button shows a saved state.
+    @Published private(set) var savedCandidateIds: Set<String> = []
+    @Published private(set) var savingCandidateIds: Set<String> = []
+
+    /// The shortlist: tracked activities the parent is still considering.
+    var exploringActivities: [TrackedActivity] { activities.filter { $0.isExploring } }
+
     @Published var errorMessage: String?
 
     // Ingestion (paste a message / pick a flyer photo).
@@ -154,6 +162,8 @@ final class PlanViewModel: ObservableObject {
 
         do {
             activities = try await PlanService.activities(baseURL: baseURL, userID: userId)
+            // Remember which discovery candidates are already pinned.
+            savedCandidateIds = Set(activities.compactMap { $0.candidateId })
         } catch {
             print("[PlanViewModel] activities failed: \(error)")
         }
@@ -219,5 +229,42 @@ final class PlanViewModel: ObservableObject {
     func resetIngest() {
         ingestResult = nil
         ingestError = nil
+    }
+
+    // MARK: - Exploring shortlist (R1)
+
+    func isSaved(_ candidate: ActivityCandidate) -> Bool {
+        savedCandidateIds.contains(candidate.id)
+    }
+
+    func isSaving(_ candidate: ActivityCandidate) -> Bool {
+        savingCandidateIds.contains(candidate.id)
+    }
+
+    /// Pin a discovery candidate to the "exploring" shortlist, then refresh the
+    /// plan so it appears in the Exploring section.
+    func saveCandidate(_ candidate: ActivityCandidate) async {
+        guard let baseURL = baseURL else { return }
+        let uid = userId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uid.isEmpty, !savedCandidateIds.contains(candidate.id) else { return }
+
+        savingCandidateIds.insert(candidate.id)
+        defer { savingCandidateIds.remove(candidate.id) }
+        do {
+            _ = try await PlanService.trackActivity(
+                baseURL: baseURL, userID: uid,
+                name: candidate.name,
+                candidateId: candidate.id,
+                kidName: candidate.displayKids.first ?? candidate.kidName,
+                provider: candidate.provider,
+                status: "exploring",
+                priceAmount: candidate.priceAmount,
+                signupURL: candidate.signupURL
+            )
+            savedCandidateIds.insert(candidate.id)
+            await loadPlan()
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 }

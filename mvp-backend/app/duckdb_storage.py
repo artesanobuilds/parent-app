@@ -388,8 +388,9 @@ class DuckDBStorage(StorageBackend):
         name              TEXT NOT NULL,
         provider          TEXT,
         week_start        DATE,
-        status            TEXT NOT NULL DEFAULT 'interested',
-            -- reference|interested|signed_up|confirmed|pending_eligibility|waitlisted|declined|done
+        status            TEXT NOT NULL DEFAULT 'exploring',
+            -- reference|exploring|interested|signed_up|confirmed|pending_eligibility|waitlisted|declined|done
+            -- exploring (R1) is the considering-not-decided default for pinned candidates + ingested items
         pending_reason    TEXT,
         price_amount      DOUBLE,
         price_status      TEXT NOT NULL DEFAULT 'tbd',  -- confirmed|tbd
@@ -2155,7 +2156,7 @@ class DuckDBStorage(StorageBackend):
         candidate_id: Optional[str] = None,
         provider: Optional[str] = None,
         week_start: Optional[str] = None,
-        status: str = "interested",
+        status: str = "exploring",
         pending_reason: Optional[str] = None,
         price_amount: Optional[float] = None,
         price_status: str = "tbd",

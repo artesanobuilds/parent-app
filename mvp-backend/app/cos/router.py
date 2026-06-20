@@ -115,7 +115,7 @@ class TrackActivityBody(BaseModel):
     candidate_id: Optional[str] = None
     provider: Optional[str] = None
     week_start: Optional[str] = None
-    status: str = "interested"
+    status: str = "exploring"
     pending_reason: Optional[str] = None
     price_amount: Optional[float] = None
     price_status: str = "tbd"

@@ -220,7 +220,9 @@ def materialize(
     # Only spawn a tracked activity when we actually identified one.
     if extracted.activity_name or extracted.provider:
         pending_reason = _eligibility_check(extracted, kids)
-        status = "pending_eligibility" if pending_reason else "interested"
+        # R1: ingested items land in the "exploring" shortlist (considering, not
+        # decided) unless an eligibility issue forces pending.
+        status = "pending_eligibility" if pending_reason else "exploring"
         contact = extracted.contact.model_dump() if extracted.contact else None
         signup_url = next((l.url for l in extracted.links if l.url), None)
         details = {

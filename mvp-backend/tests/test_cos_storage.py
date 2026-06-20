@@ -37,7 +37,7 @@ def test_tracked_activities_crud_json_and_status_filter(store):
 
     got = store.get_tracked_activity(a1)
     assert got["name"] == "Soccer Camp"
-    assert got["status"] == "interested"
+    assert got["status"] == "exploring"  # R1: default landing bucket
     # JSON round-trips under clean keys.
     assert got["contact"] == {"phone": "555-1212", "name": "Coach"}
     assert got["details"] == {"price": 200}

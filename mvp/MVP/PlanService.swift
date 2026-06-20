@@ -124,6 +124,9 @@ struct TrackedActivity: Codable, Identifiable, Hashable {
     let priceStatus: String?
     let provider: String?
     let signupURL: String?
+    // Links back to the discovery candidate it was pinned from (if any), so the
+    // UI can mark already-saved candidates.
+    let candidateId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name, status, provider
@@ -131,7 +134,10 @@ struct TrackedActivity: Codable, Identifiable, Hashable {
         case priceAmount = "price_amount"
         case priceStatus = "price_status"
         case signupURL = "signup_url"
+        case candidateId = "candidate_id"
     }
+
+    var isExploring: Bool { status == "exploring" }
 }
 
 /// An open to-do (GET /cos/todos).
@@ -387,6 +393,39 @@ enum PlanService {
         return try await sendDecoded(await authedGET(url, userID: userID, baseURL: baseURL))
     }
 
+    /// Pin/save an activity to the plan. Defaults to the "exploring" shortlist
+    /// (R1) — considering, not decided. Pass `candidateId` when saving a
+    /// discovery candidate so it links back. Returns the new tracked-activity id.
+    @discardableResult
+    static func trackActivity(
+        baseURL: URL,
+        userID: String,
+        name: String,
+        candidateId: String? = nil,
+        kidName: String? = nil,
+        provider: String? = nil,
+        status: String = "exploring",
+        priceAmount: Double? = nil,
+        signupURL: String? = nil
+    ) async throws -> String {
+        let url = baseURL.appendingPathComponent("cos/activities/track")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (k, v) in await authHeader(userID: userID, baseURL: baseURL) {
+            request.setValue(v, forHTTPHeaderField: k)
+        }
+        var body: [String: Any] = ["user_id": userID, "name": name, "status": status]
+        if let candidateId = candidateId { body["candidate_id"] = candidateId }
+        if let kidName = kidName { body["kid_name"] = kidName }
+        if let provider = provider { body["provider"] = provider }
+        if let priceAmount = priceAmount { body["price_amount"] = priceAmount }
+        if let signupURL = signupURL { body["signup_url"] = signupURL }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let resp: TrackActivityResponse = try await sendDecoded(request)
+        return resp.id
+    }
+
     // MARK: Ingestion
 
     /// Extract structured activity info from a pasted email / forwarded iMessage.
@@ -532,6 +571,7 @@ enum PlanService {
     private struct RunsEnvelope: Decodable { let runs: [ResearchRunSummary] }
     private struct ActivitiesEnvelope: Decodable { let activities: [TrackedActivity] }
     private struct TodosEnvelope: Decodable { let todos: [PlanTodo] }
+    private struct TrackActivityResponse: Decodable { let id: String }
 }
 
 private extension Data {

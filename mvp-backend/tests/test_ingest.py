@@ -126,7 +126,7 @@ def test_materialize_eligible_kid_not_pending(store):
     aid = store.insert_ingest_artifact("u1", source="paste")
     created = materialize(store, "u1", aid, ext, kids=[{"name": "Ceiba", "age": 8}])
     act = store.get_tracked_activity(created["activity_id"])
-    assert act["status"] == "interested"
+    assert act["status"] == "exploring"  # R1: ingested items land on the shortlist
     assert act["pending_reason"] is None
 
 
