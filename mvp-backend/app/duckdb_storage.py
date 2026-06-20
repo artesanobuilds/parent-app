@@ -1434,7 +1434,11 @@ class DuckDBStorage(StorageBackend):
         Tables touched (every one that references user_id):
             user_data, kid_agent_configs, kid_messages (via agent_id),
             kid_credentials, moderation_events, kid_agent_crisis_locks,
-            auth_tokens, daily_summaries, consent_records.
+            auth_tokens, daily_summaries, consent_records, and the
+            activity-planning tables (research_runs, activity_candidates,
+            tracked_activities, calendar_entries, recurring_appointments,
+            caregivers, logistics_assignments, todo_items, ingest_artifacts,
+            cos_messages, google_oauth_tokens).
 
         Tables left intact: content (categories/articles/community_posts/
         post_replies) and audit_events itself.
@@ -1474,6 +1478,20 @@ class DuckDBStorage(StorageBackend):
                 "daily_summaries",
                 "consent_records",
                 "user_data",
+                # Activity-planning / chief-of-staff tables — all keyed by
+                # user_id. Account deletion must wipe these too (privacy), and
+                # this lets a test-user purge fully clean up research runs etc.
+                "research_runs",
+                "activity_candidates",
+                "tracked_activities",
+                "calendar_entries",
+                "recurring_appointments",
+                "caregivers",
+                "logistics_assignments",
+                "todo_items",
+                "ingest_artifacts",
+                "cos_messages",
+                "google_oauth_tokens",
             ]:
                 pre = self._con.execute(
                     f"SELECT count(*) FROM {table} WHERE user_id = ?",
