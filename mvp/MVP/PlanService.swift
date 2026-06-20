@@ -140,6 +140,29 @@ struct TrackedActivity: Codable, Identifiable, Hashable {
     var isExploring: Bool { status == "exploring" }
 }
 
+/// A calendar entry (GET /cos/calendar). Week-keyed so a compact week×kid view
+/// is a query over these.
+struct CalendarEntry: Codable, Identifiable, Hashable {
+    let id: String
+    let kidName: String?
+    let title: String
+    let weekStart: String?
+    let startTs: String?
+    let endTs: String?
+    let kind: String
+    let status: String
+    let locationText: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, kind, status
+        case kidName = "kid_name"
+        case weekStart = "week_start"
+        case startTs = "start_ts"
+        case endTs = "end_ts"
+        case locationText = "location_text"
+    }
+}
+
 /// An open to-do (GET /cos/todos).
 struct PlanTodo: Codable, Identifiable, Hashable {
     let id: String
@@ -393,6 +416,12 @@ enum PlanService {
         return try await sendDecoded(await authedGET(url, userID: userID, baseURL: baseURL))
     }
 
+    static func calendar(baseURL: URL, userID: String) async throws -> [CalendarEntry] {
+        let url = baseURL.appendingPathComponent("cos/calendar")
+        let envelope: CalendarEnvelope = try await sendDecoded(await authedGET(url, userID: userID, baseURL: baseURL))
+        return envelope.entries
+    }
+
     /// Pin/save an activity to the plan. Defaults to the "exploring" shortlist
     /// (R1) — considering, not decided. Pass `candidateId` when saving a
     /// discovery candidate so it links back. Returns the new tracked-activity id.
@@ -571,6 +600,7 @@ enum PlanService {
     private struct RunsEnvelope: Decodable { let runs: [ResearchRunSummary] }
     private struct ActivitiesEnvelope: Decodable { let activities: [TrackedActivity] }
     private struct TodosEnvelope: Decodable { let todos: [PlanTodo] }
+    private struct CalendarEnvelope: Decodable { let entries: [CalendarEntry] }
     private struct TrackActivityResponse: Decodable { let id: String }
 }
 

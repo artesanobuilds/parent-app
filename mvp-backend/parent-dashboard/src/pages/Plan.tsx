@@ -35,9 +35,10 @@ export default function Plan() {
     setTodos((prev) => prev.filter((t) => t.id !== id));
   }
 
-  // Week × kid grid derived from calendar entries.
+  // Week × kid grid derived from calendar entries. Week is taken from
+  // week_start, falling back to the Monday of start_ts for day-specific entries.
   const weeks = Array.from(
-    new Set(entries.map((e) => e.week_start).filter((w): w is string => !!w)),
+    new Set(entries.map(weekKey).filter((w): w is string => !!w)),
   ).sort();
   const kids = Array.from(
     new Set(
@@ -90,49 +91,68 @@ export default function Plan() {
 
       {/* Week × kid calendar */}
       {weeks.length > 0 && (
-        <div className="mb-700 overflow-auto">
-          <h2 className="font-display text-xl text-ink-primary mb-400">Calendar</h2>
-          <table className="border-collapse min-w-full text-sm">
-            <thead>
-              <tr>
-                <th className="text-left text-ink-muted font-medium p-300 border-b border-hairline">
-                  Week
-                </th>
-                {kids.map((k) => (
-                  <th
-                    key={k}
-                    className="text-left text-ink-muted font-medium p-300 border-b border-hairline"
-                  >
-                    {k}
+        <div className="mb-700">
+          <div className="flex items-baseline justify-between mb-400">
+            <h2 className="font-display text-xl text-ink-primary">Calendar</h2>
+            <div className="flex items-center gap-400 text-xs text-ink-muted">
+              <LegendDot className="bg-accent-tint" label="Confirmed" />
+              <LegendDot className="bg-canvas border border-warning" label="Pending" />
+              <LegendDot className="bg-canvas border border-hairline" label="Blackout" />
+            </div>
+          </div>
+          <div className="overflow-auto border border-hairline rounded-xl">
+            <table className="border-collapse min-w-full text-sm">
+              <thead>
+                <tr className="bg-canvas">
+                  <th className="text-left text-ink-muted font-medium p-400 border-b border-hairline w-40">
+                    Week
                   </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {weeks.map((w) => (
-                <tr key={w}>
-                  <td className="p-300 border-b border-hairline font-mono text-ink-secondary align-top">
-                    {w}
-                  </td>
                   {kids.map((k) => (
-                    <td key={k} className="p-300 border-b border-hairline align-top">
-                      {entries
-                        .filter(
-                          (e) =>
-                            e.week_start === w &&
-                            (e.kid_name === k || e.kid_name == null),
-                        )
-                        .map((e) => (
-                          <div key={e.id} className="mb-200">
-                            <span className="text-ink-primary">{e.title}</span>
-                          </div>
-                        ))}
-                    </td>
+                    <th
+                      key={k}
+                      className="text-left text-ink-primary font-medium p-400 border-b border-hairline"
+                    >
+                      {k}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {weeks.map((w, i) => (
+                  <tr key={w} className={i % 2 ? 'bg-canvas/40' : ''}>
+                    <td className="p-400 border-b border-hairline align-top whitespace-nowrap">
+                      <div className="text-ink-primary font-medium">{fmtWeekRange(w)}</div>
+                      <div className="text-ink-muted text-xs font-mono">{w}</div>
+                    </td>
+                    {kids.map((k) => {
+                      const cell = entries.filter(
+                        (e) => weekKey(e) === w && (e.kid_name === k || e.kid_name == null),
+                      );
+                      return (
+                        <td key={k} className="p-400 border-b border-hairline align-top">
+                          {cell.length === 0 ? (
+                            <span className="text-ink-muted">—</span>
+                          ) : (
+                            <div className="flex flex-col gap-200">
+                              {cell.map((e) => (
+                                <span
+                                  key={e.id}
+                                  className={`inline-block rounded px-300 py-100 text-xs leading-tight ${chipClasses(e)}`}
+                                  title={`${e.kind}${e.status ? ` · ${e.status}` : ''}`}
+                                >
+                                  {e.title}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -163,6 +183,59 @@ export default function Plan() {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Calendar helpers ────────────────────────────────────────────────
+/** Monday (ISO yyyy-mm-dd) of a date. */
+function isoMonday(d: Date): string {
+  const day = (d.getUTCDay() + 6) % 7; // 0 = Monday
+  const mon = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day));
+  return mon.toISOString().slice(0, 10);
+}
+
+/** Bucket an entry into a week: week_start if present, else Monday of start_ts. */
+function weekKey(e: CalendarEntry): string | null {
+  if (e.week_start) return e.week_start;
+  if (e.start_ts) {
+    const d = new Date(e.start_ts);
+    if (!Number.isNaN(d.getTime())) return isoMonday(d);
+  }
+  return null;
+}
+
+/** "Jul 6–10" (Mon–Fri) for a Monday ISO date. */
+function fmtWeekRange(iso: string): string {
+  const mon = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(mon.getTime())) return iso;
+  const fri = new Date(mon.getTime());
+  fri.setUTCDate(mon.getUTCDate() + 4);
+  const m = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+  const mMon = m(mon);
+  const mFri = m(fri);
+  return mMon === mFri
+    ? `${mMon} ${mon.getUTCDate()}–${fri.getUTCDate()}`
+    : `${mMon} ${mon.getUTCDate()} – ${mFri} ${fri.getUTCDate()}`;
+}
+
+/** Chip styling by kind/status (uses only defined Hearth Tailwind tokens). */
+function chipClasses(e: CalendarEntry): string {
+  const kind = (e.kind || '').toLowerCase();
+  const status = (e.status || '').toLowerCase();
+  if (kind === 'blackout' || kind === 'holiday')
+    return 'bg-canvas text-ink-muted line-through';
+  if (status === 'confirmed') return 'bg-accent-tint text-ink-primary';
+  if (status === 'pending' || status === 'tentative' || status === 'tbd')
+    return 'bg-canvas text-warning border border-warning';
+  return 'bg-canvas text-ink-secondary border border-hairline';
+}
+
+function LegendDot({ className, label }: { className: string; label: string }) {
+  return (
+    <span className="flex items-center gap-100">
+      <span className={`inline-block w-3 h-3 rounded ${className}`} />
+      {label}
+    </span>
   );
 }
 

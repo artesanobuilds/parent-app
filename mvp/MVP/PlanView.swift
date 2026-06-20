@@ -23,6 +23,7 @@ struct PlanView: View {
                     if let summary = viewModel.summary {
                         planSummarySection(summary)
                     }
+                    calendarSection
                     todosSection
                     chatLink
                 }
@@ -348,6 +349,93 @@ struct PlanView: View {
         .padding(.hearth500)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(cardBackground)
+    }
+
+    // MARK: - Calendar (R4 — compact week×kid view)
+
+    @ViewBuilder
+    private var calendarSection: some View {
+        let weeks = viewModel.calendarWeeks
+        if !weeks.isEmpty {
+            VStack(alignment: .leading, spacing: .hearth400) {
+                Text("Calendar")
+                    .font(.hearthDisplayMD)
+                    .foregroundColor(.inkPrimary)
+                ForEach(weeks.prefix(8), id: \.week) { wk in
+                    weekCard(wk.week, entries: wk.entries)
+                }
+            }
+        }
+    }
+
+    private func weekCard(_ week: String, entries: [CalendarEntry]) -> some View {
+        VStack(alignment: .leading, spacing: .hearth300) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(formatWeekRange(week))
+                    .font(.hearthBodyMD.weight(.semibold))
+                    .foregroundColor(.inkPrimary)
+                Spacer()
+                Text(week)
+                    .font(.hearthCaptionMono)
+                    .foregroundColor(.inkMuted)
+            }
+            ForEach(entries) { entry in
+                HStack(spacing: .hearth300) {
+                    Circle()
+                        .fill(entryTone(entry))
+                        .frame(width: 6, height: 6)
+                    if let kid = entry.kidName {
+                        Text(kid)
+                            .font(.hearthBodySM)
+                            .foregroundColor(.inkSecondary)
+                            .padding(.horizontal, .hearth300)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.accentTint))
+                    }
+                    Text(entry.title)
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(.hearth500)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground)
+    }
+
+    /// Olive=confirmed, amber=pending/tbd, muted=blackout/holiday.
+    private func entryTone(_ entry: CalendarEntry) -> Color {
+        let kind = entry.kind.lowercased()
+        let status = entry.status.lowercased()
+        if kind == "blackout" || kind == "holiday" { return .inkMuted }
+        if status == "confirmed" { return .accentDefault }
+        if ["pending", "tentative", "tbd"].contains(status) { return .statusWarning }
+        return .inkSecondary
+    }
+
+    /// "Jul 6–10" (Mon–Fri) from a Monday ISO date, in UTC to avoid TZ drift.
+    private func formatWeekRange(_ iso: String) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let parse = DateFormatter()
+        parse.calendar = cal
+        parse.timeZone = cal.timeZone
+        parse.dateFormat = "yyyy-MM-dd"
+        guard let mon = parse.date(from: String(iso.prefix(10))) else { return iso }
+        let fri = cal.date(byAdding: .day, value: 4, to: mon) ?? mon
+        let monFmt = DateFormatter()
+        monFmt.timeZone = cal.timeZone
+        monFmt.dateFormat = "MMM d"
+        let sameMonth = cal.component(.month, from: mon) == cal.component(.month, from: fri)
+        if sameMonth {
+            let dayFmt = DateFormatter()
+            dayFmt.timeZone = cal.timeZone
+            dayFmt.dateFormat = "d"
+            return "\(monFmt.string(from: mon))–\(dayFmt.string(from: fri))"
+        }
+        return "\(monFmt.string(from: mon)) – \(monFmt.string(from: fri))"
     }
 
     // MARK: - Plan summary

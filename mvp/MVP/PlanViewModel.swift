@@ -26,7 +26,28 @@ final class PlanViewModel: ObservableObject {
     @Published private(set) var activities: [TrackedActivity] = []
     @Published private(set) var todos: [PlanTodo] = []
     @Published private(set) var summary: PlanSummary?
+    @Published private(set) var calendarEntries: [CalendarEntry] = []
     @Published private(set) var isLoadingPlan = false
+
+    /// Calendar entries bucketed by week-start (week_start, else the entry's
+    /// start date), oldest week first — the compact week×kid view's data.
+    var calendarWeeks: [(week: String, entries: [CalendarEntry])] {
+        var buckets: [String: [CalendarEntry]] = [:]
+        for e in calendarEntries {
+            let key = e.weekStart ?? e.startTs.map { String($0.prefix(10)) } ?? ""
+            guard !key.isEmpty else { continue }
+            buckets[key, default: []].append(e)
+        }
+        return buckets.keys.sorted().map { (week: $0, entries: buckets[$0] ?? []) }
+    }
+
+    /// Kid names seen across calendar + tracked activities, for the column order.
+    var calendarKids: [String] {
+        var names = Set<String>()
+        calendarEntries.forEach { if let k = $0.kidName { names.insert(k) } }
+        activities.forEach { if let k = $0.kidName { names.insert(k) } }
+        return names.sorted()
+    }
 
     // R1 — "Exploring" shortlist. `savedCandidateIds` tracks which discovery
     // candidates are already pinned, so their Save button shows a saved state.
@@ -176,6 +197,11 @@ final class PlanViewModel: ObservableObject {
             summary = try await PlanService.planSummary(baseURL: baseURL, userID: userId)
         } catch {
             print("[PlanViewModel] planSummary failed: \(error)")
+        }
+        do {
+            calendarEntries = try await PlanService.calendar(baseURL: baseURL, userID: userId)
+        } catch {
+            print("[PlanViewModel] calendar failed: \(error)")
         }
     }
 
