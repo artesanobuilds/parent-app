@@ -2630,6 +2630,105 @@ class DuckDBStorage(StorageBackend):
             for r in rows
         ]
 
+    # ingest_artifacts ------------------------------------------------------
+
+    _INGEST_COLS = (
+        "id", "user_id", "source", "media_type", "blob_ref", "subject",
+        "sender", "received_at", "raw_text", "extracted_json", "extract_status",
+        "links_json", "created_at",
+    )
+
+    def insert_ingest_artifact(
+        self,
+        user_id: str,
+        *,
+        source: str,
+        media_type: str = "text",
+        blob_ref: Optional[str] = None,
+        subject: Optional[str] = None,
+        sender: Optional[str] = None,
+        received_at: Optional[str] = None,
+        raw_text: Optional[str] = None,
+        extract_status: str = "pending",
+    ) -> str:
+        import uuid
+        artifact_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO ingest_artifacts (
+                id, user_id, source, media_type, blob_ref, subject, sender,
+                received_at, raw_text, extract_status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+            """,
+            [
+                artifact_id, user_id, source, media_type, blob_ref, subject,
+                sender, received_at, raw_text, extract_status,
+            ],
+        )
+        return artifact_id
+
+    def update_ingest_extraction(
+        self,
+        artifact_id: str,
+        *,
+        extracted_json: Optional[Dict[str, Any]] = None,
+        links_json: Optional[List[Any]] = None,
+        extract_status: str,
+    ) -> None:
+        """Stage-2 write-back: store the structured extraction + status. Failed
+        extractions land status='failed' with extracted_json=None."""
+        self._con.execute(
+            """
+            UPDATE ingest_artifacts
+               SET extracted_json = ?, links_json = ?, extract_status = ?
+             WHERE id = ?
+            """,
+            [
+                json.dumps(extracted_json, ensure_ascii=False) if extracted_json else None,
+                json.dumps(links_json, ensure_ascii=False) if links_json else None,
+                extract_status, artifact_id,
+            ],
+        )
+
+    def get_ingest_artifact(
+        self, artifact_id: str, user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {', '.join(self._INGEST_COLS)} FROM ingest_artifacts "
+            "WHERE id = ? AND user_id = ?",
+            [artifact_id, user_id],
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(
+            self._INGEST_COLS, row,
+            json_cols=(("extracted_json", "extracted"), ("links_json", "links")),
+            ts_cols=("received_at", "created_at"),
+        )
+
+    def list_ingest_artifacts(
+        self, user_id: str, *, status: Optional[str] = None, limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        where = "WHERE user_id = ?"
+        params: List[Any] = [user_id]
+        if status is not None:
+            where += " AND extract_status = ?"
+            params.append(status)
+        params.append(limit)
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._INGEST_COLS)} FROM ingest_artifacts "
+            f"{where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [
+            self._row_to_dict(
+                self._INGEST_COLS, r,
+                json_cols=(("extracted_json", "extracted"), ("links_json", "links")),
+                ts_cols=("received_at", "created_at"),
+            )
+            for r in rows
+        ]
+
     def export_all_parquet(self) -> None:
         """
         Export every table in BOOTSTRAP_TABLES atomically (A2). This is the

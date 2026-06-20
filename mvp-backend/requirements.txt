@@ -18,6 +18,9 @@ deepagents==0.6.11
 openai==2.14.0
 fastapi==0.115.0
 uvicorn==0.34.0
+# Multipart form parsing for photo uploads (POST /ingest/image). FastAPI's
+# Form/File/UploadFile require this; it is not a transitive dep.
+python-multipart==0.0.20
 python-dotenv==1.0.1
 duckdb==1.5.0
 bcrypt==4.2.1

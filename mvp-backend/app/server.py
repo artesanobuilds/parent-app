@@ -82,6 +82,8 @@ from app.research.router import router as research_router
 app.include_router(research_router)
 from app.cos.router import router as cos_router
 app.include_router(cos_router)
+from app.ingest.router import router as ingest_router
+app.include_router(ingest_router)
 
 # Lock CORS to known origins. Env: ALLOWED_ORIGINS=https://a.com,https://b.com
 # Default keeps localhost dev usable. iOS does not need CORS (not a browser).
