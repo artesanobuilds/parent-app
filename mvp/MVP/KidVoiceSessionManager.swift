@@ -44,6 +44,16 @@ final class KidVoiceSessionManager {
     private static let watchdogNanos: UInt64 = 15_000_000_000
     private static let micRetryDelayNanos: UInt64 = 1_000_000_000
 
+    // Connection resilience: ConvAI/LiveKit connects occasionally time out on a
+    // transient ElevenLabs/network blip (the server is never reached). Retry with
+    // backoff before surfacing a hard failure. Terminal outcomes (crisis,
+    // consent) are NOT retried.
+    private static let maxConnectAttempts = 3
+    /// Backoff before the next connect attempt: ~0.8s, then ~1.8s.
+    private static func connectBackoffNanos(afterAttempt n: Int) -> UInt64 {
+        n <= 1 ? 800_000_000 : 1_800_000_000
+    }
+
     // MARK: - Connect
 
     /// Connect a ConvAI voice session. The token is fetched via `tokenProvider`
@@ -78,17 +88,25 @@ final class KidVoiceSessionManager {
         catch { dlog("[voice-mgr] setEngineAvailability(.default) failed: \(error)") }
 
         var lastError = "unknown"
-        for attempt in 1...2 {
+        let maxAttempts = Self.maxConnectAttempts
+        for attempt in 1...maxAttempts {
             // Fresh token every attempt — tokens are conversation-scoped.
             let tokenResponse: KidAgentService.ConvAITokenResponse
             do {
                 tokenResponse = try await tokenProvider()
             } catch KidAgentServiceError.voiceFallback(reason: .crisis, status: _) {
-                return .crisisLocked
+                return .crisisLocked            // terminal — never retry
             } catch KidAgentServiceError.consentRequired(let version) {
-                return .consentRequired(version)
+                return .consentRequired(version) // terminal — never retry
             } catch {
-                return .failed("token fetch: \(error.localizedDescription)")
+                // A token fetch can fail on a transient network blip — retry.
+                lastError = "token fetch: \(error.localizedDescription)"
+                dlog("[voice-mgr] ⚠️ token fetch failed (attempt \(attempt)/\(maxAttempts)): \(lastError)")
+                if attempt < maxAttempts {
+                    try? await Task.sleep(nanoseconds: Self.connectBackoffNanos(afterAttempt: attempt))
+                    continue
+                }
+                return .failed(lastError)
             }
             guard let token = tokenResponse.signedURL else {
                 return .failed("token endpoint returned no signed_url")
@@ -101,17 +119,28 @@ final class KidVoiceSessionManager {
                 return .connected(conv)
             } catch let err as ConversationError {
                 lastError = err.localizedDescription
+                // Mic publish failure: full engine reset before the next try.
                 if case .microphoneToggleFailed = err, attempt == 1 {
                     dlog("[voice-mgr] mic publish failed (attempt 1) — full engine reset, retrying…")
                     await resetEngine()
                     try? await Task.sleep(nanoseconds: Self.micRetryDelayNanos)
                     continue
                 }
-                dlog("[voice-mgr] ❌ connect failed (attempt \(attempt)): \(lastError)")
+                // Connection/timeout error (the ElevenLabs leg never reached us) —
+                // retry with backoff before giving up.
+                dlog("[voice-mgr] ❌ connect failed (attempt \(attempt)/\(maxAttempts)): \(lastError)")
+                if attempt < maxAttempts {
+                    try? await Task.sleep(nanoseconds: Self.connectBackoffNanos(afterAttempt: attempt))
+                    continue
+                }
                 return .failed(lastError)
             } catch {
                 lastError = error.localizedDescription
-                dlog("[voice-mgr] ❌ connect failed (attempt \(attempt)): \(lastError)")
+                dlog("[voice-mgr] ❌ connect failed (attempt \(attempt)/\(maxAttempts)): \(lastError)")
+                if attempt < maxAttempts {
+                    try? await Task.sleep(nanoseconds: Self.connectBackoffNanos(afterAttempt: attempt))
+                    continue
+                }
                 return .failed(lastError)
             }
         }
