@@ -99,9 +99,11 @@ final class KidVoiceSessionManager {
             } catch KidAgentServiceError.consentRequired(let version) {
                 return .consentRequired(version) // terminal — never retry
             } catch {
-                // A token fetch can fail on a transient network blip — retry.
-                lastError = "token fetch: \(error.localizedDescription)"
-                dlog("[voice-mgr] ⚠️ token fetch failed (attempt \(attempt)/\(maxAttempts)): \(lastError)")
+                // Token fetch hits OUR backend — a failure here is our server/auth
+                // or the network to us, NOT ElevenLabs. Transient, so retry.
+                lastError = "Token fetch from our backend failed: \(error.localizedDescription). "
+                    + "This is our server/auth or the network to it, NOT ElevenLabs."
+                dlog("[voice-mgr] ⚠️ \(lastError) (attempt \(attempt)/\(maxAttempts))")
                 if attempt < maxAttempts {
                     try? await Task.sleep(nanoseconds: Self.connectBackoffNanos(afterAttempt: attempt))
                     continue
@@ -126,17 +128,18 @@ final class KidVoiceSessionManager {
                     try? await Task.sleep(nanoseconds: Self.micRetryDelayNanos)
                     continue
                 }
-                // Connection/timeout error (the ElevenLabs leg never reached us) —
-                // retry with backoff before giving up.
-                dlog("[voice-mgr] ❌ connect failed (attempt \(attempt)/\(maxAttempts)): \(lastError)")
+                // Connection/timeout on the ElevenLabs leg — the token already
+                // succeeded, so this is the voice service or network, not us.
+                lastError = Self.explainElevenLabsConnectFailure(err)
+                dlog("[voice-mgr] ❌ \(lastError) (attempt \(attempt)/\(maxAttempts))")
                 if attempt < maxAttempts {
                     try? await Task.sleep(nanoseconds: Self.connectBackoffNanos(afterAttempt: attempt))
                     continue
                 }
                 return .failed(lastError)
             } catch {
-                lastError = error.localizedDescription
-                dlog("[voice-mgr] ❌ connect failed (attempt \(attempt)/\(maxAttempts)): \(lastError)")
+                lastError = Self.explainElevenLabsConnectFailure(error)
+                dlog("[voice-mgr] ❌ \(lastError) (attempt \(attempt)/\(maxAttempts))")
                 if attempt < maxAttempts {
                     try? await Task.sleep(nanoseconds: Self.connectBackoffNanos(afterAttempt: attempt))
                     continue
@@ -180,6 +183,23 @@ final class KidVoiceSessionManager {
         } catch {
             print("[voice-mgr] engine reset failed: \(error)")
         }
+    }
+
+    /// Human explanation for a failure on the ElevenLabs connect leg. By the time
+    /// we call `startWithWatchdog` the session token was ALREADY issued by our
+    /// backend, so any failure here is the ElevenLabs/LiveKit connection (or the
+    /// network to it) — never our server. Spelling that out makes the bundled
+    /// debug reports self-explanatory instead of a bare "Timed out".
+    private static func explainElevenLabsConnectFailure(_ error: Error) -> String {
+        if let convErr = error as? ConversationError, case .agentTimeout = convErr {
+            let secs = Int(watchdogNanos / 1_000_000_000)
+            return "ElevenLabs voice connection timed out after \(secs)s (voice service unreachable). "
+                + "Our backend issued the session token fine — this is an ElevenLabs/LiveKit or "
+                + "network issue, NOT our server."
+        }
+        return "ElevenLabs voice connection failed: \(error.localizedDescription). The session token "
+            + "was issued by our backend fine — this is the ElevenLabs/LiveKit leg or the network to "
+            + "it, NOT our server."
     }
 
     private func startWithWatchdog(
