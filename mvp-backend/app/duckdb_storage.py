@@ -534,15 +534,30 @@ class DuckDBStorage(StorageBackend):
     CREATE INDEX IF NOT EXISTS idx_cos_messages_user_thread ON cos_messages (user_id, thread_id, created_at);
 
     -- Google OAuth tokens (Phase 3). Refresh token encrypted at rest.
-    CREATE TABLE IF NOT EXISTS google_oauth_tokens (
-        user_id                 TEXT PRIMARY KEY,
+    -- R5: provider-agnostic connected accounts (generalizes the old
+    -- google_oauth_tokens). One row per (user_id, provider, kind) so a user can
+    -- connect Gmail for email and Google Calendar for calendar independently, and
+    -- other providers (microsoft, apple) drop in later. Refresh token is
+    -- Fernet-encrypted at rest (see app/integrations/crypto.py).
+    CREATE TABLE IF NOT EXISTS integration_accounts (
+        id                      TEXT PRIMARY KEY,
+        user_id                 TEXT NOT NULL,
+        provider                TEXT NOT NULL,             -- google (v1) | microsoft | apple
+        kind                    TEXT NOT NULL,             -- email | calendar
+        account_email           TEXT,
+        scopes                  TEXT,                      -- space-separated granted scopes
         encrypted_refresh_token TEXT NOT NULL,
-        scopes                  TEXT,
-        email                   TEXT,
+        status                  TEXT NOT NULL DEFAULT 'connected',  -- connected | revoked | error
         connected_at            TIMESTAMPTZ DEFAULT now(),
         last_sync_at            TIMESTAMPTZ,
         revoked_at              TIMESTAMPTZ
     );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_integration_accounts_uniq
+        ON integration_accounts (user_id, provider, kind);
+
+    CREATE INDEX IF NOT EXISTS idx_integration_accounts_user
+        ON integration_accounts (user_id);
     """
 
     # Every table that must survive a volume rebuild, mapped to its parquet
@@ -576,7 +591,7 @@ class DuckDBStorage(StorageBackend):
         ("todo_items", "todo_items.parquet"),
         ("ingest_artifacts", "ingest_artifacts.parquet"),
         ("cos_messages", "cos_messages.parquet"),
-        ("google_oauth_tokens", "google_oauth_tokens.parquet"),
+        ("integration_accounts", "integration_accounts.parquet"),
     ]
 
     def __init__(self, db_path: Path | str | None = None) -> None:
@@ -1492,7 +1507,7 @@ class DuckDBStorage(StorageBackend):
                 "todo_items",
                 "ingest_artifacts",
                 "cos_messages",
-                "google_oauth_tokens",
+                "integration_accounts",
             ]:
                 pre = self._con.execute(
                     f"SELECT count(*) FROM {table} WHERE user_id = ?",
@@ -2729,6 +2744,102 @@ class DuckDBStorage(StorageBackend):
             )
             for r in rows
         ]
+
+    # integration_accounts (R5) -------------------------------------------
+
+    _INTEGRATION_COLS = (
+        "id", "user_id", "provider", "kind", "account_email", "scopes",
+        "encrypted_refresh_token", "status", "connected_at", "last_sync_at",
+        "revoked_at",
+    )
+
+    def upsert_integration_account(
+        self,
+        user_id: str,
+        *,
+        provider: str,
+        kind: str,
+        encrypted_refresh_token: str,
+        account_email: Optional[str] = None,
+        scopes: Optional[str] = None,
+        status: str = "connected",
+    ) -> str:
+        """Connect (or reconnect) a provider account for a (user, provider, kind).
+        Replaces any existing row for that triple so a re-auth refreshes the token
+        in place. Returns the row id."""
+        import uuid
+
+        account_id = str(uuid.uuid4())
+        with self._con.transaction():
+            self._con.execute(
+                "DELETE FROM integration_accounts "
+                "WHERE user_id = ? AND provider = ? AND kind = ?",
+                [user_id, provider, kind],
+            )
+            self._con.execute(
+                """
+                INSERT INTO integration_accounts (
+                    id, user_id, provider, kind, account_email, scopes,
+                    encrypted_refresh_token, status, connected_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, now())
+                """,
+                [
+                    account_id, user_id, provider, kind, account_email, scopes,
+                    encrypted_refresh_token, status,
+                ],
+            )
+        return account_id
+
+    def get_integration_account(
+        self, user_id: str, provider: str, kind: str
+    ) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {', '.join(self._INTEGRATION_COLS)} FROM integration_accounts "
+            "WHERE user_id = ? AND provider = ? AND kind = ?",
+            [user_id, provider, kind],
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(
+            self._INTEGRATION_COLS, row,
+            ts_cols=("connected_at", "last_sync_at", "revoked_at"),
+        )
+
+    def list_integration_accounts(
+        self, user_id: str, *, status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        where = "WHERE user_id = ?"
+        params: List[Any] = [user_id]
+        if status is not None:
+            where += " AND status = ?"
+            params.append(status)
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._INTEGRATION_COLS)} FROM integration_accounts "
+            f"{where} ORDER BY connected_at DESC",
+            params,
+        ).fetchall()
+        return [
+            self._row_to_dict(
+                self._INTEGRATION_COLS, r,
+                ts_cols=("connected_at", "last_sync_at", "revoked_at"),
+            )
+            for r in rows
+        ]
+
+    def mark_integration_synced(self, account_id: str) -> None:
+        self._con.execute(
+            "UPDATE integration_accounts SET last_sync_at = now() WHERE id = ?",
+            [account_id],
+        )
+
+    def revoke_integration_account(self, user_id: str, provider: str, kind: str) -> None:
+        """Mark an account revoked + scrub its token (the parent disconnected)."""
+        self._con.execute(
+            "UPDATE integration_accounts "
+            "SET status = 'revoked', revoked_at = now(), encrypted_refresh_token = '' "
+            "WHERE user_id = ? AND provider = ? AND kind = ?",
+            [user_id, provider, kind],
+        )
 
     def export_all_parquet(self) -> None:
         """

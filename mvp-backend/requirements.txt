@@ -29,3 +29,9 @@ pyyaml==6.0.2
 pytest==8.3.4
 elevenlabs==2.50.0
 httpx==0.28.1
+# R5 integrations: Fernet encryption-at-rest for OAuth refresh tokens, and the
+# Google adapters (Gmail + Calendar). The google libs are imported lazily, so
+# they're only exercised once the OAuth flow lands (R3).
+cryptography==49.0.0
+google-api-python-client==2.197.0
+google-auth-oauthlib==1.4.0
