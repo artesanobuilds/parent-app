@@ -199,10 +199,16 @@ def _llm_extract_invariants(
     cost_user: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Call the synthesis LLM with structured output. Returns a plain dict."""
+    # method="function_calling" is REQUIRED: langchain-openai 0.3+ defaults
+    # with_structured_output to OpenAI's *strict* json_schema mode, which rejects
+    # open-ended objects — and SynthesizedInvariants.tools_enabled is a
+    # Dict[str, bool]. Strict mode 400s ("required must include every key");
+    # function-calling has no such restriction. (Other schemas here use fixed
+    # models/lists, so only this one needs it.)
     llm = ChatOpenAI(
         model=SYNTHESIS_MODEL,
         temperature=SYNTHESIS_TEMPERATURE,
-    ).with_structured_output(SynthesizedInvariants)
+    ).with_structured_output(SynthesizedInvariants, method="function_calling")
 
     # Build the user message with all context. The prompt is structured so each
     # source of input is clearly delimited, reducing the chance the LLM treats
