@@ -10,9 +10,15 @@ struct SettingsView: View {
     @State private var tab: Tab = .profile
 
     enum Tab: String, CaseIterable, Identifiable {
-        case profile, server
+        case profile, integrations, server
         var id: String { rawValue }
-        var label: String { self == .profile ? "Profile" : "Server" }
+        var label: String {
+            switch self {
+            case .profile: return "Profile"
+            case .integrations: return "Integrations"
+            case .server: return "Server"
+            }
+        }
     }
 
     var body: some View {
@@ -29,6 +35,8 @@ struct SettingsView: View {
             switch tab {
             case .profile:
                 ProfileSettingsView(configuration: configuration, userID: userID)
+            case .integrations:
+                IntegrationsSettingsView(configuration: configuration, userID: userID)
             case .server:
                 ServerSettingsView(configuration: configuration)
             }
