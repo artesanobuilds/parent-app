@@ -93,6 +93,21 @@ export interface EmailSyncSchedule {
   hour: number; // 0-23
   tz: string;
 }
+export interface EmailSyncItem {
+  sender: string | null;
+  subject: string | null;
+  received_at?: string | null;
+  matched: string | null; // activity name, or null if unmatched
+  action: string; // ingested | skipped_duplicate | extract_failed
+  created?: { calendar: number; todos: number };
+  error?: string;
+}
+export interface EmailSyncDetail {
+  account_email: string | null;
+  query: string | null;
+  note: string | null;
+  items: EmailSyncItem[];
+}
 export interface EmailSyncRun {
   id: string;
   user_id: string;
@@ -104,6 +119,7 @@ export interface EmailSyncRun {
   created_at: string | null;
   started_at: string | null;
   finished_at: string | null;
+  progress?: { phase?: string; detail?: EmailSyncDetail } | null;
 }
 
 export const getEmailSyncConfig = () =>

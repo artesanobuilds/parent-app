@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import {
   getEmailSyncConfig,
   getEmailSyncRuns,
@@ -24,6 +24,7 @@ export function EmailSync() {
     tz: 'America/Los_Angeles',
   });
   const [runs, setRuns] = useState<EmailSyncRun[]>([]);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -160,17 +161,89 @@ export function EmailSync() {
             </thead>
             <tbody className="divide-y divide-hairline">
               {runs.map((r) => (
-                <tr key={r.id} className="hover:bg-canvas transition-colors duration-fast">
-                  <td className="px-500 py-400 font-medium text-ink-primary">
-                    {r.status}
-                    {r.error ? <span className="text-error"> — {r.error}</span> : null}
+                <Fragment key={r.id}>
+                  <tr
+                    onClick={() => setExpanded(expanded === r.id ? null : r.id)}
+                    className="hover:bg-canvas transition-colors duration-fast cursor-pointer"
+                  >
+                    <td className="px-500 py-400 font-medium text-ink-primary">
+                      <span className="text-ink-muted mr-200">{expanded === r.id ? '▾' : '▸'}</span>
+                      {r.status}
+                      {r.error ? <span className="text-error"> — {r.error}</span> : null}
+                    </td>
+                    <td className="px-500 py-400 text-ink-muted">{r.trigger}</td>
+                    <td className="px-500 py-400 text-ink-muted">{r.user_id}</td>
+                    <td className="px-500 py-400 text-ink-muted">{r.messages_seen}</td>
+                    <td className="px-500 py-400 text-ink-muted">{r.activities_touched}</td>
+                    <td className="px-500 py-400 text-ink-muted font-mono text-body-sm">
+                      {r.started_at ?? r.created_at ?? '—'}
+                    </td>
+                  </tr>
+                  {expanded === r.id && (
+                    <tr className="bg-canvas">
+                      <td colSpan={6} className="px-500 py-500">
+                        <RunDetail run={r} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RunDetail({ run }: { run: EmailSyncRun }) {
+  const detail = run.progress?.detail;
+  if (!detail) {
+    return <div className="text-ink-muted text-body-sm">No detail recorded for this run.</div>;
+  }
+  return (
+    <div className="flex flex-col gap-400">
+      {detail.account_email && (
+        <div className="text-body-sm text-ink-muted">
+          Account: <span className="text-ink-primary">{detail.account_email}</span>
+        </div>
+      )}
+      {detail.query && (
+        <div>
+          <div className="text-label uppercase tracking-wider text-ink-muted">Gmail search</div>
+          <div className="mt-100 font-mono text-body-sm text-ink-primary bg-elevated border border-hairline rounded-md px-400 py-300 break-all">
+            {detail.query}
+          </div>
+        </div>
+      )}
+      {detail.note && <div className="text-body-sm text-ink-muted italic">{detail.note}</div>}
+      {detail.items.length > 0 && (
+        <div className="overflow-hidden rounded-md border border-hairline bg-elevated">
+          <table className="w-full text-body-sm">
+            <thead>
+              <tr className="border-b border-hairline text-left text-label uppercase tracking-wider text-ink-muted">
+                <th className="px-400 py-300">From</th>
+                <th className="px-400 py-300">Subject</th>
+                <th className="px-400 py-300">Matched camp</th>
+                <th className="px-400 py-300">Result</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-hairline">
+              {detail.items.map((it, i) => (
+                <tr key={i}>
+                  <td className="px-400 py-300 text-ink-muted">{it.sender ?? '—'}</td>
+                  <td className="px-400 py-300 text-ink-primary">{it.subject ?? '(no subject)'}</td>
+                  <td className="px-400 py-300 text-ink-muted">
+                    {it.matched ?? <span className="italic">unmatched</span>}
                   </td>
-                  <td className="px-500 py-400 text-ink-muted">{r.trigger}</td>
-                  <td className="px-500 py-400 text-ink-muted">{r.user_id}</td>
-                  <td className="px-500 py-400 text-ink-muted">{r.messages_seen}</td>
-                  <td className="px-500 py-400 text-ink-muted">{r.activities_touched}</td>
-                  <td className="px-500 py-400 text-ink-muted font-mono text-body-sm">
-                    {r.started_at ?? r.created_at ?? '—'}
+                  <td className="px-400 py-300 text-ink-muted">
+                    {it.action === 'ingested'
+                      ? `ingested — ${it.created?.calendar ?? 0} cal, ${it.created?.todos ?? 0} to-dos`
+                      : it.action === 'skipped_duplicate'
+                        ? 'already seen'
+                        : it.action === 'extract_failed'
+                          ? <span className="text-error">extract failed</span>
+                          : it.action}
                   </td>
                 </tr>
               ))}

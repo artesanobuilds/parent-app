@@ -80,10 +80,16 @@ def test_run_email_sync_attaches_to_registered_and_is_idempotent(store, monkeypa
     )
 
     out = email_sync.run_email_sync(store, "u1", provider=provider)
-    assert out == {"messages_seen": 1, "activities_touched": 1}
+    assert out["messages_seen"] == 1 and out["activities_touched"] == 1
     # Gmail query targeted the camp's address/domain + window.
     assert "carey@camphbg.test" in provider.queries[0]
     assert "newer_than" in provider.queries[0]
+    # The run detail records the search + per-message result for the CMS view.
+    assert out["detail"]["query"] == provider.queries[0]
+    assert len(out["detail"]["items"]) == 1
+    item = out["detail"]["items"][0]
+    assert item["matched"] == "Camp HBG" and item["action"] == "ingested"
+    assert item["created"]["todos"] >= 1
 
     # NO new tracked activity — the email attached to the registered one.
     acts = store.list_tracked_activities("u1")
@@ -104,14 +110,16 @@ def test_run_email_sync_attaches_to_registered_and_is_idempotent(store, monkeypa
 
 def test_run_email_sync_noop_without_registered_or_account(store):
     # No connected account.
-    assert email_sync.run_email_sync(store, "u1", provider=_FakeProvider([], {})) == {
-        "messages_seen": 0, "activities_touched": 0
-    }
-    # Connected but no registered camps → no query made.
+    out = email_sync.run_email_sync(store, "u1", provider=_FakeProvider([], {}))
+    assert out["messages_seen"] == 0 and out["activities_touched"] == 0
+    assert out["detail"]["note"] == "no connected Gmail account"
+    # Connected but no registered camps → no query made, with an explanatory note.
     _connect_email(store)
     p = _FakeProvider([], {})
-    assert email_sync.run_email_sync(store, "u1", provider=p)["messages_seen"] == 0
+    out2 = email_sync.run_email_sync(store, "u1", provider=p)
+    assert out2["messages_seen"] == 0
     assert p.queries == []  # never queried — nothing to match
+    assert "no registered camps" in out2["detail"]["note"]
 
 
 def test_worker_schedule_tick_enqueues_once_per_day(store):
