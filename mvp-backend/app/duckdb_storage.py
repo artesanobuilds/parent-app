@@ -521,7 +521,8 @@ class DuckDBStorage(StorageBackend):
     );
 
     CREATE INDEX IF NOT EXISTS idx_ingest_artifacts_user ON ingest_artifacts (user_id, created_at);
-    CREATE INDEX IF NOT EXISTS idx_ingest_artifacts_ext ON ingest_artifacts (user_id, external_id);
+    -- NOTE: the external_id dedup index is created in migration v6 (not here) —
+    -- existing tables get the column via the migration, which runs AFTER this DDL.
 
     -- Chief-of-staff chat transcript (append-only, mirrors kid_messages).
     CREATE TABLE IF NOT EXISTS cos_messages (

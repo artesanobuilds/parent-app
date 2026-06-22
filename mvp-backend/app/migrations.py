@@ -72,13 +72,18 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
     # existing table needs a migration. Column-presence guard = idempotent.
     (6, "ingest_artifacts.add_external_id",
      lambda con: (
-         None if "external_id" in {
+         (None if "external_id" in {
              r[0] for r in con.execute(
                  "SELECT column_name FROM information_schema.columns "
                  "WHERE table_name = 'ingest_artifacts'"
              ).fetchall()
-         }
-         else con.execute("ALTER TABLE ingest_artifacts ADD COLUMN external_id TEXT")
+         } else con.execute("ALTER TABLE ingest_artifacts ADD COLUMN external_id TEXT")),
+         # Index lives here (not the DDL) so it's created only after the column
+         # exists — on fresh DBs the CREATE TABLE already added the column.
+         con.execute(
+             "CREATE INDEX IF NOT EXISTS idx_ingest_artifacts_ext "
+             "ON ingest_artifacts (user_id, external_id)"
+         ),
      )),
 ]
 
