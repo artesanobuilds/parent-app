@@ -9,10 +9,17 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 from dataclasses import dataclass
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
+
+# SECURITY: these libraries log the full access/refresh token at DEBUG. Pin them
+# to WARNING so tokens never land in app/Railway logs even if the root logger is
+# DEBUG. (Confirmed: requests_oauthlib logs the token response body verbatim.)
+for _sensitive in ("requests_oauthlib", "oauthlib", "google_auth_oauthlib", "urllib3"):
+    logging.getLogger(_sensitive).setLevel(logging.WARNING)
 
 # Per-kind Google scopes. email = restricted (needs verification + CASA).
 SCOPE_FOR_KIND = {
@@ -43,6 +50,12 @@ def scopes_for_kinds(kinds: List[str]) -> List[str]:
     return BASE_SCOPES + [SCOPE_FOR_KIND[k] for k in kinds if k in SCOPE_FOR_KIND]
 
 
+def generate_code_verifier() -> str:
+    """A PKCE code_verifier. Carried through the signed `state` so the stateless
+    callback can complete the exchange with the same verifier it authorized with."""
+    return secrets.token_urlsafe(64)
+
+
 def _client_config(redirect_uri: str) -> dict:
     return {
         "web": {
@@ -55,12 +68,15 @@ def _client_config(redirect_uri: str) -> dict:
     }
 
 
-def build_authorization_url(*, scopes: List[str], redirect_uri: str, state: str) -> str:
+def build_authorization_url(
+    *, scopes: List[str], redirect_uri: str, state: str, code_verifier: str
+) -> str:
     from google_auth_oauthlib.flow import Flow  # lazy
 
     flow = Flow.from_client_config(
         _client_config(redirect_uri), scopes=scopes, redirect_uri=redirect_uri
     )
+    flow.code_verifier = code_verifier  # PKCE — must match the one used at exchange
     url, _ = flow.authorization_url(
         access_type="offline",      # required to receive a refresh token
         include_granted_scopes="true",
@@ -70,12 +86,15 @@ def build_authorization_url(*, scopes: List[str], redirect_uri: str, state: str)
     return url
 
 
-def exchange_code(*, code: str, scopes: List[str], redirect_uri: str) -> ExchangeResult:
+def exchange_code(
+    *, code: str, scopes: List[str], redirect_uri: str, code_verifier: str
+) -> ExchangeResult:
     from google_auth_oauthlib.flow import Flow  # lazy
 
     flow = Flow.from_client_config(
         _client_config(redirect_uri), scopes=scopes, redirect_uri=redirect_uri
     )
+    flow.code_verifier = code_verifier  # PKCE — same verifier used to authorize
     flow.fetch_token(code=code)
     creds = flow.credentials
     return ExchangeResult(

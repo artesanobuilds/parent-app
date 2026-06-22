@@ -79,7 +79,10 @@ def test_oauth_endpoints_end_to_end(monkeypatch):
             url = r.json()["authorization_url"]
             assert "accounts.google.com" in url
             state = url.split("state=")[1]
-            assert oauth_state.verify_state(state) == {"user_id": uid, "kinds": ["email", "calendar"]}
+            decoded = oauth_state.verify_state(state)
+            assert decoded["user_id"] == uid
+            assert decoded["kinds"] == ["email", "calendar"]
+            assert decoded["cv"]  # PKCE verifier carried in the state
 
             # invalid kinds → 400
             assert client.get("/oauth/google/authorize-url?kinds=foo", headers=auth).status_code == 400
@@ -121,7 +124,9 @@ def test_oauth_endpoints_end_to_end(monkeypatch):
                 google_flow, "exchange_code",
                 lambda **kw: ExchangeResult(refresh_token=None, scopes=[], email=None),
             )
-            good_state = oauth_state.sign_state({"user_id": uid, "kinds": ["calendar"]})
+            good_state = oauth_state.sign_state(
+                {"user_id": uid, "kinds": ["calendar"], "cv": "test-verifier"}
+            )
             r = client.get(
                 f"/oauth/google/callback?code=abc&state={good_state}", follow_redirects=False
             )

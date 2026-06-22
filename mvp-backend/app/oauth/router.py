@@ -76,11 +76,15 @@ def authorize_url(kinds: str = "email,calendar", user_id: str = Depends(current_
     if not kind_list:
         raise HTTPException(status_code=400, detail="no valid kinds (email|calendar)")
 
-    state = oauth_state.sign_state({"user_id": user_id, "kinds": kind_list})
+    code_verifier = google_flow.generate_code_verifier()
+    state = oauth_state.sign_state(
+        {"user_id": user_id, "kinds": kind_list, "cv": code_verifier}
+    )
     url = google_flow.build_authorization_url(
         scopes=google_flow.scopes_for_kinds(kind_list),
         redirect_uri=_redirect_uri(),
         state=state,
+        code_verifier=code_verifier,
     )
     return AuthorizeURLResponse(authorization_url=url)
 
@@ -100,6 +104,7 @@ def callback(
         data = oauth_state.verify_state(state)
         user_id = data["user_id"]
         kinds = data["kinds"]
+        code_verifier = data["cv"]
     except (ValueError, KeyError):
         return _app_redirect("error", reason="bad_state")
 
@@ -108,6 +113,7 @@ def callback(
             code=code,
             scopes=google_flow.scopes_for_kinds(kinds),
             redirect_uri=_redirect_uri(),
+            code_verifier=code_verifier,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("[oauth/google] code exchange failed: %s", exc)
