@@ -45,6 +45,11 @@ def _fernet() -> Fernet:
     return Fernet(_dev_key())
 
 
+def fernet() -> Fernet:
+    """The shared Fernet (also used to sign short-lived OAuth state tokens)."""
+    return _fernet()
+
+
 def encrypt_token(plaintext: str) -> str:
     """Encrypt a refresh token → urlsafe ciphertext string."""
     return _fernet().encrypt(plaintext.encode("utf-8")).decode("ascii")
