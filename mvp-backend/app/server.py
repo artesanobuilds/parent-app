@@ -60,6 +60,13 @@ async def lifespan(app: FastAPI):
         init_worker(storage_backend).start()
     except Exception:
         logger.exception("[research] worker failed to start")
+    # R3 daily Gmail-sync worker (same daemon idiom + a schedule tick).
+    try:
+        storage_backend.requeue_stale_email_sync_runs()
+        from app.email_sync.worker import init_worker as init_email_sync_worker
+        init_email_sync_worker(storage_backend).start()
+    except Exception:
+        logger.exception("[email-sync] worker failed to start")
     yield
     try:
         from app.research.worker import research_worker
@@ -67,6 +74,12 @@ async def lifespan(app: FastAPI):
             research_worker.stop()
     except Exception:
         logger.exception("[research] worker failed to stop cleanly")
+    try:
+        from app.email_sync.worker import email_sync_worker
+        if email_sync_worker is not None:
+            email_sync_worker.stop()
+    except Exception:
+        logger.exception("[email-sync] worker failed to stop cleanly")
     persist_state()
     storage_backend.close()
 
@@ -86,6 +99,8 @@ from app.ingest.router import router as ingest_router
 app.include_router(ingest_router)
 from app.oauth.router import router as oauth_router
 app.include_router(oauth_router)
+from app.email_sync.router import router as email_sync_router
+app.include_router(email_sync_router)
 
 # Lock CORS to known origins. Env: ALLOWED_ORIGINS=https://a.com,https://b.com
 # Default keeps localhost dev usable. iOS does not need CORS (not a browser).

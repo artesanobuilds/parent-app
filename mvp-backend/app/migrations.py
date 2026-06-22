@@ -66,6 +66,20 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
          }
          else con.execute("ALTER TABLE kid_messages ADD COLUMN fragments_json JSON")
      )),
+    # R3: Gmail message id on ingest_artifacts so the daily email-sync agent is
+    # idempotent (skip already-ingested messages). New tables (email_sync_runs,
+    # agent_config) come via CREATE-IF-NOT-EXISTS; only this column-add on an
+    # existing table needs a migration. Column-presence guard = idempotent.
+    (6, "ingest_artifacts.add_external_id",
+     lambda con: (
+         None if "external_id" in {
+             r[0] for r in con.execute(
+                 "SELECT column_name FROM information_schema.columns "
+                 "WHERE table_name = 'ingest_artifacts'"
+             ).fetchall()
+         }
+         else con.execute("ALTER TABLE ingest_artifacts ADD COLUMN external_id TEXT")
+     )),
 ]
 
 _MIGRATIONS_DDL = """

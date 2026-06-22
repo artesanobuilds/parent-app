@@ -86,3 +86,39 @@ export const deleteCommunityPost = (id: string) =>
 export const getStats = () => fetchJSON<ContentStats>(`${API}/cms/stats`);
 export const exportParquet = () =>
   fetchJSON<{ exported: boolean }>(`${API}/cms/export-parquet`, { method: 'POST' });
+
+// Email Sync (R3) — admin agent control
+export interface EmailSyncSchedule {
+  enabled: boolean;
+  hour: number; // 0-23
+  tz: string;
+}
+export interface EmailSyncRun {
+  id: string;
+  user_id: string;
+  status: string; // queued|running|done|failed
+  trigger: string; // manual|scheduled
+  messages_seen: number;
+  activities_touched: number;
+  error: string | null;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export const getEmailSyncConfig = () =>
+  fetchJSON<EmailSyncSchedule>(`${API}/cms/email-sync/config`);
+
+export const putEmailSyncConfig = (cfg: EmailSyncSchedule) =>
+  fetchJSON<EmailSyncSchedule>(`${API}/cms/email-sync/config`, {
+    method: 'PUT',
+    body: JSON.stringify(cfg),
+  });
+
+export const runEmailSyncNow = () =>
+  fetchJSON<{ enqueued: number; run_ids: string[] }>(`${API}/cms/email-sync/run`, {
+    method: 'POST',
+  });
+
+export const getEmailSyncRuns = () =>
+  fetchJSON<{ runs: EmailSyncRun[] }>(`${API}/cms/email-sync/runs`).then((r) => r.runs);

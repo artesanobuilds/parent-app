@@ -5,6 +5,7 @@ import {
   Users,
   FolderOpen,
   Download,
+  Mailbox,
 } from "lucide-react";
 import { toast } from "../shared/Toast";
 
@@ -13,6 +14,7 @@ const navItems = [
   { to: "/articles", label: "Articles", icon: FileText },
   { to: "/community", label: "Community", icon: Users },
   { to: "/categories", label: "Categories", icon: FolderOpen },
+  { to: "/email-sync", label: "Email Sync", icon: Mailbox },
 ];
 
 export default function CMSLayout() {

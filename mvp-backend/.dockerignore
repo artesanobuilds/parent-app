@@ -38,4 +38,6 @@ data/todo_items.parquet
 data/ingest_artifacts.parquet
 data/cos_messages.parquet
 data/integration_accounts.parquet
+data/email_sync_runs.parquet
+data/agent_config.parquet
 data/eval_reports/

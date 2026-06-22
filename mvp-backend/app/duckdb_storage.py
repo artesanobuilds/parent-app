@@ -516,10 +516,12 @@ class DuckDBStorage(StorageBackend):
         extracted_json JSON,                        -- structured ExtractedActivity dump
         extract_status TEXT NOT NULL DEFAULT 'pending',  -- pending|extracted|failed
         links_json     JSON,                        -- [{label, url}]
+        external_id    TEXT,                        -- provider message id for R3 Gmail dedup (NULL for paste/photo)
         created_at     TIMESTAMPTZ DEFAULT now()
     );
 
     CREATE INDEX IF NOT EXISTS idx_ingest_artifacts_user ON ingest_artifacts (user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_ingest_artifacts_ext ON ingest_artifacts (user_id, external_id);
 
     -- Chief-of-staff chat transcript (append-only, mirrors kid_messages).
     CREATE TABLE IF NOT EXISTS cos_messages (
@@ -558,6 +560,31 @@ class DuckDBStorage(StorageBackend):
 
     CREATE INDEX IF NOT EXISTS idx_integration_accounts_user
         ON integration_accounts (user_id);
+
+    -- R3: durable job state for the daily Gmail sync agent (mirrors research_runs).
+    CREATE TABLE IF NOT EXISTS email_sync_runs (
+        id                TEXT PRIMARY KEY,
+        user_id           TEXT NOT NULL,
+        status            TEXT NOT NULL DEFAULT 'queued',  -- queued|running|done|failed
+        trigger           TEXT NOT NULL DEFAULT 'manual',  -- manual|scheduled
+        messages_seen     INTEGER NOT NULL DEFAULT 0,
+        activities_touched INTEGER NOT NULL DEFAULT 0,
+        progress_json     JSON,
+        error             TEXT,
+        created_at        TIMESTAMPTZ DEFAULT now(),
+        started_at        TIMESTAMPTZ,
+        finished_at       TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_email_sync_runs_status ON email_sync_runs (status, created_at);
+
+    -- R3: generic operator/agent config (key/value JSON). Holds the email-sync
+    -- schedule + the scheduler's once-a-day guard.
+    CREATE TABLE IF NOT EXISTS agent_config (
+        key        TEXT PRIMARY KEY,
+        value      JSON NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT now()
+    );
     """
 
     # Every table that must survive a volume rebuild, mapped to its parquet
@@ -592,6 +619,8 @@ class DuckDBStorage(StorageBackend):
         ("ingest_artifacts", "ingest_artifacts.parquet"),
         ("cos_messages", "cos_messages.parquet"),
         ("integration_accounts", "integration_accounts.parquet"),
+        ("email_sync_runs", "email_sync_runs.parquet"),
+        ("agent_config", "agent_config.parquet"),
     ]
 
     def __init__(self, db_path: Path | str | None = None) -> None:
@@ -1508,6 +1537,7 @@ class DuckDBStorage(StorageBackend):
                 "ingest_artifacts",
                 "cos_messages",
                 "integration_accounts",
+                "email_sync_runs",
             ]:
                 pre = self._con.execute(
                     f"SELECT count(*) FROM {table} WHERE user_id = ?",
@@ -2651,7 +2681,7 @@ class DuckDBStorage(StorageBackend):
     _INGEST_COLS = (
         "id", "user_id", "source", "media_type", "blob_ref", "subject",
         "sender", "received_at", "raw_text", "extracted_json", "extract_status",
-        "links_json", "created_at",
+        "links_json", "external_id", "created_at",
     )
 
     def insert_ingest_artifact(
@@ -2666,6 +2696,7 @@ class DuckDBStorage(StorageBackend):
         received_at: Optional[str] = None,
         raw_text: Optional[str] = None,
         extract_status: str = "pending",
+        external_id: Optional[str] = None,
     ) -> str:
         import uuid
         artifact_id = str(uuid.uuid4())
@@ -2673,15 +2704,26 @@ class DuckDBStorage(StorageBackend):
             """
             INSERT INTO ingest_artifacts (
                 id, user_id, source, media_type, blob_ref, subject, sender,
-                received_at, raw_text, extract_status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                received_at, raw_text, extract_status, external_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
             """,
             [
                 artifact_id, user_id, source, media_type, blob_ref, subject,
-                sender, received_at, raw_text, extract_status,
+                sender, received_at, raw_text, extract_status, external_id,
             ],
         )
         return artifact_id
+
+    def get_ingest_artifact_by_external(
+        self, user_id: str, external_id: str
+    ) -> Optional[str]:
+        """Return the artifact id for a (user, provider-message-id) if already
+        ingested — the R3 idempotency check. None if not seen."""
+        row = self._con.execute(
+            "SELECT id FROM ingest_artifacts WHERE user_id = ? AND external_id = ? LIMIT 1",
+            [user_id, external_id],
+        ).fetchone()
+        return row[0] if row else None
 
     def update_ingest_extraction(
         self,
@@ -2840,6 +2882,143 @@ class DuckDBStorage(StorageBackend):
             "WHERE user_id = ? AND provider = ? AND kind = ?",
             [user_id, provider, kind],
         )
+
+    def list_connected_email_accounts(self) -> List[Dict[str, Any]]:
+        """All connected email accounts across ALL users — the R3 daemon iterates
+        these to know whose Gmail to sync."""
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._INTEGRATION_COLS)} FROM integration_accounts "
+            "WHERE kind = 'email' AND status = 'connected' ORDER BY connected_at",
+        ).fetchall()
+        return [
+            self._row_to_dict(
+                self._INTEGRATION_COLS, r,
+                ts_cols=("connected_at", "last_sync_at", "revoked_at"),
+            )
+            for r in rows
+        ]
+
+    # agent_config (R3) --------------------------------------------------
+
+    def get_agent_config(self, key: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            "SELECT value FROM agent_config WHERE key = ?", [key]
+        ).fetchone()
+        return json.loads(row[0]) if row and row[0] else None
+
+    def set_agent_config(self, key: str, value: Dict[str, Any]) -> None:
+        """UPSERT a config blob (delete + insert — DuckDB ON CONFLICT on a PK is
+        finicky, and this matches the integration upsert style)."""
+        payload = json.dumps(value, ensure_ascii=False)
+        with self._con.transaction():
+            self._con.execute("DELETE FROM agent_config WHERE key = ?", [key])
+            self._con.execute(
+                "INSERT INTO agent_config (key, value, updated_at) VALUES (?, ?, now())",
+                [key, payload],
+            )
+
+    # email_sync_runs (R3) -----------------------------------------------
+
+    def create_email_sync_run(self, *, user_id: str, trigger: str = "manual") -> str:
+        import uuid
+        run_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO email_sync_runs (id, user_id, status, trigger, progress_json, created_at)
+            VALUES (?, ?, 'queued', ?, ?, now())
+            """,
+            [run_id, user_id, trigger, json.dumps({"phase": "queued"})],
+        )
+        return run_id
+
+    def claim_next_queued_email_sync_run(self) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            """
+            UPDATE email_sync_runs
+               SET status = 'running', started_at = now(),
+                   progress_json = json_object('phase', 'starting')
+             WHERE id = (
+                 SELECT id FROM email_sync_runs WHERE status = 'queued'
+                 ORDER BY created_at LIMIT 1
+             )
+            RETURNING id
+            """,
+        ).fetchone()
+        return self.get_email_sync_run(row[0]) if row else None
+
+    def update_email_sync_run(
+        self,
+        run_id: str,
+        *,
+        status: Optional[str] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        messages_seen: Optional[int] = None,
+        activities_touched: Optional[int] = None,
+        error: Optional[str] = None,
+        finished: bool = False,
+    ) -> None:
+        sets: List[str] = []
+        params: List[Any] = []
+        if status is not None:
+            sets.append("status = ?"); params.append(status)
+        if progress is not None:
+            sets.append("progress_json = ?"); params.append(json.dumps(progress, ensure_ascii=False))
+        if messages_seen is not None:
+            sets.append("messages_seen = ?"); params.append(messages_seen)
+        if activities_touched is not None:
+            sets.append("activities_touched = ?"); params.append(activities_touched)
+        if error is not None:
+            sets.append("error = ?"); params.append(error)
+        if finished:
+            sets.append("finished_at = now()")
+        if not sets:
+            return
+        params.append(run_id)
+        self._con.execute(
+            f"UPDATE email_sync_runs SET {', '.join(sets)} WHERE id = ?", params
+        )
+
+    def requeue_stale_email_sync_runs(self) -> int:
+        rows = self._con.execute(
+            "UPDATE email_sync_runs SET status = 'queued', started_at = NULL "
+            "WHERE status = 'running' RETURNING id",
+        ).fetchall()
+        if rows:
+            logger.warning("[email-sync] re-queued %d stale run(s) after restart", len(rows))
+        return len(rows)
+
+    _EMAIL_SYNC_COLS = (
+        "id", "user_id", "status", "trigger", "messages_seen", "activities_touched",
+        "progress_json", "error", "created_at", "started_at", "finished_at",
+    )
+
+    def get_email_sync_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {', '.join(self._EMAIL_SYNC_COLS)} FROM email_sync_runs WHERE id = ?",
+            [run_id],
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(
+            self._EMAIL_SYNC_COLS, row,
+            json_cols=(("progress_json", "progress"),),
+            ts_cols=("created_at", "started_at", "finished_at"),
+        )
+
+    def list_email_sync_runs(self, limit: int = 50) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._EMAIL_SYNC_COLS)} FROM email_sync_runs "
+            "ORDER BY created_at DESC LIMIT ?",
+            [limit],
+        ).fetchall()
+        return [
+            self._row_to_dict(
+                self._EMAIL_SYNC_COLS, r,
+                json_cols=(("progress_json", "progress"),),
+                ts_cols=("created_at", "started_at", "finished_at"),
+            )
+            for r in rows
+        ]
 
     def export_all_parquet(self) -> None:
         """

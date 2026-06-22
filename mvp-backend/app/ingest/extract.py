@@ -198,12 +198,17 @@ def materialize(
     extracted: ExtractedActivity,
     *,
     kids: Optional[List[Dict[str, Any]]] = None,
+    link_activity_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Stage 2 (pure Python, deterministic): persist the extraction and spawn a
     pending tracked_activity + calendar entries + action-item to-dos. Always
     lands results as `pending` + confirm-this to-dos rather than auto-confirming
     (vision/text extraction is noisy — the artifact's pending/confirmed
-    discipline). Returns a summary of what was created."""
+    discipline). Returns a summary of what was created.
+
+    When `link_activity_id` is set (R3 — the email is from an already-registered
+    camp), DON'T create a new tracked_activity: attach the calendar entries +
+    to-dos to that existing activity instead (no duplicate "exploring" rows)."""
     kids = kids or []
     created: Dict[str, Any] = {"activity_id": None, "todo_ids": [], "calendar_ids": []}
 
@@ -217,37 +222,41 @@ def materialize(
         extract_status="extracted",
     )
 
-    # Only spawn a tracked activity when we actually identified one.
-    if extracted.activity_name or extracted.provider:
+    # Attach to an existing registered activity (R3), or spawn one when we
+    # actually identified a new camp (paste/photo).
+    if link_activity_id or extracted.activity_name or extracted.provider:
         pending_reason = _eligibility_check(extracted, kids)
-        # R1: ingested items land in the "exploring" shortlist (considering, not
-        # decided) unless an eligibility issue forces pending.
-        status = "pending_eligibility" if pending_reason else "exploring"
-        contact = extracted.contact.model_dump() if extracted.contact else None
-        signup_url = next((l.url for l in extracted.links if l.url), None)
-        details = {
-            "hours": extracted.hours,
-            "schedule_text": extracted.schedule_text,
-            "dates": extracted.dates,
-            "location": extracted.location,
-            "age_min": extracted.age_min,
-            "age_max": extracted.age_max,
-            "forms_required": extracted.forms_required,
-            "is_welcome_letter": extracted.is_welcome_letter,
-        }
-        activity_id = storage.track_activity(
-            user_id,
-            name=extracted.activity_name or extracted.provider,
-            kid_name=extracted.kid_fit,
-            provider=extracted.provider,
-            status=status,
-            pending_reason=pending_reason,
-            price_amount=extracted.amount_due,
-            price_status="confirmed" if extracted.amount_due is not None else "tbd",
-            signup_url=signup_url,
-            contact=contact,
-            details=details,
-        )
+        if link_activity_id is not None:
+            activity_id = link_activity_id  # email from a tracked camp — reuse it
+        else:
+            # R1: ingested items land in the "exploring" shortlist (considering,
+            # not decided) unless an eligibility issue forces pending.
+            status = "pending_eligibility" if pending_reason else "exploring"
+            contact = extracted.contact.model_dump() if extracted.contact else None
+            signup_url = next((l.url for l in extracted.links if l.url), None)
+            details = {
+                "hours": extracted.hours,
+                "schedule_text": extracted.schedule_text,
+                "dates": extracted.dates,
+                "location": extracted.location,
+                "age_min": extracted.age_min,
+                "age_max": extracted.age_max,
+                "forms_required": extracted.forms_required,
+                "is_welcome_letter": extracted.is_welcome_letter,
+            }
+            activity_id = storage.track_activity(
+                user_id,
+                name=extracted.activity_name or extracted.provider,
+                kid_name=extracted.kid_fit,
+                provider=extracted.provider,
+                status=status,
+                pending_reason=pending_reason,
+                price_amount=extracted.amount_due,
+                price_status="confirmed" if extracted.amount_due is not None else "tbd",
+                signup_url=signup_url,
+                contact=contact,
+                details=details,
+            )
         created["activity_id"] = activity_id
 
         # Calendar entries for resolvable dates.
