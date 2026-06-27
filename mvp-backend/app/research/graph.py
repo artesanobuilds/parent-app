@@ -196,6 +196,10 @@ RESEARCH_TAVILY_MAX_RESULTS = int(os.getenv("RESEARCH_TAVILY_MAX_RESULTS", "8"))
 # Deep-agent tool loops can be long; bound them so a single run can't run away
 # on cost. 80 covers planning + several searches + recording without sprawling.
 RESEARCH_RECURSION_LIMIT = int(os.getenv("RESEARCH_RECURSION_LIMIT", "80"))
+# Resilience: with several runs executing concurrently we can brush the OpenAI
+# rate limit. ChatOpenAI retries 429/5xx with exponential backoff, so a burst
+# degrades to "slightly slower" instead of a failed run. Bump via env if needed.
+RESEARCH_LLM_MAX_RETRIES = int(os.getenv("RESEARCH_LLM_MAX_RETRIES", "4"))
 
 
 class ActivityCandidate(BaseModel):
@@ -313,11 +317,20 @@ def _task_message(
     )
 
 
+def build_research_model() -> ChatOpenAI:
+    """The single OpenAI model behind the deepagents research harness. Extracted
+    so the retry/backoff wiring (RESEARCH_LLM_MAX_RETRIES) is unit-assertable —
+    a 429 burst from concurrent runs must retry, not fail the run."""
+    return ChatOpenAI(
+        model=RESEARCH_MODEL, stream_usage=True, max_retries=RESEARCH_LLM_MAX_RETRIES
+    )
+
+
 def build_research_agent(tools: List[Any]):
     """Construct the deepagents research agent with an explicit OpenAI model
     (deepagents would otherwise default to Anthropic, which we have no key for)."""
     return create_deep_agent(
-        model=ChatOpenAI(model=RESEARCH_MODEL, stream_usage=True),
+        model=build_research_model(),
         tools=tools,
         system_prompt=_SYSTEM_PROMPT,
     )

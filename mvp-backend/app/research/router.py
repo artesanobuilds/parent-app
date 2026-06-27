@@ -69,17 +69,23 @@ def create_run(req: ResearchRunRequest, user_id: str = Depends(current_user)):
     default_location, kids = _location_and_kids_from_profile(user_id)
     location = req.location or default_location
 
-    run_id = storage.create_research_run(
+    # Atomic dedupe-or-create: if this parent already has a run in flight
+    # (queued or running), reuse it instead of stacking another behind it — a
+    # double-tap just resumes the same run. The check+insert is one transaction
+    # so two simultaneous submits can't both create (no wasted duplicate spend).
+    result = storage.enqueue_research_run(
         user_id=user_id, location=location, kids=kids, params=req.params or {}
     )
+    if result["deduped"]:
+        return {"run_id": result["run_id"], "status": result["status"], "deduped": True}
 
-    # Wake the background worker so it picks the run up immediately (it also
+    # New run: wake the background worker so it picks it up immediately (it also
     # polls, so a missing/not-yet-started worker just means a short delay).
     from app.research.worker import research_worker
     if research_worker is not None:
         research_worker.notify()
 
-    return {"run_id": run_id, "status": "queued"}
+    return {"run_id": result["run_id"], "status": "queued"}
 
 
 @router.get("/runs")

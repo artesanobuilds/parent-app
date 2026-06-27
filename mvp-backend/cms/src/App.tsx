@@ -8,6 +8,7 @@ import { CommunityPostEditor } from './pages/CommunityPostEditor'
 import { CategoryList } from './pages/CategoryList'
 import { CategoryEditor } from './pages/CategoryEditor'
 import { EmailSync } from './pages/EmailSync'
+import { CalendarSync } from './pages/CalendarSync'
 import { Toaster } from './components/shared/Toast'
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="categories" element={<CategoryList />} />
           <Route path="categories/:id" element={<CategoryEditor />} />
           <Route path="email-sync" element={<EmailSync />} />
+          <Route path="calendar-sync" element={<CalendarSync />} />
           <Route path="*" element={<Navigate to="" replace />} />
         </Route>
       </Routes>

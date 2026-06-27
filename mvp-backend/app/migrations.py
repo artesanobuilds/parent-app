@@ -85,6 +85,33 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
              "ON ingest_artifacts (user_id, external_id)"
          ),
      )),
+    # R4 part 2: two-way Google Calendar sync. calendar_entries gains the
+    # provider event id (the mapping back to the Google event) + synced_at (last
+    # reconcile, drives the dirty-check). New tables (calendar_sync_runs) come via
+    # CREATE-IF-NOT-EXISTS; only these column-adds on an existing table need a
+    # migration. Column-presence guards = idempotent against fresh + legacy DBs.
+    # The (user_id, provider_event_id) index lives here, after the columns exist
+    # (the DDL runs before migrations, so an index on a migration-added column
+    # must be created in the migration — see debugging-duckdb-ddl-gotchas).
+    (7, "calendar_entries.add_sync_columns",
+     lambda con: (
+         (None if "provider_event_id" in {
+             r[0] for r in con.execute(
+                 "SELECT column_name FROM information_schema.columns "
+                 "WHERE table_name = 'calendar_entries'"
+             ).fetchall()
+         } else con.execute("ALTER TABLE calendar_entries ADD COLUMN provider_event_id TEXT")),
+         (None if "synced_at" in {
+             r[0] for r in con.execute(
+                 "SELECT column_name FROM information_schema.columns "
+                 "WHERE table_name = 'calendar_entries'"
+             ).fetchall()
+         } else con.execute("ALTER TABLE calendar_entries ADD COLUMN synced_at TIMESTAMPTZ")),
+         con.execute(
+             "CREATE INDEX IF NOT EXISTS idx_calendar_entries_provider "
+             "ON calendar_entries (user_id, provider_event_id)"
+         ),
+     )),
 ]
 
 _MIGRATIONS_DDL = """

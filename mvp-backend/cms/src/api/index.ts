@@ -138,3 +138,57 @@ export const runEmailSyncNow = () =>
 
 export const getEmailSyncRuns = () =>
   fetchJSON<{ runs: EmailSyncRun[] }>(`${API}/cms/email-sync/runs`).then((r) => r.runs);
+
+// Calendar Sync (R4 part 2) — two-way Google Calendar sync admin control
+export interface CalendarSyncSchedule {
+  enabled: boolean;
+  hour: number; // 0-23
+  tz: string;
+}
+export interface CalendarSyncPushItem {
+  title: string;
+  start?: string | null;
+  action: string; // created | updated | push_failed
+  error?: string;
+}
+export interface CalendarSyncPullItem {
+  title: string;
+  start?: string | null;
+  action: string; // imported | updated
+}
+export interface CalendarSyncDetail {
+  account_email: string | null;
+  note: string | null;
+  pushed_items: CalendarSyncPushItem[];
+  pulled_items: CalendarSyncPullItem[];
+}
+export interface CalendarSyncRun {
+  id: string;
+  user_id: string;
+  status: string; // queued|running|done|failed
+  trigger: string; // manual|scheduled
+  pushed: number;
+  pulled: number;
+  error: string | null;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  progress?: { phase?: string; detail?: CalendarSyncDetail } | null;
+}
+
+export const getCalendarSyncConfig = () =>
+  fetchJSON<CalendarSyncSchedule>(`${API}/cms/calendar-sync/config`);
+
+export const putCalendarSyncConfig = (cfg: CalendarSyncSchedule) =>
+  fetchJSON<CalendarSyncSchedule>(`${API}/cms/calendar-sync/config`, {
+    method: 'PUT',
+    body: JSON.stringify(cfg),
+  });
+
+export const runCalendarSyncNow = () =>
+  fetchJSON<{ enqueued: number; run_ids: string[] }>(`${API}/cms/calendar-sync/run`, {
+    method: 'POST',
+  });
+
+export const getCalendarSyncRuns = () =>
+  fetchJSON<{ runs: CalendarSyncRun[] }>(`${API}/cms/calendar-sync/runs`).then((r) => r.runs);

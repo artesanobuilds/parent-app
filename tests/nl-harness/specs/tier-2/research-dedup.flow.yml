@@ -1,0 +1,35 @@
+spec:
+  name: research-dedup
+  tier: 2
+  modules: [research, reliability]
+  intent: >
+    Reliability guard for the run-dedup strategy (the June-24 double-tap fix). A
+    parent who fires two discovery runs in quick succession — a double-tap, or a
+    retry after a slow poll — must NOT stack two runs in the worker queue. The
+    second POST should return the SAME run the first created, flagged deduped, so
+    work isn't duplicated and the second run can't queue behind the first.
+
+  personas:
+    parent:
+      preset: new-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "RUN_OPENAI_FLOWS=true (a discovery run executes against OpenAI; skipped otherwise)"
+
+  invariants:
+    - "First POST /research/runs returns a fresh run_id (not deduped)"
+    - "An immediate second POST returns the SAME run_id with deduped=true"
+    - "The deduped run is still in flight (status queued or running)"
+    - "The created run is cancelled in cleanup so no orphan work is left"
+
+  boundary_contracts:
+    - endpoint: POST /research/runs
+      as: parent
+      status: 200
+      response_includes: [run_id, status]
+
+    - endpoint: POST /research/runs
+      as: parent
+      status: 200
+      response_includes: [run_id, status, deduped]

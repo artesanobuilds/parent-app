@@ -15,6 +15,7 @@ export default defineConfig({
       '/cms/stats': 'http://localhost:8904',
       '/cms/export-parquet': 'http://localhost:8904',
       '/cms/email-sync': 'http://localhost:8904',
+      '/cms/calendar-sync': 'http://localhost:8904',
     },
   },
   build: {

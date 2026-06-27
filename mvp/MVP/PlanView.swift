@@ -184,7 +184,7 @@ struct PlanView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     // Headline reflects what the model is doing right now:
                     // Thinking… / Planning… / Searching for <query> / Found <name>.
-                    Text(viewModel.discoveryDetail ?? "Finding activities…")
+                    Text(viewModel.discoveryHeadline)
                         .font(.hearthBodyMD.weight(.semibold))
                         .foregroundColor(.inkPrimary)
                         .fixedSize(horizontal: false, vertical: true)

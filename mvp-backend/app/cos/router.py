@@ -253,6 +253,43 @@ def delete_calendar(
 
 
 # --------------------------------------------------------------------------- #
+# Two-way Google Calendar sync (R4 part 2) — parent-facing trigger + status
+# --------------------------------------------------------------------------- #
+
+
+class CalendarSyncBody(BaseModel):
+    user_id: str
+
+
+@router.post("/calendar/sync")
+def calendar_sync_now(body: CalendarSyncBody, user_id: str = Depends(current_user)):
+    """Queue a two-way sync of this parent's plan with their Google Calendar and
+    wake the worker. Requires a connected Google Calendar account."""
+    authorize_user_match(authenticated=user_id, claimed=body.user_id)
+    storage = _storage()
+    acct = storage.get_integration_account(user_id, "google", "calendar")
+    if not acct or acct.get("status") != "connected":
+        raise HTTPException(status_code=400, detail="connect Google Calendar first")
+    run_id = storage.create_calendar_sync_run(user_id=user_id, trigger="manual")
+    try:
+        from app.calendar_sync.worker import calendar_sync_worker
+
+        if calendar_sync_worker is not None:
+            calendar_sync_worker.notify()
+    except Exception:  # noqa: BLE001
+        logger.exception("[calendar-sync] notify failed")
+    return {"run_id": run_id, "status": "queued"}
+
+
+@router.get("/calendar/sync/status")
+def calendar_sync_status(user_id: str = Depends(current_user)):
+    """The parent's most recent calendar-sync run (for a 'last synced' label)."""
+    runs = _storage().list_calendar_sync_runs(limit=50)
+    mine = [r for r in runs if r.get("user_id") == user_id]
+    return {"latest": mine[0] if mine else None}
+
+
+# --------------------------------------------------------------------------- #
 # Recurring appointments
 # --------------------------------------------------------------------------- #
 

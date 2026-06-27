@@ -2,6 +2,54 @@
 
 Living list of next-up work. Order is a rough priority, not a commitment. Items move to `docs/history/NNN.md` when shipped.
 
+## Pre-Launch Hardening — Security, Reliability & Scalability Overhaul (2026-06-27)
+
+**Why this exists.** On June 24 multiple testers (Miguel, Heather) reported the Plan tab "stuck on 0 found." An SRE investigation of prod data (durable `research_runs` table + Railway logs) found it was **not a crash** — every run completed with 25–33 candidates — but a **perceived hang from head-of-line blocking**: the research worker was a single daemon thread, so concurrent users serialized (Heather waited 176s behind her own run on Jun 22 → 6.5 min total; Jun 24 three users serialized through one worker), and the UI showed "0 found" with no progress during the queue wait and polled forever. The current architecture (single Railway instance, single-writer DuckDB on a local volume, no queue, no LLM backoff, log-scraping as the only observability) is fine for a closed beta but **will not survive a public launch**. This epic is the hardening pass to do **before** opening up.
+
+### ✅ Shipped now — beta concurrency fix (2026-06-27)
+- **Research worker thread pool** (`app/research/worker.py`) — `RESEARCH_WORKER_CONCURRENCY` (default 3) threads drain the queue concurrently; the atomic `claim_next_queued_run` (`UPDATE…RETURNING`) prevents double-claim. Removes head-of-line blocking at beta scale (discovery is I/O-bound, so GIL releases on network waits → real parallelism). Covered by a barrier test that deadlocks if serial.
+- **OpenAI backoff** (`app/research/graph.py`) — research `ChatOpenAI(max_retries=RESEARCH_LLM_MAX_RETRIES, default 4)` so a 429 burst from concurrent runs degrades to "slower," not "failed."
+- **Run dedup** (`app/research/router.py` + `get_active_research_run`) — a re-submit while a run is in flight returns the existing run instead of stacking another behind it (kills double-tap pile-ups).
+- **iOS queue UX** (`PlanViewModel`/`PlanView`) — a queued run shows "Lining up your search… / you're in line" instead of a frozen "0 found"; the poll is capped at 5 min with a graceful "still working, tap again" (re-tap resumes the same run via dedup).
+
+### ✅ Shipped now — reliability test suite, Phase 1 (2026-06-27)
+Tests that pin the strategies above so the June-24 incident can't silently regress.
+- **Offline / hermetic** (`mvp-backend/tests/reliability/`, 13 tests, <4s, no LLM): worker-pool concurrency (parallel + bounded by `concurrency`), atomic-claim exactly-once under thread contention, startup-sweeper crash recovery, idempotent candidate re-write, OpenAI 429→retry via `httpx.MockTransport`, per-user run dedup. See the suite README for the strategy↔test map.
+- **nl-harness black-box** (`tests/nl-harness/specs/tier-2/`): `research-dedup` (rapid re-submit → same run, `deduped=true`) and `concurrent-enqueue-resilience` (N parents fire `POST /research/runs` at once → distinct runs, no 5xx/corruption under the single DuckDB writer). Both validated live. **CI note:** the harness backend must run with `RATE_LIMIT_AUTH_PER_HOUR>=1000` (provisioning N personas issues N tokens; default cap 5/hr 429s the setup).
+
+### ⏳ Phase 2 (fast-follow) — failure-injection in the harness
+Adopt the NL-Harness Playbook's §4.8 fault-injection model (Toxiproxy + mock-service layer) for parent-app, so backoff/concurrency/failure modes are testable **end-to-end and deterministically** without real LLM cost. Concretely:
+- **Mock OpenAI/Tavily via env base-URL** (`OPENAI_BASE_URL` → a canned-response mock server) — the playbook's "services point at real-or-mock via config" pattern. Makes the harness reliability flows free + deterministic (today they spend ~1 run each).
+- **A `ctx.fault()` API** for the harness (`ctx.fault('openai','429'|'timeout'|'down')`) that toggles the mock's failure mode, mirroring the playbook's `ctx.fault('stripe','timeout')`.
+- **Failure-mode flow specs**: `research-backoff-recovery` (inject 429s → run still completes), `research-worker-saturation` (N>pool → queue drains, none lost), `voice-elevenlabs-outage` (EL down → iOS-facing error is correct, not a generic 500 — guards the real prior voice incident).
+- Stretch: a stale-run **reaper** + a backend execution-timeout per run (also listed under Reliability above) become directly testable once faults are injectable.
+
+### Reliability (next)
+- **No error tracking or alerting.** The only way to find the June 24 incident was scraping Railway's 500-line log buffer + reconstructing from the durable tables. Add structured error capture (Sentry or equivalent) + alerts on: run failure rate, p95 queue wait, worker stall, 5xx rate, LLM 429 rate. A user should never be the monitoring system.
+- **Worker stall / liveness.** A single stuck `process_run` silently burns a pool slot. Add a per-run execution timeout (hard-cap a run that exceeds N minutes → mark `failed`, free the slot) and a heartbeat so a wedged worker is detectable.
+- **Apply the thread-pool + backoff pattern to the other single-threaded workers** (`email_sync`, `calendar_sync`) before they carry real load.
+- **`research_runs` has no failure history in practice** — every run is `done`; confirm the `failed` path actually fires and surfaces to the client (today a failed run shows a generic error).
+- **Verify the moderation parent-notification path.** Jun 24 a kid session ("little one") tripped self-harm / emotional-distress flags (correctly blocked); confirm `parent_notified_at` actually alerted the parent — a safety-critical path that's currently unverified in prod.
+- **Cross-user 403 friction.** Jun 24 logs show `kid-agent/list?user_id=Greg` and `…=Ava` 403'ing intermittently (token-vs-claim mismatch). Diagnose stale/racing tokens before launch — reads to a tester as "the app won't load my kids."
+
+### Scalability (the launch lift)
+- **External job queue.** The research/email/calendar job tables live in DuckDB on a local volume, so workers can't scale past one instance. Move to a shared queue (Redis + RQ/Celery) so worker capacity scales horizontally and survives restarts independently of the API.
+- **Postgres migration.** The single-writer DuckDB `_ThreadSafeConn` RLock serializes every write through one lock on one volume — a hard ceiling and a single point of failure. Migrate to Postgres (managed) for real concurrency, connection pooling, and multi-instance writes. (`docs/roadmap.md` Backend section already flags schema normalization — fold it in.)
+- **Horizontal API + worker instances** behind Railway/load balancer once state is external (queue + Postgres). Make the API stateless (no in-process `MemorySaver`/caches that assume one instance).
+- **LLM rate-limit budgeting.** At launch scale, concurrent runs (12–14 calls × ~15–20k tokens each) will hit gpt-5.5 TPM/RPM caps. Add a token-budget governor / concurrency cap tied to the actual OpenAI tier, and reduce per-run cost (~$0.30–0.40/run today; cheaper extract model, lower default `max_candidates`).
+- **Load test** the discovery + voice paths at target concurrency (e.g. 25–50 simultaneous) and publish the real ceiling before opening up.
+
+### Security (pre-launch audit)
+- **Identity hardening.** Closed beta uses opaque client-claimed `user_id` + Bearer tokens (`/auth/issue-token`). Public launch needs real auth (Apple Sign-In / verified email), token expiry/rotation, and removal of the "client claims a user_id" trust assumption (already flagged in the Family Companion v1 section — make it a launch gate).
+- **Google verification + CASA.** `gmail.readonly` is a restricted scope; the OAuth app + annual CASA security assessment must clear before non-test users can connect Gmail. Long lead time — start now.
+- **Secret rotation + management.** OpenAI/ElevenLabs/Tavily/Fernet keys live in `.env` + Railway env. Establish rotation cadence, move to a secret manager, and confirm `INTEGRATION_ENC_KEY` (encrypts refresh tokens at rest) has a documented rotation/re-encrypt plan.
+- **Admin surface review.** `/data/export`, `/data/download/{filename}`, `/cms/*` are `ADMIN_TOKEN`-gated (shared secret). Before launch: per-operator auth/audit on these, and confirm the download path's traversal guard + that exported parquet (full user PII) can't leak.
+- **Abuse / rate limits.** Discovery is expensive ($/run) and currently throttled only by `rate_limit_enforce`. Add per-user run quotas + abuse detection before discovery is open to the public.
+- **Full security audit** (authz matrix, PII handling/retention, COPPA posture for the kid agent, injection hardening review) as a gate, not an afterthought.
+
+### Observability (cross-cutting, do early)
+- Structured request/trace logging with correlation IDs end-to-end (the `[COST]` workflow id is a good start — extend to all paths); a dashboard for run latency/queue depth/failure rate; and the **ElevenLabs post-call webhook** (already TODO in Backend section) so voice minutes are measured, not proxied.
+
 ## Activity Planning / Chief of Staff (new, 2026-06-19)
 
 Branch `feat/activity-planning-chief-of-staff`. A deep-research background agent (deepagents) discovers camps/activities by location + kid profile; an isolated chief-of-staff agent + planning service builds the calendar, to-dos, logistics/coverage, and cost. Surfaced on a new iOS **Plan** tab and a new **parent web dashboard** (`mvp-backend/parent-dashboard/`). Full design: `~/.claude/plans/we-are-going-to-frolicking-candy.md`; system diagram: `docs/system-architecture.md`.

@@ -106,6 +106,21 @@ enum GmailService {
         return try await sendDecoded(request)
     }
 
+    /// Queue a two-way Google Calendar sync for this parent (POST /cos/calendar/sync).
+    /// The backend runs it on its worker; this returns once the run is enqueued.
+    static func syncCalendar(baseURL: URL, userID: String) async throws {
+        let url = baseURL.appendingPathComponent("cos/calendar/sync")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (k, v) in await authHeader(userID: userID, baseURL: baseURL) {
+            request.setValue(v, forHTTPHeaderField: k)
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["user_id": userID])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+    }
+
     static func disconnect(baseURL: URL, userID: String, kind: String) async throws {
         let url = baseURL.appendingPathComponent("oauth/google/disconnect")
         var request = URLRequest(url: url)

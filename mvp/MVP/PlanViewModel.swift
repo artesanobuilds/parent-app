@@ -75,8 +75,24 @@ final class PlanViewModel: ObservableObject {
     var discoveryFound: Int { runStatus?.progress?.candidatesFound ?? 0 }
     var discoveryRecent: [String] { runStatus?.progress?.recent ?? [] }
 
-    /// "8 of 25 found" so the parent knows the target we're shooting for.
+    /// The run is accepted but a worker hasn't started it yet (it's waiting its
+    /// turn behind other parents' searches). Distinct from an executing run that
+    /// genuinely has 0 results so far — so we don't show a frozen "0 found".
+    var isQueued: Bool {
+        runStatus?.status == "queued" || runStatus?.progress?.phase == "queued"
+    }
+
+    /// Headline for the discovering card. While queued we say so explicitly;
+    /// otherwise we surface what the model is doing right now.
+    var discoveryHeadline: String {
+        if isQueued { return "Lining up your search…" }
+        return discoveryDetail ?? "Finding activities…"
+    }
+
+    /// "8 of 25 found" so the parent knows the target we're shooting for. While
+    /// queued there's no count yet — show the wait, not "0 found".
     var discoveryCountLabel: String {
+        if isQueued { return "Starting shortly — you're in line" }
         if let target = runStatus?.progress?.candidatesTarget, target > 0 {
             return "\(discoveryFound) of \(target) found"
         }
@@ -124,10 +140,19 @@ final class PlanViewModel: ObservableObject {
                 )
 
                 // Poll until terminal. Backoff is a fixed 2s; the run is a
-                // background worker, so a few-second cadence is plenty.
+                // background worker, so a few-second cadence is plenty. Cap the
+                // poll at 5 min so a stuck/slow run degrades into a clear "try
+                // again" instead of an infinite spinner (the run keeps going on
+                // the backend — re-tapping resumes it via server-side dedup).
+                let deadline = Date().addingTimeInterval(300)
+                var timedOut = false
                 while !Task.isCancelled {
                     try await Task.sleep(nanoseconds: 2_000_000_000)
                     if Task.isCancelled { return }
+                    if Date() >= deadline {
+                        timedOut = true
+                        break
+                    }
                     let status = try await PlanService.runStatus(
                         baseURL: baseURL, userID: userId, runId: handle.runId
                     )
@@ -135,7 +160,11 @@ final class PlanViewModel: ObservableObject {
                     if status.isTerminal { break }
                 }
 
-                if let status = self.runStatus, status.status == "done" {
+                if timedOut {
+                    self.errorMessage = "This is taking longer than usual. It's still "
+                        + "working in the background — tap Find activities again in a "
+                        + "moment to pick up where it left off."
+                } else if let status = self.runStatus, status.status == "done" {
                     self.candidates = try await PlanService.candidates(
                         baseURL: baseURL, userID: userId, runId: status.runId
                     )

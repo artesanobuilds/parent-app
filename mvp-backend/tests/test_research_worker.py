@@ -74,3 +74,47 @@ def test_init_worker_sets_singleton(store):
 
     w = init_worker(store, discover_fn=_fake_discover)
     assert worker_mod.research_worker is w
+
+
+def test_thread_pool_drains_concurrently(store):
+    """N queued runs are processed by N worker threads in parallel — the total
+    wall-clock is ~1 slow run, not N serial runs (the head-of-line-blocking fix).
+    Each fake discover blocks on a barrier so they MUST overlap to finish."""
+    import threading
+    import time
+
+    N = 3
+    barrier = threading.Barrier(N, timeout=5)
+    run_ids = [
+        store.create_research_run(user_id=f"u{i}", location={}, kids=[]) for i in range(N)
+    ]
+
+    def _blocking_discover(**kwargs):
+        # Won't return until all N are running at once — proves real concurrency.
+        barrier.wait()
+        return [{"name": "Camp", "category": "camp"}]
+
+    worker = ResearchWorker(store, _blocking_discover, poll_interval=0.2, concurrency=N)
+    worker.start()
+    try:
+        deadline = time.time() + 8
+        while time.time() < deadline:
+            if all(store.get_research_run(r)["status"] == "done" for r in run_ids):
+                break
+            time.sleep(0.1)
+    finally:
+        worker.stop(timeout=2)
+
+    statuses = [store.get_research_run(r)["status"] for r in run_ids]
+    assert statuses == ["done"] * N, statuses  # barrier would deadlock if serial
+
+
+def test_create_run_dedupes_active(store):
+    """A second create while one is in flight returns the SAME run (no pile-up)."""
+    first = store.create_research_run(user_id="u1", location={}, kids=[])
+    active = store.get_active_research_run("u1")
+    assert active is not None and active["id"] == first and active["status"] == "queued"
+
+    # Once it's terminal, a new create is NOT deduped (active returns None).
+    store.update_research_run(first, status="done", candidate_count=0, finished=True)
+    assert store.get_active_research_run("u1") is None

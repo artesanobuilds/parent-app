@@ -67,6 +67,13 @@ async def lifespan(app: FastAPI):
         init_email_sync_worker(storage_backend).start()
     except Exception:
         logger.exception("[email-sync] worker failed to start")
+    # R4 part 2: two-way Google Calendar sync worker (same daemon idiom).
+    try:
+        storage_backend.requeue_stale_calendar_sync_runs()
+        from app.calendar_sync.worker import init_worker as init_calendar_sync_worker
+        init_calendar_sync_worker(storage_backend).start()
+    except Exception:
+        logger.exception("[calendar-sync] worker failed to start")
     yield
     try:
         from app.research.worker import research_worker
@@ -80,6 +87,12 @@ async def lifespan(app: FastAPI):
             email_sync_worker.stop()
     except Exception:
         logger.exception("[email-sync] worker failed to stop cleanly")
+    try:
+        from app.calendar_sync.worker import calendar_sync_worker
+        if calendar_sync_worker is not None:
+            calendar_sync_worker.stop()
+    except Exception:
+        logger.exception("[calendar-sync] worker failed to stop cleanly")
     persist_state()
     storage_backend.close()
 
@@ -101,6 +114,8 @@ from app.oauth.router import router as oauth_router
 app.include_router(oauth_router)
 from app.email_sync.router import router as email_sync_router
 app.include_router(email_sync_router)
+from app.calendar_sync.router import router as calendar_sync_router
+app.include_router(calendar_sync_router)
 
 # Lock CORS to known origins. Env: ALLOWED_ORIGINS=https://a.com,https://b.com
 # Default keeps localhost dev usable. iOS does not need CORS (not a browser).

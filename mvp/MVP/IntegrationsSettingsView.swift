@@ -9,8 +9,10 @@ final class IntegrationsViewModel: ObservableObject {
     @Published private(set) var configured = true
     @Published private(set) var isLoading = false
     @Published private(set) var isConnecting = false
+    @Published private(set) var isSyncingCalendar = false
     @Published var errorMessage: String?
     @Published var connectedEmail: String?
+    @Published var calendarSyncMessage: String?
 
     private let baseURL: URL?
     private let userID: String
@@ -23,6 +25,7 @@ final class IntegrationsViewModel: ObservableObject {
 
     var connectedAccounts: [GoogleAccount] { accounts.filter { $0.isConnected } }
     var isGmailConnected: Bool { connectedAccounts.contains { $0.kind == "email" } }
+    var isCalendarConnected: Bool { connectedAccounts.contains { $0.kind == "calendar" } }
 
     func load() async {
         guard let baseURL = baseURL else { return }
@@ -51,6 +54,23 @@ final class IntegrationsViewModel: ObservableObject {
             await load()
         } catch GmailServiceError.authCancelled {
             // user backed out — no error banner
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func syncCalendarNow() async {
+        guard let baseURL = baseURL else { return }
+        isSyncingCalendar = true
+        calendarSyncMessage = nil
+        errorMessage = nil
+        defer { isSyncingCalendar = false }
+        do {
+            try await GmailService.syncCalendar(baseURL: baseURL, userID: userID)
+            calendarSyncMessage = "Sync started — your calendar will update shortly."
+            // Refresh once so a recently-stamped last-synced time shows; the run
+            // itself completes on the backend worker (we don't poll for it).
+            await load()
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
@@ -165,6 +185,9 @@ struct IntegrationsSettingsView: View {
                                 .font(.hearthBodySM)
                                 .foregroundColor(.inkSecondary)
                         }
+                        if account.kind == "calendar" {
+                            calendarSyncRow(account)
+                        }
                     }
                     Spacer()
                     Button("Disconnect") {
@@ -177,6 +200,13 @@ struct IntegrationsSettingsView: View {
                 if account.id != viewModel.connectedAccounts.last?.id {
                     Divider().background(Color.borderHairline)
                 }
+            }
+
+            if let msg = viewModel.calendarSyncMessage {
+                Text(msg)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkSecondary)
+                    .padding(.top, .hearth300)
             }
 
             if !viewModel.isGmailConnected {
@@ -208,6 +238,52 @@ struct IntegrationsSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(cardBackground)
     }
+
+    @ViewBuilder
+    private func calendarSyncRow(_ account: GoogleAccount) -> some View {
+        HStack(spacing: .hearth300) {
+            Text(lastSyncedLabel(account.lastSyncAt))
+                .font(.hearthBodySM)
+                .foregroundColor(.inkMuted)
+            Button {
+                Task { await viewModel.syncCalendarNow() }
+            } label: {
+                if viewModel.isSyncingCalendar {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.hearthBodySM.weight(.semibold))
+                        .foregroundColor(.accentDefault)
+                }
+            }
+            .disabled(viewModel.isSyncingCalendar)
+        }
+        .padding(.top, .hearth300)
+    }
+
+    private func lastSyncedLabel(_ iso: String?) -> String {
+        guard let iso = iso, let date = Self.parseISO(iso) else {
+            return "Not synced yet"
+        }
+        return "Last synced \(Self.relativeFormatter.localizedString(for: date, relativeTo: Date()))"
+    }
+
+    /// DuckDB's `.isoformat()` may or may not include fractional seconds, so try
+    /// both ISO8601 variants.
+    private static func parseISO(_ iso: String) -> Date? {
+        let withFrac = ISO8601DateFormatter()
+        withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = withFrac.date(from: iso) { return d }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: iso)
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        return f
+    }()
 
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)

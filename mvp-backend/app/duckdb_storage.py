@@ -420,9 +420,17 @@ class DuckDBStorage(StorageBackend):
         end_ts        TIMESTAMPTZ,
         all_day       BOOLEAN NOT NULL DEFAULT FALSE,
         location_text TEXT,
-        kind          TEXT NOT NULL DEFAULT 'camp', -- camp|class|appointment|therapy|blackout|holiday
+        kind          TEXT NOT NULL DEFAULT 'camp', -- camp|class|appointment|therapy|blackout|holiday|external
         status        TEXT NOT NULL DEFAULT 'confirmed',  -- confirmed|pending|tbd
-        source        TEXT NOT NULL DEFAULT 'manual',     -- manual|research|email|photo|cos_agent
+        source        TEXT NOT NULL DEFAULT 'manual',     -- manual|research|email|photo|cos_agent|gcal
+        -- Two-way Google Calendar sync (R4 part 2). provider_event_id is the
+        -- Google event id (set after we push, or on a pulled external event).
+        -- synced_at is the last reconcile (NULL means never pushed). A row is
+        -- dirty (needs push) when updated_at is later than synced_at. The
+        -- (user_id, provider_event_id) index lives in migration v7 because the
+        -- columns are added there on existing DBs.
+        provider_event_id TEXT,
+        synced_at     TIMESTAMPTZ,
         created_at    TIMESTAMPTZ DEFAULT now(),
         updated_at    TIMESTAMPTZ DEFAULT now()
     );
@@ -579,8 +587,27 @@ class DuckDBStorage(StorageBackend):
 
     CREATE INDEX IF NOT EXISTS idx_email_sync_runs_status ON email_sync_runs (status, created_at);
 
+    -- R4 part 2: durable job state for the two-way Google Calendar sync daemon
+    -- (mirrors email_sync_runs). pushed and pulled count entries reconciled in
+    -- each direction.
+    CREATE TABLE IF NOT EXISTS calendar_sync_runs (
+        id                TEXT PRIMARY KEY,
+        user_id           TEXT NOT NULL,
+        status            TEXT NOT NULL DEFAULT 'queued',  -- queued|running|done|failed
+        trigger           TEXT NOT NULL DEFAULT 'manual',  -- manual|scheduled
+        pushed            INTEGER NOT NULL DEFAULT 0,
+        pulled            INTEGER NOT NULL DEFAULT 0,
+        progress_json     JSON,
+        error             TEXT,
+        created_at        TIMESTAMPTZ DEFAULT now(),
+        started_at        TIMESTAMPTZ,
+        finished_at       TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_calendar_sync_runs_status ON calendar_sync_runs (status, created_at);
+
     -- R3: generic operator/agent config (key/value JSON). Holds the email-sync
-    -- schedule + the scheduler's once-a-day guard.
+    -- and calendar-sync schedules plus each scheduler's once-a-day guard.
     CREATE TABLE IF NOT EXISTS agent_config (
         key        TEXT PRIMARY KEY,
         value      JSON NOT NULL,
@@ -621,6 +648,7 @@ class DuckDBStorage(StorageBackend):
         ("cos_messages", "cos_messages.parquet"),
         ("integration_accounts", "integration_accounts.parquet"),
         ("email_sync_runs", "email_sync_runs.parquet"),
+        ("calendar_sync_runs", "calendar_sync_runs.parquet"),
         ("agent_config", "agent_config.parquet"),
     ]
 
@@ -1539,6 +1567,7 @@ class DuckDBStorage(StorageBackend):
                 "cos_messages",
                 "integration_accounts",
                 "email_sync_runs",
+                "calendar_sync_runs",
             ]:
                 pre = self._con.execute(
                     f"SELECT count(*) FROM {table} WHERE user_id = ?",
@@ -1916,6 +1945,29 @@ class DuckDBStorage(StorageBackend):
         )
         return run_id
 
+    def enqueue_research_run(
+        self,
+        *,
+        user_id: str,
+        location: Dict[str, Any],
+        kids: List[Dict[str, Any]],
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Atomically dedupe-or-create a research run. If the user already has an
+        in-flight run (queued or running), return it; otherwise create one. The
+        check and the insert run under a single transaction — the storage RLock
+        is held for its whole duration — so two simultaneous submits can't both
+        create a run. Closes the check-then-create TOCTOU on POST /research/runs.
+        Returns {run_id, status, deduped}."""
+        with self._con.transaction():
+            active = self.get_active_research_run(user_id)
+            if active is not None:
+                return {"run_id": active["id"], "status": active["status"], "deduped": True}
+            run_id = self.create_research_run(
+                user_id=user_id, location=location, kids=kids, params=params
+            )
+            return {"run_id": run_id, "status": "queued", "deduped": False}
+
     def claim_next_queued_run(self) -> Optional[Dict[str, Any]]:
         """Atomically pick the oldest queued run, flip it to running, and return
         it. Single UPDATE...RETURNING so two workers can't claim the same row."""
@@ -2011,6 +2063,24 @@ class DuckDBStorage(StorageBackend):
             [user_id, limit],
         ).fetchall()
         return [self._research_run_row_to_dict(r) for r in rows]
+
+    def get_active_research_run(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """The user's most recent still-in-flight run (queued or running), if any.
+        Used to dedupe rapid re-submits (double-taps) so they reuse the run in
+        flight instead of piling extra runs behind it in the worker queue."""
+        row = self._con.execute(
+            """
+            SELECT id, user_id, status, location_json, kids_json, params_json,
+                   progress_json, candidate_count, error,
+                   created_at, started_at, finished_at
+            FROM research_runs
+            WHERE user_id = ? AND status IN ('queued', 'running')
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            [user_id],
+        ).fetchone()
+        return self._research_run_row_to_dict(row) if row else None
 
     @staticmethod
     def _research_run_row_to_dict(row: Any) -> Dict[str, Any]:
@@ -2297,8 +2367,9 @@ class DuckDBStorage(StorageBackend):
     _CALENDAR_COLS = (
         "id", "user_id", "kid_name", "activity_id", "title", "week_start",
         "start_ts", "end_ts", "all_day", "location_text", "kind", "status",
-        "source", "created_at", "updated_at",
+        "source", "provider_event_id", "synced_at", "created_at", "updated_at",
     )
+    _CALENDAR_TS = ("week_start", "start_ts", "end_ts", "synced_at", "created_at", "updated_at")
 
     def add_calendar_entry(
         self,
@@ -2315,6 +2386,7 @@ class DuckDBStorage(StorageBackend):
         kind: str = "camp",
         status: str = "confirmed",
         source: str = "manual",
+        provider_event_id: Optional[str] = None,
     ) -> str:
         import uuid
         entry_id = str(uuid.uuid4())
@@ -2323,12 +2395,13 @@ class DuckDBStorage(StorageBackend):
             INSERT INTO calendar_entries (
                 id, user_id, kid_name, activity_id, title, week_start,
                 start_ts, end_ts, all_day, location_text, kind, status, source,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+                provider_event_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
             """,
             [
                 entry_id, user_id, kid_name, activity_id, title, week_start,
                 start_ts, end_ts, all_day, location_text, kind, status, source,
+                provider_event_id,
             ],
         )
         return entry_id
@@ -2340,10 +2413,21 @@ class DuckDBStorage(StorageBackend):
         ).fetchone()
         if row is None:
             return None
-        return self._row_to_dict(
-            self._CALENDAR_COLS, row,
-            ts_cols=("week_start", "start_ts", "end_ts", "created_at", "updated_at"),
-        )
+        return self._row_to_dict(self._CALENDAR_COLS, row, ts_cols=self._CALENDAR_TS)
+
+    def get_calendar_entry_by_provider_event(
+        self, user_id: str, provider_event_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Look up an entry by its Google Calendar event id — used by the pull
+        leg to dedupe (our own pushed echo) and to update an imported event."""
+        row = self._con.execute(
+            f"SELECT {', '.join(self._CALENDAR_COLS)} FROM calendar_entries "
+            "WHERE user_id = ? AND provider_event_id = ?",
+            [user_id, provider_event_id],
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(self._CALENDAR_COLS, row, ts_cols=self._CALENDAR_TS)
 
     def list_calendar_entries(
         self,
@@ -2366,12 +2450,34 @@ class DuckDBStorage(StorageBackend):
             params,
         ).fetchall()
         return [
-            self._row_to_dict(
-                self._CALENDAR_COLS, r,
-                ts_cols=("week_start", "start_ts", "end_ts", "created_at", "updated_at"),
-            )
+            self._row_to_dict(self._CALENDAR_COLS, r, ts_cols=self._CALENDAR_TS)
             for r in rows
         ]
+
+    def list_calendar_entries_to_push(self, user_id: str) -> List[Dict[str, Any]]:
+        """Entries we own (source != 'gcal') with a concrete start that are new
+        or have been locally edited since the last push (synced_at is NULL or
+        older than updated_at). The calendar-sync push leg iterates these."""
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._CALENDAR_COLS)} FROM calendar_entries "
+            "WHERE user_id = ? AND source != 'gcal' AND start_ts IS NOT NULL "
+            "AND (synced_at IS NULL OR updated_at > synced_at) "
+            "ORDER BY start_ts",
+            [user_id],
+        ).fetchall()
+        return [
+            self._row_to_dict(self._CALENDAR_COLS, r, ts_cols=self._CALENDAR_TS)
+            for r in rows
+        ]
+
+    def mark_calendar_pushed(self, entry_id: str, provider_event_id: str) -> None:
+        """Stamp an entry as reconciled with the provider: record the event id +
+        synced_at. Deliberately does NOT bump updated_at, so the dirty-check
+        (updated_at > synced_at) only fires again on a real local edit."""
+        self._con.execute(
+            "UPDATE calendar_entries SET provider_event_id = ?, synced_at = now() WHERE id = ?",
+            [provider_event_id, entry_id],
+        )
 
     def update_calendar_entry(self, entry_id: str, **fields: Any) -> None:
         allowed = {
@@ -2887,9 +2993,18 @@ class DuckDBStorage(StorageBackend):
     def list_connected_email_accounts(self) -> List[Dict[str, Any]]:
         """All connected email accounts across ALL users — the R3 daemon iterates
         these to know whose Gmail to sync."""
+        return self._list_connected_accounts("email")
+
+    def list_connected_calendar_accounts(self) -> List[Dict[str, Any]]:
+        """All connected calendar accounts across ALL users — the R4 calendar-sync
+        daemon iterates these to know whose Google Calendar to reconcile."""
+        return self._list_connected_accounts("calendar")
+
+    def _list_connected_accounts(self, kind: str) -> List[Dict[str, Any]]:
         rows = self._con.execute(
             f"SELECT {', '.join(self._INTEGRATION_COLS)} FROM integration_accounts "
-            "WHERE kind = 'email' AND status = 'connected' ORDER BY connected_at",
+            "WHERE kind = ? AND status = 'connected' ORDER BY connected_at",
+            [kind],
         ).fetchall()
         return [
             self._row_to_dict(
@@ -3015,6 +3130,111 @@ class DuckDBStorage(StorageBackend):
         return [
             self._row_to_dict(
                 self._EMAIL_SYNC_COLS, r,
+                json_cols=(("progress_json", "progress"),),
+                ts_cols=("created_at", "started_at", "finished_at"),
+            )
+            for r in rows
+        ]
+
+    # calendar_sync_runs (R4 part 2) -------------------------------------
+    # Mirrors email_sync_runs but counts entries reconciled per direction
+    # (pushed / pulled) instead of messages_seen / activities_touched.
+
+    _CALENDAR_SYNC_COLS = (
+        "id", "user_id", "status", "trigger", "pushed", "pulled",
+        "progress_json", "error", "created_at", "started_at", "finished_at",
+    )
+
+    def create_calendar_sync_run(self, *, user_id: str, trigger: str = "manual") -> str:
+        import uuid
+        run_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO calendar_sync_runs (id, user_id, status, trigger, progress_json, created_at)
+            VALUES (?, ?, 'queued', ?, ?, now())
+            """,
+            [run_id, user_id, trigger, json.dumps({"phase": "queued"})],
+        )
+        return run_id
+
+    def claim_next_queued_calendar_sync_run(self) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            """
+            UPDATE calendar_sync_runs
+               SET status = 'running', started_at = now(),
+                   progress_json = json_object('phase', 'starting')
+             WHERE id = (
+                 SELECT id FROM calendar_sync_runs WHERE status = 'queued'
+                 ORDER BY created_at LIMIT 1
+             )
+            RETURNING id
+            """,
+        ).fetchone()
+        return self.get_calendar_sync_run(row[0]) if row else None
+
+    def update_calendar_sync_run(
+        self,
+        run_id: str,
+        *,
+        status: Optional[str] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        pushed: Optional[int] = None,
+        pulled: Optional[int] = None,
+        error: Optional[str] = None,
+        finished: bool = False,
+    ) -> None:
+        sets: List[str] = []
+        params: List[Any] = []
+        if status is not None:
+            sets.append("status = ?"); params.append(status)
+        if progress is not None:
+            sets.append("progress_json = ?"); params.append(json.dumps(progress, ensure_ascii=False))
+        if pushed is not None:
+            sets.append("pushed = ?"); params.append(pushed)
+        if pulled is not None:
+            sets.append("pulled = ?"); params.append(pulled)
+        if error is not None:
+            sets.append("error = ?"); params.append(error)
+        if finished:
+            sets.append("finished_at = now()")
+        if not sets:
+            return
+        params.append(run_id)
+        self._con.execute(
+            f"UPDATE calendar_sync_runs SET {', '.join(sets)} WHERE id = ?", params
+        )
+
+    def requeue_stale_calendar_sync_runs(self) -> int:
+        rows = self._con.execute(
+            "UPDATE calendar_sync_runs SET status = 'queued', started_at = NULL "
+            "WHERE status = 'running' RETURNING id",
+        ).fetchall()
+        if rows:
+            logger.warning("[calendar-sync] re-queued %d stale run(s) after restart", len(rows))
+        return len(rows)
+
+    def get_calendar_sync_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {', '.join(self._CALENDAR_SYNC_COLS)} FROM calendar_sync_runs WHERE id = ?",
+            [run_id],
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(
+            self._CALENDAR_SYNC_COLS, row,
+            json_cols=(("progress_json", "progress"),),
+            ts_cols=("created_at", "started_at", "finished_at"),
+        )
+
+    def list_calendar_sync_runs(self, limit: int = 50) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._CALENDAR_SYNC_COLS)} FROM calendar_sync_runs "
+            "ORDER BY created_at DESC LIMIT ?",
+            [limit],
+        ).fetchall()
+        return [
+            self._row_to_dict(
+                self._CALENDAR_SYNC_COLS, r,
                 json_cols=(("progress_json", "progress"),),
                 ts_cols=("created_at", "started_at", "finished_at"),
             )

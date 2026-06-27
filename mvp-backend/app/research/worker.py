@@ -14,6 +14,7 @@ so the worker is unit-testable with a fake that does no LLM/network calls.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from typing import Any, Callable, Dict, List, Optional
 
@@ -22,33 +23,59 @@ logger = logging.getLogger(__name__)
 DiscoverFn = Callable[..., List[Dict[str, Any]]]
 
 
+def _default_concurrency() -> int:
+    """How many runs execute at once. Discovery is I/O-bound (the model + Tavily
+    calls release the GIL on network waits), so a small thread pool gives real
+    parallelism on the single instance and removes head-of-line blocking when
+    several parents discover at the same time. Bounded to keep us under the
+    OpenAI/Tavily rate ceilings; raise via env as the beta grows."""
+    try:
+        n = int(os.getenv("RESEARCH_WORKER_CONCURRENCY", "3"))
+    except (TypeError, ValueError):
+        n = 3
+    return max(1, min(n, 16))
+
+
 class ResearchWorker:
-    def __init__(self, storage: Any, discover_fn: DiscoverFn, poll_interval: float = 5.0) -> None:
+    def __init__(
+        self,
+        storage: Any,
+        discover_fn: DiscoverFn,
+        poll_interval: float = 5.0,
+        concurrency: Optional[int] = None,
+    ) -> None:
         self._storage = storage
         self._discover = discover_fn
         self._poll = poll_interval
+        self._concurrency = concurrency if concurrency is not None else _default_concurrency()
         self._stop = threading.Event()
         self._wake = threading.Event()
-        self._thread: Optional[threading.Thread] = None
+        self._threads: List[threading.Thread] = []
 
     # ── lifecycle ────────────────────────────────────────────────────
     def start(self) -> None:
-        if self._thread and self._thread.is_alive():
+        if any(t.is_alive() for t in self._threads):
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._loop, name="research-worker", daemon=True)
-        self._thread.start()
-        logger.info("[research] worker started")
+        self._threads = []
+        for i in range(self._concurrency):
+            t = threading.Thread(target=self._loop, name=f"research-worker-{i}", daemon=True)
+            t.start()
+            self._threads.append(t)
+        logger.info("[research] worker started (%d threads)", self._concurrency)
 
     def notify(self) -> None:
-        """Wake the worker immediately (called by the enqueue endpoint)."""
+        """Wake idle workers immediately (called by the enqueue endpoint). A
+        single set() releases all threads waiting on the event; each then claims
+        runs atomically until the queue drains, so wakes are never lost beyond
+        the poll-interval fallback."""
         self._wake.set()
 
     def stop(self, timeout: float = 3.0) -> None:
         self._stop.set()
         self._wake.set()
-        if self._thread:
-            self._thread.join(timeout)
+        for t in self._threads:
+            t.join(timeout)
         logger.info("[research] worker stopped")
 
     # ── loop ─────────────────────────────────────────────────────────

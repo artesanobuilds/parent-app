@@ -6,6 +6,7 @@ import {
   FolderOpen,
   Download,
   Mailbox,
+  CalendarSync as CalendarSyncIcon,
 } from "lucide-react";
 import { toast } from "../shared/Toast";
 
@@ -15,6 +16,7 @@ const navItems = [
   { to: "/community", label: "Community", icon: Users },
   { to: "/categories", label: "Categories", icon: FolderOpen },
   { to: "/email-sync", label: "Email Sync", icon: Mailbox },
+  { to: "/calendar-sync", label: "Calendar Sync", icon: CalendarSyncIcon },
 ];
 
 export default function CMSLayout() {

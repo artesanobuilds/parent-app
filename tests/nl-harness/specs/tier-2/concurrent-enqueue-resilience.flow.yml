@@ -1,0 +1,35 @@
+spec:
+  name: concurrent-enqueue-resilience
+  tier: 3
+  modules: [research, reliability]
+  intent: >
+    Distributed-systems guard: N parents fire discovery runs at the exact same
+    moment. The enqueue path (token issue + create_research_run + worker notify)
+    and the atomic claim must hold up under concurrent writes through the single
+    DuckDB writer — every request succeeds with a valid handle, distinct users
+    get distinct runs, and nothing 5xx's or corrupts. This is the black-box
+    counterpart to the offline atomic-claim test; the worker pool itself is what
+    keeps the runs from serializing once claimed.
+
+  personas:
+    parents:
+      preset: new-parent
+      count: 4    # > RESEARCH_WORKER_CONCURRENCY default (3), so some queue too
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "RUN_OPENAI_FLOWS=true (runs execute against OpenAI; skipped otherwise)"
+    - "Backend RATE_LIMIT_AUTH_PER_HOUR is raised (>=1000); provisioning N parents
+       issues N tokens and the default cap of 5/hour would 429 the setup"
+
+  invariants:
+    - "All N concurrent POST /research/runs return 200 (no 5xx under write contention)"
+    - "Every response carries a valid run_id"
+    - "Distinct users get distinct run_ids (no claim collision / row corruption)"
+    - "Each created run is cancelled in cleanup to bound spend"
+
+  boundary_contracts:
+    - endpoint: POST /research/runs
+      as: parent
+      status: 200
+      response_includes: [run_id, status]
