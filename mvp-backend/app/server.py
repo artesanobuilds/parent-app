@@ -43,6 +43,11 @@ if not verbose_external_logs:
     for noisy in ("httpx", "httpcore", "openai", "urllib3", "langchain", "langgraph"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
+# Error tracking (gated on SENTRY_DSN — no-op if unset). Init as early as possible
+# so it wraps app creation + the workers. See app/observability + setup/sentry-setup.md.
+from app.observability import init_sentry
+init_sentry()
+
 storage_backend = DuckDBStorage()
 content_service.init(storage_backend)
 chat_memory = MemoryRepository()
@@ -116,6 +121,13 @@ from app.email_sync.router import router as email_sync_router
 app.include_router(email_sync_router)
 from app.calendar_sync.router import router as calendar_sync_router
 app.include_router(calendar_sync_router)
+
+# Metrics via OpenTelemetry → Grafana Cloud (gated on OTEL_EXPORTER_OTLP_ENDPOINT —
+# no-op if unset). Instrument after the app + routers exist; register the domain
+# gauges that read research-run health. See setup/grafana-observability-setup.md.
+from app.observability import init_otel, register_domain_metrics
+if init_otel(app):
+    register_domain_metrics(storage_backend)
 
 # Lock CORS to known origins. Env: ALLOWED_ORIGINS=https://a.com,https://b.com
 # Default keeps localhost dev usable. iOS does not need CORS (not a browser).

@@ -2094,6 +2094,36 @@ class DuckDBStorage(StorageBackend):
         ).fetchall()
         return [self._research_run_row_to_dict(r) for r in rows]
 
+    def research_run_health(self, window_minutes: int = 60) -> Dict[str, Any]:
+        """Aggregate research-run health over the last `window_minutes` for the
+        observability gauges (failure rate, worst queue wait, in-flight count).
+        Cheap: count/filter over the (status, created_at) indexes."""
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+        row = self._con.execute(
+            """
+            SELECT
+                count(*)                                              AS total,
+                count(*) FILTER (WHERE status = 'failed')             AS failed,
+                count(*) FILTER (WHERE status IN ('queued','running')) AS in_flight,
+                coalesce(max(CASE WHEN started_at IS NOT NULL
+                     THEN datediff('second', created_at, started_at) END), 0) AS max_queue_wait_s
+            FROM research_runs
+            WHERE created_at > ?
+            """,
+            [cutoff],
+        ).fetchone()
+        total, failed, in_flight, max_qw = (row or (0, 0, 0, 0))
+        return {
+            "window_minutes": window_minutes,
+            "total": int(total or 0),
+            "failed": int(failed or 0),
+            "in_flight": int(in_flight or 0),
+            "failure_rate": (float(failed) / float(total)) if total else 0.0,
+            "max_queue_wait_s": int(max_qw or 0),
+        }
+
     def get_active_research_run(self, user_id: str) -> Optional[Dict[str, Any]]:
         """The user's most recent still-in-flight run (queued or running), if any.
         Used to dedupe rapid re-submits (double-taps) so they reuse the run in

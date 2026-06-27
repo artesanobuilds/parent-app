@@ -35,3 +35,9 @@ httpx==0.28.1
 cryptography==49.0.0
 google-api-python-client==2.197.0
 google-auth-oauthlib==1.4.0
+# Observability "last mile" (gated on env vars; see app/observability + setup/).
+# Sentry = error tracking; OpenTelemetry = metrics via OTLP push → Grafana Cloud.
+sentry-sdk[fastapi]==2.63.0
+opentelemetry-distro==0.64b0
+opentelemetry-exporter-otlp==1.43.0
+opentelemetry-instrumentation-fastapi==0.64b0
