@@ -1,0 +1,32 @@
+spec:
+  name: research-worker-saturation
+  tier: 2
+  modules: [research, reliability, fault-injection]
+  intent: >
+    Distributed-systems guard: saturate the worker pool. With a healthy mock
+    OpenAI (each run completes in one fast canned call), fire N > pool-size runs
+    at once and prove the whole pipeline — concurrent enqueue, pool drain,
+    completion — lands every run at done with none stranded or lost. This is the
+    deterministic, free, end-to-end counterpart to the offline atomic-claim and
+    worker-concurrency unit tests.
+
+  personas:
+    parents:
+      preset: new-parent
+      count: 5    # > RESEARCH_WORKER_CONCURRENCY default (3)
+
+  preconditions:
+    - "Run via tools/run-fault-flows.sh (mock OpenAI up, backend OPENAI_BASE_URL→mock)"
+    - "OPENAI_MOCK_CONTROL_URL set so flow_ctx.fault is available"
+    - "Backend RATE_LIMIT_AUTH_PER_HOUR >= 1000 (provisioning N personas issues N tokens)"
+
+  invariants:
+    - "All N concurrent POST /research/runs return 200"
+    - "Every run drains to status=done (pool processes the backlog, none stranded queued)"
+    - "No run ends failed (the healthy mock can't fail a run)"
+
+  boundary_contracts:
+    - endpoint: POST /research/runs
+      as: parent
+      status: 200
+      response_includes: [run_id, status]

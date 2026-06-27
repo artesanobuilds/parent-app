@@ -47,6 +47,22 @@ class FlowContext:
     _consent_agreement_version_override: Optional[str] = None
     _cleanups: list[_CleanupAction] = field(default_factory=list)
     _state: dict[str, Any] = field(default_factory=dict)
+    _fault: Any = None
+
+    # ── Fault injection (Playbook §4.8) ──────────────────────────────
+
+    @property
+    def fault(self):
+        """Failure-injection handle for the mock OpenAI dependency. `.available`
+        is False unless OPENAI_MOCK_CONTROL_URL is set (the orchestrated fault
+        env), so fault flows skip cleanly in the normal harness."""
+        if self._fault is None:
+            import os
+
+            from .fault import FaultController
+
+            self._fault = FaultController(os.getenv("OPENAI_MOCK_CONTROL_URL"))
+        return self._fault
 
     # ── HTTP verb passthrough ────────────────────────────────────────
 

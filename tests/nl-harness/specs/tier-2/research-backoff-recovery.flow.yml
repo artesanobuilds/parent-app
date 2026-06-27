@@ -1,0 +1,30 @@
+spec:
+  name: research-backoff-recovery
+  tier: 2
+  modules: [research, reliability, fault-injection]
+  intent: >
+    Failure-injection guard for the OpenAI backoff strategy. With a mock OpenAI
+    in the path (Playbook §4.8), inject a transient burst of 429s and prove the
+    research run rides through them to completion — the production fix for a
+    rate-limit burst from concurrent runs. Deterministic + free (no real OpenAI).
+
+  personas:
+    parent:
+      preset: new-parent
+
+  preconditions:
+    - "Run via tools/run-fault-flows.sh (mock OpenAI up, backend OPENAI_BASE_URL→mock)"
+    - "OPENAI_MOCK_CONTROL_URL set so flow_ctx.fault is available"
+
+  invariants:
+    - "ctx.fault('openai','rate_limit', count=2) makes the next 2 model calls 429"
+    - "POST /research/runs returns 200 (enqueue unaffected by the upstream fault)"
+    - "The run reaches status=done despite the 429s (backoff retried through them)"
+    - "The mock recorded >=2 faults — the retry path was actually exercised"
+    - "The fault is reset at teardown"
+
+  boundary_contracts:
+    - endpoint: POST /research/runs
+      as: parent
+      status: 200
+      response_includes: [run_id, status]

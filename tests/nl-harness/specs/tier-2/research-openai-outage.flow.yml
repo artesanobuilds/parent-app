@@ -1,0 +1,32 @@
+spec:
+  name: research-openai-outage
+  tier: 2
+  modules: [research, reliability, fault-injection]
+  intent: >
+    Failure-injection guard for graceful degradation when OpenAI is fully down.
+    Inject a hard outage (every model call 503s), and prove the run ends FAILED
+    cleanly — the enqueue API stays 200, the poll endpoint never cascades a 5xx,
+    and the failed run carries an error. A dead dependency must not hang the run
+    or crash the API.
+
+  personas:
+    parent:
+      preset: new-parent
+
+  preconditions:
+    - "Run via tools/run-fault-flows.sh (mock OpenAI up, backend OPENAI_BASE_URL→mock)"
+    - "OPENAI_MOCK_CONTROL_URL set so flow_ctx.fault is available"
+
+  invariants:
+    - "ctx.fault('openai','down') makes every model call 503 until reset"
+    - "POST /research/runs still returns 200 (the API itself stays healthy)"
+    - "The run reaches status=failed (retries exhaust, the worker catches)"
+    - "GET /research/runs/{id} keeps returning 200 throughout (no 5xx cascade)"
+    - "The failed run carries a non-empty error message"
+    - "The fault is reset at teardown"
+
+  boundary_contracts:
+    - endpoint: POST /research/runs
+      as: parent
+      status: 200
+      response_includes: [run_id, status]
