@@ -2020,6 +2020,36 @@ class DuckDBStorage(StorageBackend):
             params,
         )
 
+    def finalize_run_if_running(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        candidate_count: Optional[int] = None,
+        error: Optional[str] = None,
+        progress: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Write a terminal status (done/failed) ONLY if the run is still
+        'running'. Returns True if it transitioned, False if the run had already
+        left 'running' (e.g. the parent cancelled it mid-run). The conditional
+        UPDATE closes the cancel-clobber race: a finished worker can't resurrect
+        a cancelled run back to done/failed."""
+        sets: List[str] = ["status = ?", "finished_at = now()"]
+        params: List[Any] = [status]
+        if candidate_count is not None:
+            sets.append("candidate_count = ?"); params.append(candidate_count)
+        if error is not None:
+            sets.append("error = ?"); params.append(error)
+        if progress is not None:
+            sets.append("progress_json = ?"); params.append(json.dumps(progress, ensure_ascii=False))
+        params.append(run_id)
+        row = self._con.execute(
+            f"UPDATE research_runs SET {', '.join(sets)} "
+            "WHERE id = ? AND status = 'running' RETURNING id",
+            params,
+        ).fetchone()
+        return row is not None
+
     def requeue_stale_running_runs(self) -> int:
         """Startup sweeper: a restart kills the in-flight worker thread, so any
         run still 'running' is orphaned. Re-queue it (re-runs are idempotent).

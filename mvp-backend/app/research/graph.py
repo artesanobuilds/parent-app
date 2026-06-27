@@ -200,6 +200,10 @@ RESEARCH_RECURSION_LIMIT = int(os.getenv("RESEARCH_RECURSION_LIMIT", "80"))
 # rate limit. ChatOpenAI retries 429/5xx with exponential backoff, so a burst
 # degrades to "slightly slower" instead of a failed run. Bump via env if needed.
 RESEARCH_LLM_MAX_RETRIES = int(os.getenv("RESEARCH_LLM_MAX_RETRIES", "4"))
+# Per-call timeout so a HUNG upstream can't pin a worker slot for the SDK default
+# (~10 min). Real research calls take ~7s, so 60s only trips on a genuine stall.
+# (A full per-run wall-clock cap + stale-run reaper is still roadmapped.)
+RESEARCH_LLM_TIMEOUT_S = float(os.getenv("RESEARCH_LLM_TIMEOUT_S", "60"))
 
 
 class ActivityCandidate(BaseModel):
@@ -322,7 +326,8 @@ def build_research_model() -> ChatOpenAI:
     so the retry/backoff wiring (RESEARCH_LLM_MAX_RETRIES) is unit-assertable —
     a 429 burst from concurrent runs must retry, not fail the run."""
     return ChatOpenAI(
-        model=RESEARCH_MODEL, stream_usage=True, max_retries=RESEARCH_LLM_MAX_RETRIES
+        model=RESEARCH_MODEL, stream_usage=True,
+        max_retries=RESEARCH_LLM_MAX_RETRIES, timeout=RESEARCH_LLM_TIMEOUT_S,
     )
 
 

@@ -121,22 +121,29 @@ class ResearchWorker:
             n = self._storage.insert_activity_candidates(
                 run_id=run_id, user_id=user_id, candidates=candidates
             )
-            self._storage.update_research_run(
+            # Finalize only if the run is still 'running'. If the parent cancelled
+            # it during the (long) discovery, don't resurrect it to done — drop the
+            # work so a cancel actually sticks (terminal state stays terminal).
+            if self._storage.finalize_run_if_running(
                 run_id,
                 status="done",
                 candidate_count=n,
                 progress={"phase": "done", "candidates_found": n},
-                finished=True,
-            )
-            logger.info("[research] run %s done with %d candidate(s)", run_id, n)
+            ):
+                logger.info("[research] run %s done with %d candidate(s)", run_id, n)
+            else:
+                self._storage.insert_activity_candidates(
+                    run_id=run_id, user_id=user_id, candidates=[]
+                )  # discard candidates collected for a now-cancelled run
+                logger.info("[research] run %s left 'running' mid-flight (cancelled?) — discarded %d candidate(s)", run_id, n)
         except Exception as exc:  # noqa: BLE001 - any failure marks the run failed
             logger.exception("[research] run %s failed", run_id)
-            self._storage.update_research_run(
+            # Conditional too: a cancel during discovery must not be clobbered to failed.
+            self._storage.finalize_run_if_running(
                 run_id,
                 status="failed",
                 error=str(exc)[:1000],
                 progress={"phase": "failed"},
-                finished=True,
             )
 
 
