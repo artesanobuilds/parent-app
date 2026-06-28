@@ -99,10 +99,12 @@ final class PlanViewModel: ObservableObject {
     }
 
     /// "8 of 25 found" so the parent knows the target we're shooting for. While
-    /// queued there's no count yet — show the wait, not "0 found".
+    /// queued there's no count yet — show the wait, not "0 found". Once we reach the
+    /// target the "of N" is meaningless (the agent can overshoot the soft aim, e.g.
+    /// 27 good options) — just show the count so it never reads "27 of 25".
     var discoveryCountLabel: String {
         if isQueued { return "Starting shortly — you're in line" }
-        if let target = runStatus?.progress?.candidatesTarget, target > 0 {
+        if let target = runStatus?.progress?.candidatesTarget, target > 0, discoveryFound < target {
             return "\(discoveryFound) of \(target) found"
         }
         return "\(discoveryFound) found"

@@ -208,7 +208,11 @@ export default function Discovery() {
           {typeof progress?.candidates_found === 'number' && (
             <div className="text-accent text-sm mt-200">
               {progress.candidates_found}
-              {progress.candidates_target ? ` of ${progress.candidates_target}` : ''} found
+              {/* drop "of N" once we hit the soft target so it never reads "27 of 25" */}
+              {progress.candidates_target && progress.candidates_found < progress.candidates_target
+                ? ` of ${progress.candidates_target}`
+                : ''}{' '}
+              found
             </div>
           )}
           {Array.isArray(progress?.recent) && progress.recent.length > 0 && (
