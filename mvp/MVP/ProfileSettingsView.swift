@@ -12,6 +12,7 @@ struct ProfileSettingsView: View {
     @State private var family = FamilyProfileDTO()
     @State private var kidKeys: [String] = []
     @State private var showAddKid = false
+    @State private var pendingDeleteKey: String?
     @State private var errorMessage: String?
 
     var body: some View {
@@ -39,6 +40,13 @@ struct ProfileSettingsView: View {
                                 kidKey: key, kid: family.children?[key] ?? ChildProfileDTO()
                             ) { apply($0) }
                         } label: { kidRow(key) }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                pendingDeleteKey = key
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                     }
                     Button { showAddKid = true } label: {
                         Label("Add a kid", systemImage: "plus.circle.fill")
@@ -68,6 +76,21 @@ struct ProfileSettingsView: View {
         .background(Color.bgCanvas.ignoresSafeArea())
         .sheet(isPresented: $showAddKid) {
             AddKidSheet(baseURL: configuration.baseURL, userID: userID) { apply($0) }
+        }
+        .confirmationDialog(
+            pendingDeleteKey.map { "Delete \(family.children?[$0]?.name ?? $0)'s profile?" } ?? "",
+            isPresented: Binding(
+                get: { pendingDeleteKey != nil },
+                set: { if !$0 { pendingDeleteKey = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete profile", role: .destructive) {
+                if let key = pendingDeleteKey { deleteKid(key) }
+            }
+            Button("Cancel", role: .cancel) { pendingDeleteKey = nil }
+        } message: {
+            Text("This permanently removes this child and everything saved about them. This can't be undone.")
         }
         .task { await load() }
     }
@@ -131,6 +154,21 @@ struct ProfileSettingsView: View {
     private func apply(_ fam: FamilyProfileDTO) {
         family = fam
         kidKeys = (fam.children ?? [:]).keys.sorted()
+    }
+
+    private func deleteKid(_ key: String) {
+        guard let baseURL = configuration.baseURL else { return }
+        pendingDeleteKey = nil
+        Task {
+            do {
+                let fam = try await ProfileService.deleteKid(
+                    baseURL: baseURL, userID: userID, name: key
+                )
+                apply(fam)
+            } catch {
+                errorMessage = "Couldn't delete that profile. Check your connection and try again."
+            }
+        }
     }
 
     private func load() async {

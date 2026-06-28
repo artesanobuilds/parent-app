@@ -158,6 +158,26 @@ enum ProfileService {
         )
     }
 
+    /// Remove a child profile (DELETE /profile/kids/{name}). Returns the updated
+    /// family so the caller can refresh. Scoped to the authenticated user.
+    @discardableResult
+    static func deleteKid(
+        baseURL: URL, userID: String, name: String
+    ) async throws -> FamilyProfileDTO {
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let url = baseURL.appendingPathComponent("profile/kids/\(encoded)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        for (k, v) in await authHeader(userID: userID, baseURL: baseURL) {
+            request.setValue(v, forHTTPHeaderField: k)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(FamilyProfileDTO.self, from: data)
+    }
+
     private static func patch(
         path: String, baseURL: URL, userID: String, fields: [String: Any]
     ) async throws -> FamilyProfileDTO {

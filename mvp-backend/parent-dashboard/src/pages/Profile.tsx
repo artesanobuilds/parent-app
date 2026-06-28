@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import { getProfile, updateProfile, updateKid } from '../api';
+import { getProfile, updateProfile, updateKid, deleteKid } from '../api';
 import type { ChildProfile, FamilyProfile, ParentProfile } from '../types';
 
 // Settings → Profile editor (web parity, 2026-06-28). Edits the full parent +
@@ -23,6 +23,7 @@ export default function Profile() {
   const [kids, setKids] = useState<Record<string, ChildProfile>>({});
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -68,6 +69,16 @@ export default function Profile() {
 
   function setKid(key: string, patch: Partial<ChildProfile>) {
     setKids((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+  }
+
+  async function removeKid(key: string) {
+    try {
+      apply(await deleteKid(key));
+      setConfirmDeleteKey(null);
+      flash('Removed.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Delete failed');
+    }
   }
 
   return (
@@ -147,7 +158,40 @@ export default function Profile() {
               <Field label="Teacher notes" value={kid.teacher_notes} onChange={(v) => setKid(key, { teacher_notes: v })} />
               <Field label="Safety flags" value={kid.safety_flags} onChange={(v) => setKid(key, { safety_flags: v })} />
             </Learned>
-            <SaveBar onSave={() => saveKid(key)} />
+            <div className="mt-500 flex items-center gap-300">
+              <button
+                onClick={() => saveKid(key)}
+                className="bg-accent text-white px-500 py-300 rounded-lg text-sm font-medium"
+              >
+                Save
+              </button>
+              {confirmDeleteKey === key ? (
+                <div className="flex items-center gap-300">
+                  <span className="text-ink-secondary text-sm">
+                    Delete {kid.name ?? key}? This can't be undone.
+                  </span>
+                  <button
+                    onClick={() => removeKid(key)}
+                    className="bg-error text-white px-400 py-300 rounded-lg text-sm font-medium"
+                  >
+                    Delete profile
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteKey(null)}
+                    className="px-400 py-300 rounded-lg text-sm text-ink-secondary hover:bg-elevated"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmDeleteKey(key)}
+                  className="ml-auto text-error text-sm font-medium hover:underline"
+                >
+                  Delete profile
+                </button>
+              )}
+            </div>
           </Card>
         );
       })}

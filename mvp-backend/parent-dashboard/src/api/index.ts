@@ -59,6 +59,12 @@ export const updateKid = (name: string, fields: Record<string, unknown>) =>
     body: JSON.stringify({ user_id: uid(), ...fields }),
   });
 
+// Remove a child profile.
+export const deleteKid = (name: string) =>
+  api<FamilyProfile>(`/profile/kids/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+
 // ── Discovery ───────────────────────────────────────────────────────
 export const createResearchRun = (
   params?: Record<string, unknown>,

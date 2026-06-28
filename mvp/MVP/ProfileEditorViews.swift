@@ -241,6 +241,8 @@ struct KidProfileEditor: View {
     @State private var draft: ChildProfileDTO
     @State private var ageText: String
     @State private var saving = false
+    @State private var deleting = false
+    @State private var confirmingDelete = false
     @State private var error: String?
     @Environment(\.dismiss) private var dismiss
 
@@ -264,6 +266,22 @@ struct KidProfileEditor: View {
                 pickerRow("Grade band", ProfileOptions.gradeBand, $draft.gradeBand.orEmpty)
             }
             if let error { Text(error).font(.hearthBodySM).foregroundColor(.statusError) }
+
+            // Destructive: remove this child entirely. Confirmed before it runs.
+            Section {
+                Button(role: .destructive) {
+                    confirmingDelete = true
+                } label: {
+                    HStack {
+                        if deleting { ProgressView().padding(.trailing, 4) }
+                        Text(deleting ? "Deleting…" : "Delete profile")
+                    }
+                }
+                .disabled(saving || deleting)
+            } footer: {
+                Text("Removes \(draft.name ?? kidKey) and everything saved about them.")
+                    .font(.hearthBodySM).foregroundColor(.inkMuted)
+            }
         }
         .scrollContentBackground(.hidden)
         .background(Color.bgCanvas.ignoresSafeArea())
@@ -271,8 +289,35 @@ struct KidProfileEditor: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button(saving ? "Saving…" : "Save") { save() }.disabled(saving)
+                Button(saving ? "Saving…" : "Save") { save() }.disabled(saving || deleting)
             }
+        }
+        .confirmationDialog(
+            "Delete \(draft.name ?? kidKey)'s profile?",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete profile", role: .destructive) { delete() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently removes \(draft.name ?? kidKey) and everything saved about them. This can't be undone.")
+        }
+    }
+
+    private func delete() {
+        guard let baseURL else { return }
+        deleting = true; error = nil
+        Task {
+            do {
+                let fam = try await ProfileService.deleteKid(
+                    baseURL: baseURL, userID: userID, name: kidKey
+                )
+                onSaved(fam)
+                dismiss()
+            } catch {
+                self.error = "Couldn't delete. Check your connection and try again."
+            }
+            deleting = false
         }
     }
 
