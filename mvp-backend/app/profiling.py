@@ -169,6 +169,15 @@ class ProfilingService:
         family.children[child_name].apply_update(child_updates, replace_lists=True)
         return {child_name: asdict(family.children[child_name])}
 
+    def remove_child_profile(self, user_id: str, child_name: str) -> bool:
+        """Editor-facing kid removal. Returns True if a child was removed. Used to
+        delete a kid the parent added by mistake or a duplicate the coach created
+        before it learned the real name."""
+        family = self._get_or_create_family(user_id)
+        existed = child_name in family.children
+        family.children.pop(child_name, None)
+        return existed
+
     def get_family_profile(self, user_id: str) -> Dict[str, Any]:
         family = self._get_or_create_family(user_id)
         return family.snapshot()

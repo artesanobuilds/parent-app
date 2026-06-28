@@ -889,6 +889,18 @@ def patch_kid(
     return profiling_service.get_family_profile(user_id)
 
 
+@app.delete("/profile/kids/{kid_name}")
+def delete_kid(
+    kid_name: str,
+    user_id: str = Depends(current_user),
+):
+    """Remove a child profile (a mistakenly-added kid, or a duplicate the coach
+    created before it learned the real name). Scoped to the authenticated user."""
+    profiling_service.remove_child_profile(user_id, kid_name)
+    persist_state(user_id)
+    return profiling_service.get_family_profile(user_id)
+
+
 @app.post("/feedback")
 def submit_feedback(req: FeedbackRequest, user_id: str = Depends(current_user)):
     """

@@ -135,5 +135,14 @@ def test_patch_profile_and_add_kid_round_trip():
             got = client.get("/profile", headers=auth).json()
             assert got["parent"]["goals"] == ["more patience"]
             assert got["children"]["Ceiba"]["grade_band"] == "elementary"
+
+            # ── remove a kid via DELETE /profile/kids/{name} ──────────
+            assert client.delete("/profile/kids/Ceiba").status_code == 401  # unauth
+            r = client.delete("/profile/kids/Ceiba", headers=auth)
+            assert r.status_code == 200, r.text
+            assert "Ceiba" not in r.json()["children"]
+            # idempotent: deleting a non-existent kid is a no-op 200
+            assert client.delete("/profile/kids/Nope", headers=auth).status_code == 200
+            assert "Ceiba" not in client.get("/profile", headers=auth).json()["children"]
     finally:
         _reconnect_shared_storage(server)
