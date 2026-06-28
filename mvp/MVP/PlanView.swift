@@ -160,6 +160,72 @@ struct PlanView: View {
                         )
                 )
 
+            // Search radius from the ZIP.
+            VStack(alignment: .leading, spacing: .hearth300) {
+                Text("Search radius")
+                    .font(.hearthBodySM.weight(.semibold))
+                    .foregroundColor(.inkSecondary)
+                Picker("Search radius", selection: $viewModel.radiusMiles) {
+                    ForEach(viewModel.radiusOptions, id: \.self) { mi in
+                        Text("\(mi) mi").tag(mi)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            // Optional free-form focus — hidden until the parent asks for it, so the
+            // default form is just ZIP + radius.
+            if viewModel.showFocus {
+                VStack(alignment: .leading, spacing: .hearth300) {
+                    HStack {
+                        Text("Focus (optional)")
+                            .font(.hearthBodySM.weight(.semibold))
+                            .foregroundColor(.inkSecondary)
+                        Spacer()
+                        Button("Remove") {
+                            withAnimation(.hearthFast) {
+                                viewModel.showFocus = false
+                                viewModel.focusText = ""
+                            }
+                        }
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkMuted)
+                    }
+                    ZStack(alignment: .topLeading) {
+                        if viewModel.focusText.isEmpty {
+                            Text("e.g. art camps only · physical activity · just for Ceiba")
+                                .font(.hearthBodyMD)
+                                .foregroundColor(.inkMuted)
+                                .padding(.horizontal, .hearth500 + 4)
+                                .padding(.vertical, .hearth400 + 8)
+                        }
+                        TextEditor(text: $viewModel.focusText)
+                            .font(.hearthBodyMD)
+                            .foregroundColor(.inkPrimary)
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: 72)
+                            .padding(.horizontal, .hearth400)
+                            .padding(.vertical, .hearth300)
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                            .fill(Color.bgCanvas)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                                    .stroke(Color.borderStrong, lineWidth: 1)
+                            )
+                    )
+                }
+            } else {
+                Button {
+                    withAnimation(.hearthFast) { viewModel.showFocus = true }
+                } label: {
+                    Label("Add focus (optional)", systemImage: "plus.circle")
+                        .font(.hearthBodySM.weight(.semibold))
+                        .foregroundColor(.accentDefault)
+                }
+            }
+
             Button {
                 viewModel.startDiscovery()
             } label: {

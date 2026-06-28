@@ -525,6 +525,75 @@ enum PlanService {
     // Mirrors ChatService.streamResponse: POST /cos/chat, parse `data: {...}`
     // frames (`{"type":"token","content":...}`) until `data: [DONE]`.
 
+    /// One SSE frame from `GET /research/runs/{id}/stream` — same fields as a poll
+    /// of `runStatus`, minus run_id (the client already knows it).
+    private struct ResearchStreamFrame: Decodable {
+        let type: String?
+        let status: String?
+        let progress: ResearchProgress?
+        let candidateCount: Int?
+        let error: String?
+        enum CodingKeys: String, CodingKey {
+            case type, status, progress, error
+            case candidateCount = "candidate_count"
+        }
+    }
+
+    /// Live discovery progress over SSE — the client holds ONE connection instead of
+    /// polling `runStatus` every 2s. Yields a `ResearchRunStatus` per progress frame;
+    /// finishes on the terminal frame / `[DONE]`. If it throws (e.g. a proxy that
+    /// mishandles SSE), the caller falls back to polling.
+    static func streamRun(
+        baseURL: URL,
+        userID: String,
+        runId: String
+    ) -> AsyncThrowingStream<ResearchRunStatus, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let url = baseURL.appendingPathComponent("research/runs/\(runId)/stream")
+                    var request = URLRequest(url: url)
+                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    for (k, v) in await authHeader(userID: userID, baseURL: baseURL) {
+                        request.setValue(v, forHTTPHeaderField: k)
+                    }
+                    request.timeoutInterval = 600
+                    request.cachePolicy = .reloadIgnoringLocalCacheData
+
+                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    guard let http = response as? HTTPURLResponse else {
+                        throw PlanServiceError.invalidResponse
+                    }
+                    guard (200..<300).contains(http.statusCode) else {
+                        throw PlanServiceError.httpError(http.statusCode)
+                    }
+
+                    for try await line in bytes.lines {
+                        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard trimmed.hasPrefix("data:") else { continue }
+                        var payload = trimmed.dropFirst(5)
+                        payload = payload.drop(while: { $0 == " " })
+                        if payload == "[DONE]" { break }
+                        guard !payload.isEmpty, let data = String(payload).data(using: .utf8) else { continue }
+                        if let frame = try? JSONDecoder().decode(ResearchStreamFrame.self, from: data),
+                           let status = frame.status {
+                            continuation.yield(ResearchRunStatus(
+                                runId: runId,
+                                status: status,
+                                progress: frame.progress,
+                                candidateCount: frame.candidateCount ?? 0,
+                                error: frame.error
+                            ))
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
     static func streamCosChat(
         baseURL: URL,
         userID: String,

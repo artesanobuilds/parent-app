@@ -7,6 +7,7 @@ import type {
   CalendarEntry,
   FamilyProfile,
   PlanSummary,
+  ResearchProgress,
   ResearchRun,
   ResearchRunStatus,
   Todo,
@@ -68,6 +69,54 @@ export const getCandidates = (id: string) =>
   api<{ candidates: Candidate[] }>(`/research/runs/${id}/candidates`).then(
     (r) => r.candidates,
   );
+
+// Live discovery progress over SSE — the client holds ONE connection instead of
+// polling /research/runs/{id} every 2s. `onProgress` fires per frame; resolves on
+// the terminal frame / [DONE]. Mirrors streamCosChat (fetch + reader so we can send
+// the Bearer header — EventSource can't). Caller reconciles the final state.
+export interface ResearchStreamFrame {
+  status: string;
+  progress?: ResearchProgress;
+  candidate_count?: number;
+  error?: string | null;
+}
+export async function streamResearchRun(
+  id: string,
+  onProgress: (frame: ResearchStreamFrame) => void,
+): Promise<void> {
+  const res = await fetch(`/research/runs/${id}/stream`, {
+    headers: { Authorization: `Bearer ${getToken() ?? ''}` },
+  });
+  if (!res.ok || !res.body) throw new Error(`Stream failed (${res.status})`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') return;
+      try {
+        const ev = JSON.parse(data) as Partial<ResearchStreamFrame> & { type?: string };
+        if (ev.status) {
+          onProgress({
+            status: ev.status,
+            progress: ev.progress,
+            candidate_count: ev.candidate_count,
+            error: ev.error,
+          });
+        }
+      } catch {
+        /* ignore non-JSON keepalives */
+      }
+    }
+  }
+}
 
 // ── Chief-of-staff plan ─────────────────────────────────────────────
 export const getActivities = () =>

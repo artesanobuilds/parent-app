@@ -8,9 +8,12 @@ app.server (same pattern as app.auth / app.kid_agent).
 """
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.auth import current_user, authorize_user_match
@@ -103,6 +106,57 @@ def get_run(run_id: str, user_id: str = Depends(current_user)):
         "candidate_count": run.get("candidate_count", 0),
         "error": run.get("error"),
     }
+
+
+# Stream interval / cap (env-tunable). Server-side tail of progress_json — the
+# client holds ONE connection instead of polling every 2s.
+_STREAM_INTERVAL_S = 1.0
+_STREAM_MAX_TICKS = 600  # ~10 min ceiling so a wedged run can't hold forever
+
+
+@router.get("/runs/{run_id}/stream")
+async def stream_run(run_id: str, user_id: str = Depends(current_user)):
+    """SSE: stream a run's progress so clients don't poll. Tails progress_json and
+    emits a frame whenever it changes, then a terminal `final` frame + `[DONE]`.
+    The `GET /runs/{run_id}` poll endpoint stays for fallback/back-compat."""
+    storage = _storage()
+    _require_owned_run(storage, run_id, user_id)  # ownership check before streaming (raises 404/403)
+
+    async def _gen():
+        last_payload = None
+        for _ in range(_STREAM_MAX_TICKS):
+            run = storage.get_research_run(run_id)
+            if not run:
+                yield f"data: {json.dumps({'type': 'error', 'content': 'run not found'})}\n\n"
+                return
+            payload = {
+                "type": "progress",
+                "status": run["status"],
+                "progress": run.get("progress") or {},
+                "candidate_count": run.get("candidate_count", 0),
+            }
+            if payload != last_payload:
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                last_payload = payload
+            if run["status"] in ("done", "failed", "canceled"):
+                yield (
+                    "data: "
+                    + json.dumps({
+                        "type": "final",
+                        "status": run["status"],
+                        "candidate_count": run.get("candidate_count", 0),
+                        "error": run.get("error"),
+                    }, ensure_ascii=False)
+                    + "\n\n"
+                )
+                yield "data: [DONE]\n\n"
+                return
+            await asyncio.sleep(_STREAM_INTERVAL_S)
+        # Hit the ceiling without terminating — let the client fall back to polling.
+        yield f"data: {json.dumps({'type': 'timeout'})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
 def _fit_kids(candidate: Dict[str, Any], kids: List[Dict[str, Any]]) -> List[str]:

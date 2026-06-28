@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bookmark, BookmarkCheck, Loader2 } from 'lucide-react';
 import {
   createResearchRun,
@@ -6,6 +6,7 @@ import {
   getCandidates,
   getProfile,
   getResearchRun,
+  streamResearchRun,
   trackActivity,
 } from '../api';
 import type { Candidate, ResearchProgress, TrackedActivity } from '../types';
@@ -14,9 +15,12 @@ export default function Discovery() {
   const [progress, setProgress] = useState<ResearchProgress | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [zip, setZip] = useState('');
+  const [radius, setRadius] = useState(15);
+  const [focus, setFocus] = useState('');
+  const [showFocus, setShowFocus] = useState(false);
+  const radiusOptions = [5, 10, 25, 50];
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const pollRef = useRef<number | undefined>(undefined);
 
   // R1 — "Exploring" shortlist.
   const [exploring, setExploring] = useState<TrackedActivity[]>([]);
@@ -65,13 +69,6 @@ export default function Discovery() {
     }
   }
 
-  useEffect(
-    () => () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
-    },
-    [],
-  );
-
   // Prefill the ZIP from the saved profile (don't override anything typed).
   useEffect(() => {
     getProfile()
@@ -91,31 +88,41 @@ export default function Discovery() {
     setProgress(null);
     try {
       const trimmedZip = zip.trim();
+      const params: Record<string, unknown> = { season: 'summer 2026', radius_miles: radius };
+      const f = focus.trim();
+      if (f) params.focus = f;
       const { run_id } = await createResearchRun(
-        { season: 'summer 2026' },
+        params,
         trimmedZip ? { postal_code: trimmedZip, country: 'US' } : undefined,
       );
-      pollRef.current = window.setInterval(async () => {
-        try {
-          const s = await getResearchRun(run_id);
-          setProgress(s.progress ?? null);
-          if (s.status === 'done') {
-            window.clearInterval(pollRef.current);
-            setCandidates(await getCandidates(run_id));
-            setBusy(false);
-          } else if (s.status === 'failed' || s.status === 'error') {
-            window.clearInterval(pollRef.current);
-            setErr(s.error ?? 'The discovery run failed.');
-            setBusy(false);
-          }
-        } catch (e) {
-          window.clearInterval(pollRef.current);
-          setErr(e instanceof Error ? e.message : 'Polling failed');
-          setBusy(false);
-        }
-      }, 2000);
+
+      // Live updates over SSE — one held connection, no polling. If the stream
+      // errors/ends early we reconcile (and briefly poll) below.
+      try {
+        await streamResearchRun(run_id, (frame) => setProgress(frame.progress ?? null));
+      } catch {
+        /* fall through to reconcile/poll */
+      }
+      let s = await getResearchRun(run_id);
+      const deadline = Date.now() + 300_000;
+      while (
+        s.status !== 'done' &&
+        s.status !== 'failed' &&
+        s.status !== 'error' &&
+        Date.now() < deadline
+      ) {
+        await new Promise((r) => setTimeout(r, 3000));
+        s = await getResearchRun(run_id);
+        setProgress(s.progress ?? null);
+      }
+      if (s.status === 'done') {
+        setCandidates(await getCandidates(run_id));
+      } else if (s.status === 'failed' || s.status === 'error') {
+        setErr(s.error ?? 'The discovery run failed.');
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not start a run');
+    } finally {
       setBusy(false);
     }
   }
@@ -134,6 +141,18 @@ export default function Discovery() {
             placeholder="ZIP (e.g. 95448)"
             className="w-36 border border-strong rounded-lg px-400 py-300 bg-elevated outline-none focus:border-accent"
           />
+          <select
+            value={radius}
+            onChange={(e) => setRadius(Number(e.target.value))}
+            className="border border-strong rounded-lg px-400 py-300 bg-elevated outline-none focus:border-accent"
+            aria-label="Search radius"
+          >
+            {radiusOptions.map((mi) => (
+              <option key={mi} value={mi}>
+                {mi} mi
+              </option>
+            ))}
+          </select>
           <button
             onClick={run}
             disabled={busy}
@@ -142,6 +161,40 @@ export default function Discovery() {
             {busy ? 'Searching…' : 'Find activities'}
           </button>
         </div>
+      </div>
+
+      {/* Optional free-form focus — hidden until asked for, so the default is just ZIP + radius. */}
+      <div className="mb-700">
+        {showFocus ? (
+          <div className="flex flex-col gap-200">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-ink-secondary">Focus (optional)</label>
+              <button
+                onClick={() => {
+                  setShowFocus(false);
+                  setFocus('');
+                }}
+                className="text-ink-muted text-sm hover:text-ink-secondary"
+              >
+                Remove
+              </button>
+            </div>
+            <textarea
+              value={focus}
+              onChange={(e) => setFocus(e.target.value)}
+              rows={2}
+              placeholder="e.g. art camps only · physical activity · just for Ceiba"
+              className="w-full border border-strong rounded-lg px-400 py-300 bg-elevated outline-none focus:border-accent resize-y"
+            />
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowFocus(true)}
+            className="text-accent text-sm font-medium"
+          >
+            + Add focus (optional)
+          </button>
+        )}
       </div>
 
       {busy && (

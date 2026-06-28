@@ -17,6 +17,15 @@ final class PlanViewModel: ObservableObject {
     /// it as a `location` override on the run.
     @Published var locationQuery: String = ""
 
+    /// How far from the ZIP to search (miles). Sent as `params.radius_miles`.
+    @Published var radiusMiles: Int = 15
+    /// Optional free-form text that tilts the search ("art camps only", "only for
+    /// Ceiba"). Hidden behind `showFocus`; sent as `params.focus` when non-empty.
+    @Published var focusText: String = ""
+    @Published var showFocus: Bool = false
+    /// Preset radius options for the segmented picker.
+    let radiusOptions: [Int] = [5, 10, 25, 50]
+
     // Discovery run.
     @Published private(set) var runStatus: ResearchRunStatus?
     @Published private(set) var candidates: [ActivityCandidate] = []
@@ -129,47 +138,56 @@ final class PlanViewModel: ObservableObject {
 
         let zip = locationQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let location: [String: Any]? = zip.isEmpty ? nil : ["postal_code": zip, "country": "US"]
+        var params: [String: Any] = ["radius_miles": radiusMiles]
+        let focus = focusText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !focus.isEmpty { params["focus"] = focus }
 
         pollTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let handle = try await PlanService.createRun(baseURL: baseURL, userID: userId, location: location)
+                let handle = try await PlanService.createRun(
+                    baseURL: baseURL, userID: userId, location: location, params: params
+                )
                 self.runStatus = ResearchRunStatus(
                     runId: handle.runId, status: handle.status,
                     progress: nil, candidateCount: 0, error: nil
                 )
 
-                // Poll until terminal. Backoff is a fixed 2s; the run is a
-                // background worker, so a few-second cadence is plenty. Cap the
-                // poll at 5 min so a stuck/slow run degrades into a clear "try
-                // again" instead of an infinite spinner (the run keeps going on
-                // the backend — re-tapping resumes it via server-side dedup).
-                let deadline = Date().addingTimeInterval(300)
-                var timedOut = false
-                while !Task.isCancelled {
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
-                    if Task.isCancelled { return }
-                    if Date() >= deadline {
-                        timedOut = true
-                        break
-                    }
-                    let status = try await PlanService.runStatus(
+                // Live updates over SSE — one held connection, no 2s polling. Fall
+                // back to polling if the stream errors (proxy/network) or ends early
+                // (server-side cap). The run keeps going on the backend regardless.
+                var reachedTerminal = false
+                do {
+                    for try await status in PlanService.streamRun(
                         baseURL: baseURL, userID: userId, runId: handle.runId
+                    ) {
+                        if Task.isCancelled { return }
+                        self.runStatus = status
+                        if status.isTerminal { reachedTerminal = true; break }
+                    }
+                } catch {
+                    if Task.isCancelled { return }
+                    reachedTerminal = await self.pollUntilTerminal(
+                        baseURL: baseURL, userId: userId, runId: handle.runId
                     )
-                    self.runStatus = status
-                    if status.isTerminal { break }
+                }
+                if !reachedTerminal, !Task.isCancelled {
+                    reachedTerminal = await self.pollUntilTerminal(
+                        baseURL: baseURL, userId: userId, runId: handle.runId
+                    )
                 }
 
-                if timedOut {
-                    self.errorMessage = "This is taking longer than usual. It's still "
-                        + "working in the background — tap Find activities again in a "
-                        + "moment to pick up where it left off."
-                } else if let status = self.runStatus, status.status == "done" {
+                if Task.isCancelled { return }
+                if let status = self.runStatus, status.status == "done" {
                     self.candidates = try await PlanService.candidates(
                         baseURL: baseURL, userID: userId, runId: status.runId
                     )
                 } else if let status = self.runStatus, status.status == "failed" {
                     self.errorMessage = status.error ?? "The discovery run failed."
+                } else if !reachedTerminal {
+                    self.errorMessage = "This is taking longer than usual. It's still "
+                        + "working in the background — tap Find activities again in a "
+                        + "moment to pick up where it left off."
                 }
             } catch {
                 if !Task.isCancelled {
@@ -178,6 +196,22 @@ final class PlanViewModel: ObservableObject {
             }
             self.isDiscovering = false
         }
+    }
+
+    /// Fallback poll loop (used when SSE fails or ends early). Returns whether the
+    /// run reached a terminal state; capped at 5 min.
+    private func pollUntilTerminal(baseURL: URL, userId: String, runId: String) async -> Bool {
+        let deadline = Date().addingTimeInterval(300)
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if Task.isCancelled || Date() >= deadline { return false }
+            guard let status = try? await PlanService.runStatus(
+                baseURL: baseURL, userID: userId, runId: runId
+            ) else { continue }
+            self.runStatus = status
+            if status.isTerminal { return true }
+        }
+        return false
     }
 
     func cancelDiscovery() {
