@@ -10,18 +10,25 @@ research / email / calendar worker failures (they call `logger.exception`, which
 Sentry's logging integration turns into an issue with the full traceback). It's
 errors-only by default (`traces_sample_rate=0`) so it stays on the free tier.
 
-**Cost:** free **Developer** tier (~5K errors/mo, 1 user) is plenty for the closed
-beta. No credit card needed. (See `docs/roadmap.md` → Pre-Launch Hardening.)
+> **Status: LIVE in prod (2026-06-27).** `SENTRY_DSN` is set on Railway; verified
+> with a real production error via `/debug/sentry-test` (below). This doc is the
+> as-built record + how to re-do it.
+
+**Cost:** signup gives a 14-day Business trial that **auto-drops to the free
+Developer plan** (no card, no expiry) — ~5K errors/mo, 30-day retention, **1 user**.
+Plenty for the closed beta; the 1-user cap is the main limit.
 
 ---
 
 ## 1. Create the project
 
-1. Sign up / log in at <https://sentry.io>.
+1. Sign up / log in at <https://sentry.io/signup/> (no credit card; you'll create
+   an **org** during signup).
 2. **Create Project** → Platform: **Python → FastAPI** → name it `mvp-backend`.
-3. On the setup screen, copy the **DSN** (looks like
-   `https://<hash>@o<org>.ingest.sentry.io/<project>`). That's the only secret you need —
-   our code does the SDK init, so you can ignore Sentry's copy-paste snippet.
+   (Ignore the install snippet it shows — our code already does the SDK init.)
+3. Copy the **DSN** (`https://<key>@o<org>.ingest.us.sentry.io/<project>`). Find it
+   later at **Settings → Projects → mvp-backend → Client Keys (DSN)**. The DSN is the
+   only thing needed, and it's safe as config (submit-only — it can't read data).
 
 ## 2. Set the Railway env vars
 
@@ -35,32 +42,42 @@ Railway → the `mvp-backend` service → **Variables**:
 | `SENTRY_TRACES_SAMPLE_RATE` | `0` | optional — raise (e.g. `0.1`) only if you want perf tracing |
 
 Saving a variable triggers a redeploy. On boot you'll see
-`[observability] Sentry initialized (env=production)` in the Railway logs.
+`[observability] Sentry initialized (env=production)` in the Railway logs — that's
+the confirmation it's active.
 
 ## 3. (Recommended) Route alerts to Slack
 
-In Sentry: **Settings → Integrations → Slack** → install, pick the channel. Then
-**Alerts → Create Alert → Issues** → "a new issue is created" (and/or "an issue
-is seen more than N times in 1h") → action: **Send a Slack notification**. Now a
-crash pages the team in real time.
+In Sentry: **Settings → Integrations → Slack** → install + authorize the workspace.
+Then **Alerts → Create Alert → Issues** → trigger **"a new issue is created"**
+(and/or "seen more than N times in 1h") → action: **Send a Slack notification** →
+pick the channel.
 
-## 4. Verify
+> For a **private** Slack channel, invite the bot first: type `@Sentry` in that
+> channel so it can post there.
 
-With `SENTRY_DSN` set in prod (or locally), force a failure and confirm it lands:
+## 4. Verify (the as-built way)
+
+There's a permanent, admin-gated verification lever built into the backend:
 
 ```bash
-# easiest: use the fault harness to make a research run fail
-tests/nl-harness/tools/run-fault-flows.sh -k outage
-# or hit the running app in a way that raises, then check:
-#   Sentry → Issues  → you should see the exception with its traceback,
-#   tagged with the environment, and (for worker failures) the "[research] run … failed" message.
+# forces a REAL production exception through the live app → Sentry captures it
+curl -i https://mvp-backend-production-8678.up.railway.app/debug/sentry-test \
+  -H "X-Admin-Token: <ADMIN_TOKEN>"
+# → HTTP 500, and a "RuntimeError: Deliberate Sentry verification error …" issue
+#   appears in Sentry → Issues under environment=production, with full request context.
 ```
 
-If nothing appears: confirm `SENTRY_DSN` is set on the service, the deploy picked
-it up (look for the `[observability] Sentry initialized` log line), and the error
-actually fired.
+`GET /debug/sentry-test` is gated by `ADMIN_TOKEN` (returns 401 without it), so it
+can't be abused. It's the standard "is Sentry alive?" check.
+
+Alternatively, the fault harness forces a *worker* failure locally:
+`tests/nl-harness/tools/run-fault-flows.sh -k outage` (needs `SENTRY_DSN` exported
+on that backend).
+
+If nothing appears: confirm `SENTRY_DSN` is set on the service, the deploy picked it
+up (the `[observability] Sentry initialized` log line), and the error actually fired.
 
 ---
 
 **Local note:** to test locally, `export SENTRY_DSN=…` before starting uvicorn.
-Leave it unset and the app is unaffected (the suite runs with it unset).
+Leave it unset and the app is unaffected (the test suite runs with it unset).
