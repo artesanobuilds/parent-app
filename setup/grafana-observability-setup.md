@@ -8,8 +8,8 @@ egress-only, so we push, never get scraped). OTel is vendor-neutral: this points
 Grafana Cloud, but switching backends later is just changing the endpoint + header.
 
 What you get: HTTP request rate / p95 latency / error count automatically, plus
-custom domain gauges — `research_run_failure_rate`, `research_run_max_queue_wait_seconds`,
-`research_run_in_flight` — that read the durable run tables. Grafana then alerts on
+custom domain gauges — `research_run_failure_rate_ratio`, `research_run_max_queue_wait_seconds`,
+`research_run_in_flight_ratio` — that read the durable run tables. Grafana then alerts on
 these → Slack. And the **Grafana MCP** lets Claude Code query all of it read-only.
 
 > **Status: metrics LIVE in prod (2026-06-27).** The three `OTEL_*` vars are set on
@@ -78,27 +78,29 @@ needs a **separate, read-only token** (NOT the ingest token from §2):
 
 1. Grafana → **Administration → Service accounts** → **Add service account**
    (role: **Viewer**) → **Add token** → copy it.
-2. Add the server to Claude Code (install `mcp-grafana` first — see
-   github.com/grafana/mcp-grafana):
+2. Install the binary + add it to Claude Code (as-built — `go` was already present):
    ```bash
-   claude mcp add grafana -- mcp-grafana --disable-write
+   go install github.com/grafana/mcp-grafana/cmd/mcp-grafana@latest   # → ~/go/bin/mcp-grafana
+   claude mcp add grafana \
+     --env GRAFANA_URL=https://<org>.grafana.net \
+     --env GRAFANA_SERVICE_ACCOUNT_TOKEN=<viewer token from step 1> \
+     -- ~/go/bin/mcp-grafana --disable-write
    ```
-   with env on the MCP:
-   ```
-   GRAFANA_URL=https://<org>.grafana.net
-   GRAFANA_SERVICE_ACCOUNT_TOKEN=<viewer token from step 1>
-   ```
-   `--disable-write` blocks all create/update/delete — the agent can only run PromQL,
-   read dashboards, and list alerts/incidents.
-3. Verify: ask Claude to "query `research_run_failure_rate` via the grafana MCP" — it
-   returns data; a write attempt is refused.
+   (`GRAFANA_URL` is the bare stack URL — strip any `/a/...` app path. `--disable-write`
+   blocks all create/update/delete; the agent can only run PromQL, read dashboards,
+   list alerts/incidents.)
+3. **Restart Claude Code** — MCP tools load at session start, so a freshly-added
+   server isn't usable until you restart (verify it's registered with `claude mcp list`
+   → `grafana … ✔ Connected`).
+4. Verify: ask Claude to "query `research_run_failure_rate_ratio` via the grafana MCP" —
+   it returns data; a write attempt is refused.
 
 ## 5. Dashboard + Slack alerts
 
 - **Dashboard:** new dashboard → panels for request rate, p95 latency, error rate,
-  `research_run_failure_rate`, `research_run_max_queue_wait_seconds`, `research_run_in_flight`.
+  `research_run_failure_rate_ratio`, `research_run_max_queue_wait_seconds`, `research_run_in_flight_ratio`.
 - **Alerts → Contact points:** add **Slack** (reuse the team webhook). Then
-  **Alert rules:** e.g. `research_run_failure_rate > 0.3 for 15m`, or
+  **Alert rules:** e.g. `research_run_failure_rate_ratio > 0.3 for 15m`, or
   `research_run_max_queue_wait_seconds > 300` → notify Slack. (Grafana alerting
   replaces the need for a bespoke in-app watchdog.)
 
@@ -108,23 +110,34 @@ Grafana → **Explore** → pick the Prometheus data source (`grafanacloud-<org>
 Type a metric name to autocomplete, switch the panel to **Time series**:
 
 ```promql
-# total HTTP requests since the current deploy
-sum(http_server_request_duration_seconds_count)
+# total HTTP requests in the last 30 min
+sum(increase(http_server_duration_milliseconds_count[30m]))
 
 # requests/sec over the last 5 min (the graph that moves)
-sum(rate(http_server_request_duration_seconds_count[5m]))
+sum(rate(http_server_duration_milliseconds_count[5m]))
 
-# by route + status
-sum by (http_route, http_response_status_code) (http_server_request_duration_seconds_count)
+# by method + status (this OTel version does NOT populate http_route)
+sum by (http_method, http_status_code) (increase(http_server_duration_milliseconds_count[30m]))
 
-# our domain health gauges
-research_run_failure_rate
-research_run_in_flight
+# our domain health gauges (note the _ratio suffix — see below)
+research_run_failure_rate_ratio
+research_run_in_flight_ratio
+research_run_max_queue_wait_seconds
 ```
 
-(The exact HTTP metric name can vary by instrumentation version — type `http_` and
-pick the `..._count` series the autocomplete shows.) To generate failure signal on
-demand: `tests/nl-harness/tools/load_and_chaos.py --conc 5` (mock-backed, free).
+**As-built metric-name notes (verified live 2026-06-27):**
+- The HTTP request metric is **`http_server_duration_milliseconds_count`** (this OTel
+  version uses the older `http.server.duration` convention, not `..._request_duration_seconds`).
+  Labels present: `http_method`, `http_status_code` (no `http_route`).
+- The OTLP→Prometheus translation **appends `_ratio`** to gauges declared with
+  `unit="1"` → `research_run_failure_rate_ratio`, `research_run_in_flight_ratio`. The
+  seconds gauge stays `research_run_max_queue_wait_seconds`. All carry
+  `service_name="mvp-backend"`.
+- If a name doesn't autocomplete, use the Grafana MCP from Claude Code:
+  `list_prometheus_metric_names(regex="research.*")` to see exact names.
+
+To generate failure signal on demand: `tests/nl-harness/tools/load_and_chaos.py --conc 5`
+(mock-backed, free).
 
 ---
 
