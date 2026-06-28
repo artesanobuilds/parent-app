@@ -3,21 +3,15 @@ import MarkdownUI
 
 /// Chief-of-staff chat. Modeled on `AgentView`'s message list + input area, but
 /// scoped to the planning conversation (`/cos/chat`) — no voice surface and no
-/// content cards. Pushed onto the Plan tab's NavigationStack.
+/// content cards. Embedded as the default segment of the Plan hub (`PlanView`);
+/// its `CosChatViewModel` is owned by `MainTabView` and injected here so the
+/// conversation survives switching segments.
 struct CosChatView: View {
-    @StateObject private var viewModel: CosChatViewModel
+    @ObservedObject var viewModel: CosChatViewModel
     @State private var messageText: String = ""
-    @State private var didSendInitial = false
 
-    /// When set, this prompt is auto-sent once on open (e.g. the Exploring
-    /// section's "Help me decide" entry seeds a triage request).
-    private let initialPrompt: String?
-
-    init(configuration: ServerConfiguration, userID: String, initialPrompt: String? = nil) {
-        let vm = CosChatViewModel(configuration: configuration)
-        vm.setUserID(userID)
-        _viewModel = StateObject(wrappedValue: vm)
-        self.initialPrompt = initialPrompt
+    init(viewModel: CosChatViewModel) {
+        self.viewModel = viewModel
     }
 
     var body: some View {
@@ -26,22 +20,6 @@ struct CosChatView: View {
             messageList
             inputArea
         }
-        // Lift the input bar clear of MainTabView's floating custom tab bar.
-        // Pushed NavigationStack destinations don't inherit the tab-bar bottom
-        // padding the way the tab's root content does (see PlanView). hearth800
-        // clears the bar while keeping the gap below the field ~symmetric with
-        // the gap above it (divider line).
-        .padding(.bottom, .hearth800)
-        .onAppear {
-            guard let prompt = initialPrompt, !didSendInitial,
-                  !viewModel.isSending, !viewModel.isUserIDMissing else { return }
-            didSendInitial = true
-            viewModel.send(prompt)
-        }
-        .navigationTitle("Chief of Staff")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Color.bgCanvas, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
         .background(Color.bgCanvas.ignoresSafeArea())
         .alert(
             "Error",

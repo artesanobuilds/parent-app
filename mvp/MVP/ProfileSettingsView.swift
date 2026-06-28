@@ -1,115 +1,145 @@
 import SwiftUI
 
-/// Editable parent profile (Settings → Profile tab). Loads the current values
-/// via GET /profile and saves edits via /profile/seed. The ZIP feeds the Plan
-/// tab's activity discovery, so it's surfaced prominently.
+/// Settings → Profile hub. Loads the full family profile via GET /profile and
+/// drills into editors: the parent's Basics ("You"), each kid's Basics, an
+/// "Add a kid" sheet, and the family-wide "What we've learned" screen (the
+/// fields the coaching/onboarding agents infer over time). Lives inside the
+/// Settings sheet's NavigationStack, so the rows push.
 struct ProfileSettingsView: View {
     let configuration: ServerConfiguration
     let userID: String
 
-    @State private var name = ""
-    @State private var postalCode = ""
-    @State private var country = ""
-    @State private var children: [ChildRow] = []
-    @State private var isSaving = false
-    @State private var savedOK = false
+    @State private var family = FamilyProfileDTO()
+    @State private var kidKeys: [String] = []
+    @State private var showAddKid = false
     @State private var errorMessage: String?
 
-    private struct ChildRow: Identifiable {
-        let id: String   // kid name (unique within a family)
-        let age: Double?
-    }
-
     var body: some View {
-        Form {
+        List {
             if userID.isEmpty {
                 Section {
                     Text("Complete onboarding to edit your profile.")
                         .foregroundColor(.inkMuted)
                 }
             } else {
-                Section("Parent") {
-                    TextField("Name", text: $name)
-                    TextField("ZIP / Postal code", text: $postalCode)
-                        .keyboardType(.numbersAndPunctuation)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    TextField("Country (e.g. US)", text: $country)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
+                Section("You") {
+                    NavigationLink {
+                        ParentProfileEditor(
+                            baseURL: configuration.baseURL, userID: userID,
+                            parent: family.parent ?? ParentProfileDTO()
+                        ) { apply($0) }
+                    } label: { parentRow }
                 }
 
-                if !children.isEmpty {
-                    Section("Kids") {
-                        ForEach(children) { kid in
-                            HStack {
-                                Text(kid.id).foregroundColor(.inkPrimary)
-                                Spacer()
-                                if let age = kid.age {
-                                    Text("Age \(Int(age))").foregroundColor(.inkMuted)
-                                }
-                            }
-                        }
+                Section("Kids") {
+                    ForEach(kidKeys, id: \.self) { key in
+                        NavigationLink {
+                            KidProfileEditor(
+                                baseURL: configuration.baseURL, userID: userID,
+                                kidKey: key, kid: family.children?[key] ?? ChildProfileDTO()
+                            ) { apply($0) }
+                        } label: { kidRow(key) }
+                    }
+                    Button { showAddKid = true } label: {
+                        Label("Add a kid", systemImage: "plus.circle.fill")
+                            .font(.hearthBodyMD.weight(.semibold))
+                            .foregroundColor(.accentDefault)
                     }
                 }
 
                 Section {
-                    Button(isSaving ? "Saving…" : "Save profile") { save() }
-                        .disabled(isSaving)
-                    if savedOK {
-                        Text("Saved").font(.hearthBodySM).foregroundColor(.statusSuccess)
-                    }
-                    if let err = errorMessage {
-                        Text(err).font(.hearthBodySM).foregroundColor(.statusError)
-                    }
+                    NavigationLink {
+                        LearnedProfileView(
+                            baseURL: configuration.baseURL, userID: userID, family: family
+                        ) { apply($0) }
+                    } label: { learnedRow }
                 } footer: {
                     Text("Your ZIP is used to find camps and activities near you on the Plan tab.")
                         .font(.hearthBodySM)
                         .foregroundColor(.inkMuted)
                 }
+
+                if let errorMessage {
+                    Section { Text(errorMessage).font(.hearthBodySM).foregroundColor(.statusError) }
+                }
             }
         }
         .scrollContentBackground(.hidden)
         .background(Color.bgCanvas.ignoresSafeArea())
+        .sheet(isPresented: $showAddKid) {
+            AddKidSheet(baseURL: configuration.baseURL, userID: userID) { apply($0) }
+        }
         .task { await load() }
+    }
+
+    // MARK: - Rows
+
+    private var parentRow: some View {
+        HStack(spacing: .hearth400) {
+            Image(systemName: "person.fill")
+                .foregroundColor(.accentDefault)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(family.parent?.name?.isEmpty == false ? family.parent!.name! : "Add your name")
+                    .font(.hearthBodyMD.weight(.semibold))
+                    .foregroundColor(.inkPrimary)
+                let sub = [family.parent?.postalCode, family.parent?.country]
+                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                if !sub.isEmpty {
+                    Text(sub).font(.hearthBodySM).foregroundColor(.inkMuted)
+                }
+            }
+        }
+    }
+
+    private func kidRow(_ key: String) -> some View {
+        let kid = family.children?[key]
+        return HStack(spacing: .hearth400) {
+            Image(systemName: "figure.child")
+                .foregroundColor(.accentDefault)
+                .frame(width: 24)
+            Text(kid?.name ?? key)
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkPrimary)
+            Spacer()
+            if let age = kid?.age {
+                Text("Age \(age.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(age)) : String(age))")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+            }
+        }
+    }
+
+    private var learnedRow: some View {
+        HStack(spacing: .hearth400) {
+            Image(systemName: "sparkles")
+                .foregroundColor(.accentDefault)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("What we've learned")
+                    .font(.hearthBodyMD.weight(.semibold))
+                    .foregroundColor(.inkPrimary)
+                Text("Review + correct what your coach has gathered")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+            }
+        }
+    }
+
+    // MARK: - Data
+
+    private func apply(_ fam: FamilyProfileDTO) {
+        family = fam
+        kidKeys = (fam.children ?? [:]).keys.sorted()
     }
 
     private func load() async {
         guard let baseURL = configuration.baseURL, !userID.isEmpty else { return }
         do {
             let fam = try await ProfileService.getProfile(baseURL: baseURL, userID: userID)
-            name = fam.parent?.name ?? ""
-            postalCode = fam.parent?.postalCode ?? ""
-            country = fam.parent?.country ?? ""
-            var rows: [ChildRow] = []
-            for (key, value) in (fam.children ?? [:]) {
-                rows.append(ChildRow(id: value.name ?? key, age: value.age))
-            }
-            children = rows.sorted { $0.id < $1.id }
+            apply(fam)
         } catch {
             errorMessage = "Couldn't load your profile."
-        }
-    }
-
-    private func save() {
-        guard let baseURL = configuration.baseURL, !userID.isEmpty else { return }
-        isSaving = true
-        savedOK = false
-        errorMessage = nil
-        Task {
-            do {
-                try await ProfileService.saveParentProfile(
-                    baseURL: baseURL,
-                    userID: userID,
-                    name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                    postalCode: postalCode.trimmingCharacters(in: .whitespacesAndNewlines),
-                    country: country.trimmingCharacters(in: .whitespacesAndNewlines)
-                )
-                savedOK = true
-            } catch {
-                errorMessage = "Couldn't save. Check your connection and try again."
-            }
-            isSaving = false
         }
     }
 }

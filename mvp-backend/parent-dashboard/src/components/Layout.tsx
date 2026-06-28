@@ -1,11 +1,12 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Calendar, Search, MessageSquare, LogOut } from 'lucide-react';
+import { Calendar, Search, MessageSquare, User, LogOut } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 
 const NAV = [
-  { to: '/plan', label: 'Plan', icon: Calendar },
-  { to: '/discovery', label: 'Discover', icon: Search },
   { to: '/chat', label: 'Chief of Staff', icon: MessageSquare },
+  { to: '/discovery', label: 'Discover', icon: Search },
+  { to: '/plan', label: 'Plan', icon: Calendar },
+  { to: '/profile', label: 'Profile', icon: User },
 ];
 
 export default function Layout() {

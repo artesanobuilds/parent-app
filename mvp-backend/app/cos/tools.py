@@ -18,6 +18,7 @@ from typing import Optional
 from langchain.tools import tool
 
 from app.cos import planning
+from app.cost_logging import cost_config, new_workflow_id
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,19 @@ def _storage():
     return storage_backend
 
 
+def _tool_error(tool_name: str, exc: Exception, user_id: str) -> str:
+    """Log + (gated) Sentry-capture a tool failure, then return a short string the
+    agent can relay. Tools never raise — they degrade to an explanation."""
+    logger.warning("[cos_tool] %s failed: %s", tool_name, exc)
+    try:
+        from app.observability import capture_exception
+
+        capture_exception(exc, feature="cos", tool=tool_name, user=user_id)
+    except Exception:  # observability must never break a tool
+        pass
+    return f"{tool_name} hit an error: {exc}"
+
+
 def _kids_for(user_id: str) -> list[dict]:
     """Return ``[{"name", "age", ...}]`` for the user's children from the profile."""
     from app.profiling import profiling_service
@@ -40,6 +54,57 @@ def _kids_for(user_id: str) -> list[dict]:
         prof = prof or {}
         kids.append({"name": prof.get("name") or name, "age": prof.get("age")})
     return kids
+
+
+def _results_to_text(results: Any) -> str:
+    """Flatten a TavilySearch result (dict with 'results', a list, or a string)
+    into plain text the extractor can read."""
+    items = []
+    if isinstance(results, dict):
+        items = results.get("results") or []
+    elif isinstance(results, list):
+        items = results
+    else:
+        return str(results)
+    parts: list[str] = []
+    for r in items:
+        if isinstance(r, dict):
+            parts.append(
+                "\n".join(
+                    str(r.get(k))
+                    for k in ("title", "url", "content")
+                    if r.get(k)
+                )
+            )
+        else:
+            parts.append(str(r))
+    return "\n\n".join(parts) or str(results)
+
+
+_HELP_TEXT = """\
+I'm your Chief of Staff — I run the logistics of your kids' camps, classes, and activities so you don't have to hold it all in your head. Here's what I can do:
+
+DISCOVER & SAVE
+• Start a web search for new camps/activities near you ("find art camps for Ceiba") — say the word and I'll kick one off.
+• Look up a camp you already signed up for and save it to your plan with all its details ("I registered for Camp Galileo and Steve & Kate's").
+• Search the options we've already discovered.
+
+DECIDE
+• Lay your shortlist side-by-side (cost, age-fit, schedule clashes, who competes with whom) and help you pick — then record the decision and the why.
+
+TRACK & ORGANIZE
+• Keep every activity's status explicit (exploring → signed up → confirmed → declined), update or remove any of them.
+• Build your week-by-week calendar and a running to-do / follow-ups list (signups, payments, forms, emails).
+• Track caregivers and who's covering drop-off/pickup — and flag coverage gaps, time conflicts, and age-eligibility issues before you commit.
+• Keep a running cost picture (confirmed total + what's still TBD).
+
+KNOW YOUR FAMILY
+• Pull up what we know about your kids (ages, interests, fit) to tailor recommendations.
+
+DRAFT
+• Write an email to an organizer for you to review and send (I never send it myself).
+
+Just tell me what you need in plain language — e.g. "what's left to do this week?", "are we covered for the week of July 6?", "help me decide between these two camps", or "save the three camps I signed up for"."""
 
 
 # --------------------------------------------------------------------------- #
@@ -607,6 +672,330 @@ def _make_draft_email_tool(user_id: str):
 
 
 # --------------------------------------------------------------------------- #
+# Camp lookup-and-save (do what the UI does: research a named camp + track it)
+# --------------------------------------------------------------------------- #
+
+
+def _make_lookup_and_save_camp_tool(user_id: str):
+    @tool
+    def LookupAndSaveCamp(
+        camp_name: str,
+        kid_name: Optional[str] = None,
+        url: Optional[str] = None,
+        status: str = "signed_up",
+        note: Optional[str] = None,
+    ) -> str:
+        """Look up a specific camp/class — typically one the parent ALREADY signed
+        up for — fetch its details from the web, and SAVE it to the plan as if it
+        had been tracked through the app UI.
+
+        Use this when the parent gives you camps they've registered for ("I signed
+        up for Camp Galileo and Steve & Kate's"). Call it ONCE per camp. Default
+        ``status`` is "signed_up" (already registered) — use "confirmed" if they
+        say it's locked in, or "exploring" if they're only considering it. Pass
+        ``url`` when the parent gives a link. First reuses an already-discovered
+        candidate if one matches (no web spend); otherwise it searches the web,
+        extracts the details, and tracks it.
+        """
+        storage = _storage()
+
+        # 1) Reuse an already-discovered candidate by name (free — no web call).
+        try:
+            candidates = storage.list_candidates(user_id=user_id)
+        except Exception:  # noqa: BLE001 — fall through to web lookup
+            candidates = []
+        low = (camp_name or "").lower().strip()
+        match = None
+        for c in candidates:
+            nm = (c.get("name") or "").lower()
+            if low and (low in nm or nm in low):
+                match = c
+                break
+        if match:
+            try:
+                activity_id = storage.track_activity(
+                    user_id,
+                    name=match.get("name") or camp_name,
+                    kid_name=kid_name or match.get("kid_name"),
+                    candidate_id=match.get("id"),
+                    provider=match.get("provider"),
+                    status=status,
+                    price_amount=match.get("price_amount"),
+                    price_status="confirmed" if match.get("price_amount") is not None else "tbd",
+                    signup_url=match.get("signup_url"),
+                    notes=note,
+                )
+            except Exception as exc:
+                return _tool_error("LookupAndSaveCamp", exc, user_id)
+            return (
+                f"Saved '{match.get('name') or camp_name}' as {status} "
+                f"(matched one of your discovered options, id={activity_id})."
+            )
+
+        # 2) Targeted web lookup → structured extraction → track. NEW SPEND PATH:
+        # cost-log the Tavily search + the extraction LLM call under feature=cos.
+        try:
+            from langchain_tavily import TavilySearch
+            from app.ingest.extract import extract_from_text
+
+            query = url or f"{camp_name} kids camp registration details schedule price location"
+            search = TavilySearch(max_results=5, search_depth="advanced")
+            results = search.invoke(
+                {"query": query},
+                config=cost_config(
+                    "cos", workflow=new_workflow_id(), user=user_id, search_depth="advanced"
+                ),
+            )
+            extracted = extract_from_text(
+                _results_to_text(results),
+                source_hint=f"web lookup for {camp_name}",
+                cost_user=user_id,
+            )
+        except Exception as exc:
+            return _tool_error("LookupAndSaveCamp", exc, user_id)
+
+        signup = url or next((l.url for l in extracted.links if l.url), None)
+        details = {
+            "hours": extracted.hours,
+            "schedule_text": extracted.schedule_text,
+            "dates": extracted.dates,
+            "location": extracted.location,
+            "age_min": extracted.age_min,
+            "age_max": extracted.age_max,
+        }
+        try:
+            activity_id = storage.track_activity(
+                user_id,
+                name=extracted.activity_name or camp_name,
+                kid_name=kid_name or extracted.kid_fit,
+                provider=extracted.provider,
+                status=status,
+                price_amount=extracted.amount_due,
+                price_status="confirmed" if extracted.amount_due is not None else "tbd",
+                signup_url=signup,
+                contact=extracted.contact.model_dump() if extracted.contact else None,
+                details=details,
+                notes=note,
+            )
+        except Exception as exc:
+            return _tool_error("LookupAndSaveCamp", exc, user_id)
+
+        bits = []
+        if extracted.provider:
+            bits.append(extracted.provider)
+        if extracted.location:
+            bits.append(extracted.location)
+        if extracted.amount_due is not None:
+            bits.append(f"${extracted.amount_due:g}")
+        extra = f" ({'; '.join(bits)})" if bits else ""
+        return (
+            f"Looked up and saved '{extracted.activity_name or camp_name}' as "
+            f"{status}{extra} (id={activity_id})."
+        )
+
+    return LookupAndSaveCamp
+
+
+# --------------------------------------------------------------------------- #
+# Update / untrack tracked activities (shortlist parity with the UI)
+# --------------------------------------------------------------------------- #
+
+
+def _make_update_activity_tool(user_id: str):
+    @tool
+    def UpdateActivity(
+        activity_id: str,
+        status: Optional[str] = None,
+        price_amount: Optional[float] = None,
+        price_status: Optional[str] = None,
+        signup_url: Optional[str] = None,
+        week_start: Optional[str] = None,
+        notes: Optional[str] = None,
+        decision_rationale: Optional[str] = None,
+    ) -> str:
+        """Update fields on an existing tracked activity — e.g. move it
+        exploring→signed_up/confirmed/declined, set the price, add a signup link,
+        or set the week. Send only the fields to change. ALWAYS include
+        ``decision_rationale`` when you change ``status`` (decision log)."""
+        storage = _storage()
+        existing = storage.get_tracked_activity(activity_id)
+        if not existing:
+            return f"No tracked activity with id {activity_id}."
+        if existing.get("user_id") != user_id:
+            return "That activity doesn't belong to this account."
+        fields = {
+            k: v
+            for k, v in {
+                "status": status,
+                "price_amount": price_amount,
+                "price_status": price_status,
+                "signup_url": signup_url,
+                "week_start": week_start,
+                "notes": notes,
+                "decision_rationale": decision_rationale,
+            }.items()
+            if v is not None
+        }
+        if not fields:
+            return "Nothing to update — provide at least one field."
+        try:
+            storage.update_tracked_activity(activity_id, **fields)
+        except Exception as exc:
+            return _tool_error("UpdateActivity", exc, user_id)
+        return f"Updated '{existing.get('name')}': {', '.join(fields)} (id={activity_id})."
+
+    return UpdateActivity
+
+
+def _make_untrack_activity_tool(user_id: str):
+    @tool
+    def UntrackActivity(activity_id: str) -> str:
+        """Permanently remove a tracked activity from the plan (un-pin from the
+        shortlist, or delete one added by mistake). Prefer
+        UpdateActivity(status="declined") when the parent decided against it but
+        wants it on the record."""
+        storage = _storage()
+        existing = storage.get_tracked_activity(activity_id)
+        if not existing:
+            return f"No tracked activity with id {activity_id}."
+        if existing.get("user_id") != user_id:
+            return "That activity doesn't belong to this account."
+        try:
+            storage.delete_tracked_activity(activity_id)
+        except Exception as exc:
+            return _tool_error("UntrackActivity", exc, user_id)
+        return f"Removed '{existing.get('name')}' (id={activity_id})."
+
+    return UntrackActivity
+
+
+# --------------------------------------------------------------------------- #
+# Kick off a discovery run from chat
+# --------------------------------------------------------------------------- #
+
+
+def _make_start_discovery_tool(user_id: str):
+    @tool
+    def StartDiscovery(
+        focus: Optional[str] = None, radius_miles: Optional[int] = None
+    ) -> str:
+        """Kick off a background web-discovery run to find NEW camps/activities for
+        the family near their saved location. Use when the parent wants you to go
+        find options ("find art camps for Ceiba", "what swim classes are near us").
+        Optional ``focus`` biases what to surface (category / which kid / vibe);
+        ``radius_miles`` limits distance. Returns once queued — finds stream onto
+        the Discover tab; afterwards use SearchActivities to read them."""
+        storage = _storage()
+        from app.profiling import profiling_service
+
+        fam = profiling_service.get_family_profile(user_id) or {}
+        parent = fam.get("parent") or {}
+        location = {
+            "postal_code": parent.get("postal_code"),
+            "country": parent.get("country"),
+        }
+        if not location.get("postal_code"):
+            return (
+                "I can't start discovery without your ZIP/postal code — add it in "
+                "Settings → Profile first, then ask me again."
+            )
+        kids = []
+        for name, prof in (fam.get("children") or {}).items():
+            prof = prof or {}
+            kids.append(
+                {
+                    "name": prof.get("name") or name,
+                    "age": prof.get("age"),
+                    "grade_band": prof.get("grade_band"),
+                    "interests": prof.get("interests") or [],
+                }
+            )
+        params: dict = {}
+        if focus:
+            params["focus"] = focus
+        if radius_miles:
+            params["radius_miles"] = radius_miles
+        try:
+            result = storage.enqueue_research_run(
+                user_id=user_id, location=location, kids=kids, params=params
+            )
+        except Exception as exc:
+            return _tool_error("StartDiscovery", exc, user_id)
+        try:
+            from app.research.worker import research_worker
+
+            if research_worker is not None:
+                research_worker.notify()
+        except Exception:  # noqa: BLE001 — worker wake is best-effort
+            pass
+        if result.get("deduped"):
+            return (
+                f"A discovery run is already in progress (id={result['run_id']}). "
+                "New finds appear on the Discover tab."
+            )
+        return (
+            f"Started a discovery run (id={result['run_id']}). New camps will appear "
+            "on the Discover tab as they're found — ask me to search them after."
+        )
+
+    return StartDiscovery
+
+
+# --------------------------------------------------------------------------- #
+# Kids info + help (read-only)
+# --------------------------------------------------------------------------- #
+
+
+def _make_get_kids_info_tool(user_id: str):
+    @tool
+    def GetKidsInfo() -> str:
+        """Return what we know about the parent's kids — name, age, grade band,
+        interests, and notable constraints — to tailor recommendations and fit.
+        Call this when reasoning about which activities suit which kid."""
+        from app.profiling import profiling_service
+
+        fam = profiling_service.get_family_profile(user_id) or {}
+        kids = fam.get("children") or {}
+        if not kids:
+            return (
+                "No kids on file yet. The parent can add them in Settings → Profile "
+                "(or tell you and you can note it)."
+            )
+        out: list[str] = []
+        for key, p in kids.items():
+            p = p or {}
+            name = p.get("name") or key
+            bits: list[str] = []
+            age = p.get("age")
+            if age is not None:
+                try:
+                    bits.append(f"age {float(age):g}")
+                except (TypeError, ValueError):
+                    pass
+            if p.get("grade_band"):
+                bits.append(str(p["grade_band"]))
+            if p.get("interests"):
+                bits.append("interests: " + ", ".join(p["interests"]))
+            if p.get("temperament"):
+                bits.append(f"temperament: {p['temperament']}")
+            out.append(f"- {name}" + (f" — {'; '.join(bits)}" if bits else ""))
+        return "Kids:\n" + "\n".join(out)
+
+    return GetKidsInfo
+
+
+def _make_help_tool(user_id: str):
+    @tool
+    def Help() -> str:
+        """List everything you (the Chief of Staff) can do. Call this whenever the
+        parent asks "help", "what can you do", "how does this work", or otherwise
+        seems unsure where to start."""
+        return _HELP_TEXT
+
+    return Help
+
+
+# --------------------------------------------------------------------------- #
 # Assembly
 # --------------------------------------------------------------------------- #
 
@@ -627,4 +1016,11 @@ def build_cos_tools(user_id: str) -> list:
         _make_compare_activities_tool(user_id),
         _make_check_eligibility_tool(user_id),
         _make_draft_email_tool(user_id),
+        # Power-tools: do what the UI does (2026-06-28)
+        _make_lookup_and_save_camp_tool(user_id),
+        _make_update_activity_tool(user_id),
+        _make_untrack_activity_tool(user_id),
+        _make_start_discovery_tool(user_id),
+        _make_get_kids_info_tool(user_id),
+        _make_help_tool(user_id),
     ]

@@ -45,6 +45,20 @@ export async function issueToken(userId: string): Promise<AuthTokenResponse> {
 // ── Profile ─────────────────────────────────────────────────────────
 export const getProfile = () => api<FamilyProfile>('/profile');
 
+// Partial-update the parent profile (snake_case keys → values; lists replaced).
+export const updateProfile = (fields: Record<string, unknown>) =>
+  api<FamilyProfile>('/profile', {
+    method: 'PATCH',
+    body: JSON.stringify({ user_id: uid(), ...fields }),
+  });
+
+// Partial-update (or create) a child profile.
+export const updateKid = (name: string, fields: Record<string, unknown>) =>
+  api<FamilyProfile>(`/profile/kids/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ user_id: uid(), ...fields }),
+  });
+
 // ── Discovery ───────────────────────────────────────────────────────
 export const createResearchRun = (
   params?: Record<string, unknown>,

@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Discovery from './pages/Discovery';
 import Plan from './pages/Plan';
 import Chat from './pages/Chat';
+import Profile from './pages/Profile';
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { isAuthed } = useAuth();
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="plan" element={<Plan />} />
         <Route path="discovery" element={<Discovery />} />
         <Route path="chat" element={<Chat />} />
+        <Route path="profile" element={<Profile />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

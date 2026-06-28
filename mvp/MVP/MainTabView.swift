@@ -7,6 +7,9 @@ struct MainTabView: View {
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var contentVM = ContentViewModel()
     @StateObject private var planVM = PlanViewModel()
+    // The Chief-of-Staff chat VM is owned here (not by CosChatView) so the
+    // conversation survives switching between the Plan hub's segments.
+    @StateObject private var cosVM: CosChatViewModel
     @State private var selectedTab: Tab = .home
 
     enum Tab: String {
@@ -18,6 +21,7 @@ struct MainTabView: View {
         let config = ServerConfiguration()
         _configuration = StateObject(wrappedValue: config)
         _viewModel = StateObject(wrappedValue: ChatViewModel(configuration: config, mode: .coaching))
+        _cosVM = StateObject(wrappedValue: CosChatViewModel(configuration: config))
     }
 
     var body: some View {
@@ -39,6 +43,7 @@ struct MainTabView: View {
             viewModel.setUserID(username)
             contentVM.userId = username
             planVM.userId = username
+            cosVM.setUserID(username)
         }
         .task {
             if let url = configuration.baseURL {
@@ -67,7 +72,7 @@ struct MainTabView: View {
                 case .circle:
                     CircleView()
                 case .planning:
-                    PlanView(viewModel: planVM, configuration: configuration, userID: username)
+                    PlanView(viewModel: planVM, cosVM: cosVM, configuration: configuration, userID: username)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -89,7 +94,7 @@ struct MainTabView: View {
         HStack(spacing: 0) {
             tabBarItem(tab: .home, icon: "house", activeIcon: "house.fill", label: "Home")
             tabBarItem(tab: .library, icon: "book", activeIcon: "book.fill", label: "Library")
-            tabBarItem(tab: .agent, icon: "message", activeIcon: "message.fill", label: "MVP")
+            tabBarItem(tab: .agent, icon: "message", activeIcon: "message.fill", label: "Coach")
             tabBarItem(tab: .circle, icon: "person.2", activeIcon: "person.2.fill", label: "Circle")
             tabBarItem(tab: .planning, icon: "calendar", activeIcon: "calendar", label: "Plan")
         }

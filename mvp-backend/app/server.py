@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import AsyncGenerator, Dict, List, Any, Optional
 
 import hmac
-from fastapi import FastAPI, Request, Depends, Header, HTTPException, Query
+from fastapi import FastAPI, Request, Depends, Header, HTTPException, Query, Body
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +16,7 @@ from langchain_core.messages import HumanMessage
 from app.agent import get_agent
 from app.onboarding_agent import get_onboarding_agent
 from app.memory import MemoryRepository
-from app.profiling import profiling_service
+from app.profiling import profiling_service, ParentProfile, ChildProfile
 from app.duckdb_storage import DuckDBStorage
 from app import content as content_service
 from app import kid_agent as kid_agent_service
@@ -817,6 +817,76 @@ def seed_profile(request: OnboardingSeedRequest, user_id: str = Depends(current_
 
     logger.info(f"[profile/seed] seeded profile for user_id={request.user_id}")
     return profiling_service.get_family_profile(request.user_id)
+
+
+# ── Profile editor write path (PATCH) ────────────────────────────────
+# The full ~35 parent + ~23 kid fields are already stored + returned by GET
+# /profile; these let the iOS/web profile editor WRITE them (the seed endpoint
+# only whitelists a subset and merges lists). List fields use replace semantics
+# so the editor can edit/remove items, not only append.
+
+from dataclasses import fields as _dc_fields
+
+_PARENT_FIELDS = {f.name for f in _dc_fields(ParentProfile)}
+_CHILD_FIELDS = {f.name for f in _dc_fields(ChildProfile)}
+_INT_FIELDS = {"adults_in_household"}
+_FLOAT_FIELDS = {"age"}
+
+
+def _coerce_profile_value(key: str, value: Any) -> Any:
+    """Light type coercion so JSON strings land as the right scalar type."""
+    if value is None:
+        return None
+    try:
+        if key in _INT_FIELDS:
+            return int(value)
+        if key in _FLOAT_FIELDS:
+            return float(value)
+    except (TypeError, ValueError):
+        return value
+    return value
+
+
+def _validated_updates(payload: Dict[str, Any], allowed: set) -> Dict[str, Any]:
+    """Keep only known profile keys (drop junk / control keys) + coerce types."""
+    return {
+        k: _coerce_profile_value(k, v)
+        for k, v in payload.items()
+        if k in allowed
+    }
+
+
+@app.patch("/profile")
+def patch_profile(
+    payload: Dict[str, Any] = Body(default={}),
+    user_id: str = Depends(current_user),
+):
+    """Partial-update the authenticated user's PARENT profile. Body is any subset
+    of ParentProfile fields (unknown keys ignored); list fields are replaced."""
+    claimed = payload.pop("user_id", None)
+    if claimed is not None:
+        authorize_user_match(authenticated=user_id, claimed=claimed)
+    updates = _validated_updates(payload, _PARENT_FIELDS)
+    profiling_service.replace_parent_profile(user_id, updates)
+    persist_state(user_id)
+    return profiling_service.get_family_profile(user_id)
+
+
+@app.patch("/profile/kids/{kid_name}")
+def patch_kid(
+    kid_name: str,
+    payload: Dict[str, Any] = Body(default={}),
+    user_id: str = Depends(current_user),
+):
+    """Partial-update (or CREATE if new — covers add-a-kid) a child profile. Body
+    is any subset of ChildProfile fields; list fields are replaced."""
+    claimed = payload.pop("user_id", None)
+    if claimed is not None:
+        authorize_user_match(authenticated=user_id, claimed=claimed)
+    updates = _validated_updates(payload, _CHILD_FIELDS)
+    profiling_service.replace_child_profile(user_id, kid_name, updates)
+    persist_state(user_id)
+    return profiling_service.get_family_profile(user_id)
 
 
 @app.post("/feedback")

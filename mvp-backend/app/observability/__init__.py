@@ -67,6 +67,25 @@ def init_sentry() -> bool:
     return True
 
 
+def capture_exception(exc: BaseException, **tags: Any) -> None:
+    """Send an explicit exception to Sentry with string tags (e.g. feature=cos,
+    tool=LookupAndSaveCamp, user=...). No-op when Sentry is off, so it's safe to
+    call from anywhere (local/tests). Used by code paths that swallow an
+    exception into a user-facing string but still want it tracked."""
+    if not _sentry_on:
+        return
+    try:
+        import sentry_sdk
+
+        with sentry_sdk.push_scope() as scope:
+            for key, value in tags.items():
+                if value is not None:
+                    scope.set_tag(key, str(value))
+            sentry_sdk.capture_exception(exc)
+    except Exception:  # noqa: BLE001 — tracking must never break the caller
+        pass
+
+
 # ── Metrics: OpenTelemetry (OTLP push) → Grafana Cloud ───────────────────────
 
 def init_otel(app: Any) -> bool:

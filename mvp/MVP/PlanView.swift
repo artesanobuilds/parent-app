@@ -7,32 +7,35 @@ import SwiftUI
 /// view model injected from `MainTabView`.
 struct PlanView: View {
     @ObservedObject var viewModel: PlanViewModel
+    @ObservedObject var cosVM: CosChatViewModel
     let configuration: ServerConfiguration
     let userID: String
 
+    @State private var segment: PlanSegment = .chat
     @State private var showIngest = false
+
+    /// The Plan hub's sub-views. The Chief of Staff (chat) is the front door;
+    /// the structured views hang off it one tap away.
+    enum PlanSegment: String, CaseIterable, Identifiable {
+        case chat, discover, shortlist, calendar
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .chat: return "Chat"
+            case .discover: return "Discover"
+            case .shortlist: return "Shortlist"
+            case .calendar: return "Calendar"
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: .hearth900) {
-                    header
-                    ingestEntry
-                    discoverySection
-                    exploringSection
-                    if let summary = viewModel.summary {
-                        planSummarySection(summary)
-                    }
-                    calendarSection
-                    todosSection
-                    chatLink
-                }
-                .padding(.horizontal, .hearth700)
-                .padding(.top, .hearth700)
+            VStack(spacing: 0) {
+                header
+                segmentPicker
+                segmentBody
             }
-            // Any scroll drag dismisses the keyboard (the numeric ZIP keyboard
-            // has no return key); the field's own "Done" bar is the explicit tap.
-            .scrollDismissesKeyboard(.immediately)
             .background(Color.bgCanvas.ignoresSafeArea())
             .sheet(isPresented: $showIngest) {
                 IngestView(viewModel: viewModel)
@@ -43,13 +46,14 @@ struct PlanView: View {
             .task {
                 viewModel.userId = userID
                 viewModel.baseURL = configuration.baseURL
+                cosVM.setUserID(userID)
                 await viewModel.prefillLocation()
                 await viewModel.loadPlan()
             }
-            .refreshable { await viewModel.loadPlan() }
             .onAppear {
                 viewModel.userId = userID
                 viewModel.baseURL = configuration.baseURL
+                cosVM.setUserID(userID)
             }
         }
     }
@@ -62,11 +66,114 @@ struct PlanView: View {
                 .font(.hearthLabel)
                 .tracking(0.66)
                 .foregroundColor(.inkMuted)
-            Text("Your family's activities")
+            Text("Chief of Staff")
                 .font(.hearthDisplayMD)
                 .foregroundColor(.inkPrimary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, .hearth700)
+        .padding(.top, .hearth700)
+    }
+
+    // MARK: - Segments
+
+    private var segmentPicker: some View {
+        Picker("View", selection: $segment) {
+            ForEach(PlanSegment.allCases) { seg in
+                Text(seg.label).tag(seg)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, .hearth700)
+        .padding(.top, .hearth500)
+        .padding(.bottom, .hearth400)
+        .background(Color.bgCanvas)
+    }
+
+    @ViewBuilder
+    private var segmentBody: some View {
+        switch segment {
+        case .chat:
+            // The chat owns its own pinned input bar + scroll; MainTabView's
+            // bottom padding already lifts the whole tab clear of the tab bar.
+            CosChatView(viewModel: cosVM)
+
+        case .discover:
+            ScrollView {
+                VStack(alignment: .leading, spacing: .hearth900) {
+                    ingestEntry
+                    discoverySection
+                }
+                .padding(.horizontal, .hearth700)
+                .padding(.top, .hearth500)
+                .padding(.bottom, .hearth900)
+            }
+            // The numeric ZIP keyboard has no return key; any drag dismisses it.
+            .scrollDismissesKeyboard(.immediately)
+
+        case .shortlist:
+            ScrollView {
+                VStack(alignment: .leading, spacing: .hearth900) {
+                    exploringSection
+                    if let summary = viewModel.summary {
+                        planSummarySection(summary)
+                    }
+                    todosSection
+                    if shortlistIsEmpty {
+                        emptyState(
+                            icon: "bookmark",
+                            title: "Nothing on your shortlist yet",
+                            message: "Pin camps from Discover, then ask the Chief of Staff to help you decide."
+                        )
+                    }
+                }
+                .padding(.horizontal, .hearth700)
+                .padding(.top, .hearth500)
+                .padding(.bottom, .hearth900)
+            }
+            .refreshable { await viewModel.loadPlan() }
+
+        case .calendar:
+            ScrollView {
+                VStack(alignment: .leading, spacing: .hearth900) {
+                    calendarSection
+                    if viewModel.calendarWeeks.isEmpty {
+                        emptyState(
+                            icon: "calendar",
+                            title: "Your calendar is empty",
+                            message: "Once you confirm camps and activities, your week-by-week plan appears here."
+                        )
+                    }
+                }
+                .padding(.horizontal, .hearth700)
+                .padding(.top, .hearth500)
+                .padding(.bottom, .hearth900)
+            }
+            .refreshable { await viewModel.loadPlan() }
+        }
+    }
+
+    private var shortlistIsEmpty: Bool {
+        viewModel.exploringActivities.isEmpty
+            && viewModel.todos.isEmpty
+            && viewModel.summary == nil
+    }
+
+    private func emptyState(icon: String, title: String, message: String) -> some View {
+        VStack(spacing: .hearth400) {
+            Image(systemName: icon)
+                .font(.system(size: 30, weight: .light))
+                .foregroundColor(.inkMuted)
+            Text(title)
+                .font(.hearthBodyLG.weight(.semibold))
+                .foregroundColor(.inkPrimary)
+            Text(message)
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkSecondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, .hearth1000)
     }
 
     // MARK: - Ingest entry
@@ -357,12 +464,11 @@ struct PlanView: View {
                 ForEach(items) { activity in
                     exploringRow(activity)
                 }
-                NavigationLink {
-                    CosChatView(
-                        configuration: configuration,
-                        userID: userID,
-                        initialPrompt: "Help me decide between the camps on my shortlist. Walk me through the tradeoffs (cost, eligibility, schedule conflicts, coverage) and recommend picks per kid."
-                    )
+                Button {
+                    // Flip to the chat segment and seed a triage request into the
+                    // same (hoisted) conversation.
+                    withAnimation(.hearthFast) { segment = .chat }
+                    cosVM.send("Help me decide between the camps on my shortlist. Walk me through the tradeoffs (cost, eligibility, schedule conflicts, coverage) and recommend picks per kid.")
                 } label: {
                     Label("Help me decide", systemImage: "arrow.left.arrow.right")
                         .font(.hearthBodyMD.weight(.semibold))
@@ -604,39 +710,6 @@ struct PlanView: View {
                 }
             }
         }
-    }
-
-    // MARK: - Chat
-
-    private var chatLink: some View {
-        NavigationLink {
-            CosChatView(configuration: configuration, userID: userID)
-        } label: {
-            HStack(spacing: .hearth400) {
-                Image(systemName: "calendar.badge.clock")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.inkOnPhotoLight)
-                    .frame(width: 40, height: 40)
-                    .background(Circle().fill(Color.accentDefault))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Ask your chief of staff")
-                        .font(.hearthBodyMD.weight(.semibold))
-                        .foregroundColor(.inkPrimary)
-                    Text("Track activities, sort coverage, decide between camps")
-                        .font(.hearthBodySM)
-                        .foregroundColor(.inkSecondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.inkMuted)
-            }
-            .padding(.hearth500)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(cardBackground)
-        }
-        .buttonStyle(.plain)
-        .padding(.bottom, .hearth1000)
     }
 
     // MARK: - Helpers

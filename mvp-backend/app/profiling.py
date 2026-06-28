@@ -3,6 +3,33 @@ from threading import Lock
 from typing import Any, Dict, List, Optional
 
 
+def _apply_update(obj: Any, updates: Dict[str, Any], *, replace_lists: bool = False) -> None:
+    """Shared partial-update logic for ParentProfile / ChildProfile.
+
+    Scalars are set directly. List fields MERGE by default (extend + dedupe);
+    with ``replace_lists=True`` a list field present in ``updates`` is SET to the
+    given value (scalar coerced to a 1-item list, None/empty → [])."""
+    for key, value in updates.items():
+        if not hasattr(obj, key):
+            continue
+        current = getattr(obj, key)
+        if isinstance(current, list):
+            if replace_lists:
+                if value is None:
+                    setattr(obj, key, [])
+                elif isinstance(value, list):
+                    setattr(obj, key, [v for v in value if v not in (None, "")])
+                else:
+                    setattr(obj, key, [value])
+            elif value:
+                if isinstance(value, list):
+                    current.extend(v for v in value if v not in current)
+                elif value not in current:
+                    current.append(value)
+        else:
+            setattr(obj, key, value)
+
+
 @dataclass
 class ParentProfile:
     """Lightweight parent profile collected during onboarding."""
@@ -33,21 +60,15 @@ class ParentProfile:
     co_parenting: Optional[str] = None  # notes about coordination/boundaries
     guidance_style: Optional[str] = None  # concise scripts vs. explanations
 
-    def apply_update(self, updates: Dict[str, Any]) -> None:
-        """Merge partial updates into the parent profile."""
-        for key, value in updates.items():
-            if not hasattr(self, key):
-                continue
-            current = getattr(self, key)
-            if isinstance(current, list) and value:
-                # Merge list-like values; allow value to be str or list
-                if isinstance(value, list):
-                    current.extend(v for v in value if v not in current)
-                else:
-                    if value not in current:
-                        current.append(value)
-            else:
-                setattr(self, key, value)
+    def apply_update(self, updates: Dict[str, Any], *, replace_lists: bool = False) -> None:
+        """Merge partial updates into the parent profile.
+
+        List fields are normally MERGED (extend + dedupe) — that's how the
+        coaching/onboarding agents accumulate facts over time. With
+        ``replace_lists=True`` a list field present in ``updates`` is SET to the
+        given value instead, so the profile editor can edit/remove items (not
+        only append) and a removal actually sticks."""
+        _apply_update(self, updates, replace_lists=replace_lists)
 
 
 @dataclass
@@ -81,20 +102,10 @@ class ChildProfile:
     motivators: List[str] = field(default_factory=list)
     safety_flags: Optional[str] = None  # non-clinical concerns
 
-    def apply_update(self, updates: Dict[str, Any]) -> None:
-        """Merge partial updates into the child profile."""
-        for key, value in updates.items():
-            if not hasattr(self, key):
-                continue
-            current = getattr(self, key)
-            if isinstance(current, list) and value:
-                if isinstance(value, list):
-                    current.extend(v for v in value if v not in current)
-                else:
-                    if value not in current:
-                        current.append(value)
-            else:
-                setattr(self, key, value)
+    def apply_update(self, updates: Dict[str, Any], *, replace_lists: bool = False) -> None:
+        """Merge partial updates into the child profile. See
+        ``ParentProfile.apply_update`` for the ``replace_lists`` semantics."""
+        _apply_update(self, updates, replace_lists=replace_lists)
 
 
 @dataclass
@@ -139,6 +150,23 @@ class ProfilingService:
         if child_name not in family.children:
             family.children[child_name] = ChildProfile(name=child_name)
         family.children[child_name].apply_update(child_updates)
+        return {child_name: asdict(family.children[child_name])}
+
+    def replace_parent_profile(self, user_id: str, parent_updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Like update_parent_profile but list fields are SET, not merged — used by
+        the profile editor so edits/removals persist (see apply_update)."""
+        family = self._get_or_create_family(user_id)
+        family.parent.apply_update(parent_updates, replace_lists=True)
+        return family.snapshot()["parent"]
+
+    def replace_child_profile(
+        self, user_id: str, child_name: str, child_updates: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Editor-facing kid update (creates the kid if new; list fields SET)."""
+        family = self._get_or_create_family(user_id)
+        if child_name not in family.children:
+            family.children[child_name] = ChildProfile(name=child_name)
+        family.children[child_name].apply_update(child_updates, replace_lists=True)
         return {child_name: asdict(family.children[child_name])}
 
     def get_family_profile(self, user_id: str) -> Dict[str, Any]:

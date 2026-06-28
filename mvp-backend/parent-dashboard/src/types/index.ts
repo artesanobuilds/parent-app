@@ -8,9 +8,68 @@ export interface AuthTokenResponse {
   user_id: string;
 }
 
+// Mirrors app/profiling.py ParentProfile / ChildProfile (all optional). The
+// profile editor reads + writes these; list fields are replaced server-side.
+export interface ParentProfile {
+  name?: string | null;
+  pronouns?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
+  primary_language?: string | null;
+  parent_age_range?: string | null;
+  adults_in_household?: number | null;
+  household_structure?: string | null;
+  employment?: string | null;
+  work_hours?: string | null;
+  energy_pattern?: string | null;
+  default_stress_response?: string | null;
+  dreaded_moment?: string | null;
+  support_system?: string | null;
+  support_boundaries?: string | null;
+  cultural_background?: string | null;
+  parenting_style?: string | null;
+  stressors?: string[];
+  goals?: string[];
+  coping_strategies?: string[];
+  deescalation_works?: string[];
+  deescalation_backfires?: string[];
+  mental_health_notes?: string | null;
+  co_parenting?: string | null;
+  guidance_style?: string | null;
+}
+
+export interface ChildProfile {
+  name?: string | null;
+  pronouns?: string | null;
+  age?: number | null;
+  grade_band?: string | null;
+  temperament?: string | null;
+  interests?: string[];
+  strengths?: string[];
+  academic_strengths?: string[];
+  challenges?: string[];
+  emotion_regulation?: string | null;
+  social_profile?: string | null;
+  learning_profile?: string | null;
+  neurodiversity?: string | null;
+  sensory_notes?: string | null;
+  sleep_routine?: string | null;
+  health_notes?: string | null;
+  triggers?: string[];
+  escalation_pattern?: string | null;
+  calming_strategies?: string[];
+  recent_changes?: string[];
+  school_context?: string | null;
+  teacher_notes?: string | null;
+  sibling_conflicts?: string[];
+  repair_helpers?: string[];
+  motivators?: string[];
+  safety_flags?: string | null;
+}
+
 export interface FamilyProfile {
-  parent?: { name?: string; postal_code?: string | null; country?: string | null };
-  children?: Record<string, { name?: string; age?: number | null }>;
+  parent?: ParentProfile;
+  children?: Record<string, ChildProfile>;
 }
 
 // ── Discovery / research ──────────────────────────────────────────────

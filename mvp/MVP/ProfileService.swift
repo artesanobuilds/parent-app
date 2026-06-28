@@ -1,22 +1,109 @@
 import Foundation
 
-// DTOs for the family profile (GET /profile). We declare only the fields the
-// Settings → Profile screen reads/edits; JSONDecoder ignores the rest.
+// DTOs for the family profile (GET /profile). The backend stores ~35 parent +
+// ~23 kid fields (most populated by the coaching/onboarding agents over time);
+// we decode them all so the profile editor can show + edit them. JSONDecoder
+// ignores any field not declared here.
 
 struct ParentProfileDTO: Codable {
-    var name: String?
-    var postalCode: String?
-    var country: String?
+    var name: String? = nil
+    var pronouns: String? = nil
+    var postalCode: String? = nil
+    var country: String? = nil
+    var primaryLanguage: String? = nil
+    var parentAgeRange: String? = nil
+    var adultsInHousehold: Int? = nil
+    var householdStructure: String? = nil
+    var employment: String? = nil
+    var workHours: String? = nil
+    var energyPattern: String? = nil
+    var defaultStressResponse: String? = nil
+    var dreadedMoment: String? = nil
+    var supportSystem: String? = nil
+    var supportBoundaries: String? = nil
+    var culturalBackground: String? = nil
+    var parentingStyle: String? = nil
+    var stressors: [String]? = nil
+    var goals: [String]? = nil
+    var copingStrategies: [String]? = nil
+    var deescalationWorks: [String]? = nil
+    var deescalationBackfires: [String]? = nil
+    var mentalHealthNotes: String? = nil
+    var coParenting: String? = nil
+    var guidanceStyle: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case name, country
+        case name, pronouns, country, employment, stressors, goals
         case postalCode = "postal_code"
+        case primaryLanguage = "primary_language"
+        case parentAgeRange = "parent_age_range"
+        case adultsInHousehold = "adults_in_household"
+        case householdStructure = "household_structure"
+        case workHours = "work_hours"
+        case energyPattern = "energy_pattern"
+        case defaultStressResponse = "default_stress_response"
+        case dreadedMoment = "dreaded_moment"
+        case supportSystem = "support_system"
+        case supportBoundaries = "support_boundaries"
+        case culturalBackground = "cultural_background"
+        case parentingStyle = "parenting_style"
+        case copingStrategies = "coping_strategies"
+        case deescalationWorks = "deescalation_works"
+        case deescalationBackfires = "deescalation_backfires"
+        case mentalHealthNotes = "mental_health_notes"
+        case coParenting = "co_parenting"
+        case guidanceStyle = "guidance_style"
     }
 }
 
 struct ChildProfileDTO: Codable {
-    var name: String?
-    var age: Double?
+    var name: String? = nil
+    var pronouns: String? = nil
+    var age: Double? = nil
+    var gradeBand: String? = nil
+    var temperament: String? = nil
+    var interests: [String]? = nil
+    var strengths: [String]? = nil
+    var academicStrengths: [String]? = nil
+    var challenges: [String]? = nil
+    var emotionRegulation: String? = nil
+    var socialProfile: String? = nil
+    var learningProfile: String? = nil
+    var neurodiversity: String? = nil
+    var sensoryNotes: String? = nil
+    var sleepRoutine: String? = nil
+    var healthNotes: String? = nil
+    var triggers: [String]? = nil
+    var escalationPattern: String? = nil
+    var calmingStrategies: [String]? = nil
+    var recentChanges: [String]? = nil
+    var schoolContext: String? = nil
+    var teacherNotes: String? = nil
+    var siblingConflicts: [String]? = nil
+    var repairHelpers: [String]? = nil
+    var motivators: [String]? = nil
+    var safetyFlags: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case name, pronouns, age, temperament, interests, strengths, challenges
+        case triggers, motivators, neurodiversity
+        case gradeBand = "grade_band"
+        case academicStrengths = "academic_strengths"
+        case emotionRegulation = "emotion_regulation"
+        case socialProfile = "social_profile"
+        case learningProfile = "learning_profile"
+        case sensoryNotes = "sensory_notes"
+        case sleepRoutine = "sleep_routine"
+        case healthNotes = "health_notes"
+        case escalationPattern = "escalation_pattern"
+        case calmingStrategies = "calming_strategies"
+        case recentChanges = "recent_changes"
+        case schoolContext = "school_context"
+        case teacherNotes = "teacher_notes"
+        case siblingConflicts = "sibling_conflicts"
+        case repairHelpers = "repair_helpers"
+        case safetyFlags = "safety_flags"
+    }
 }
 
 struct FamilyProfileDTO: Codable {
@@ -24,9 +111,10 @@ struct FamilyProfileDTO: Codable {
     var children: [String: ChildProfileDTO]?
 }
 
-/// Reads/writes the parent profile. Mirrors ContentService/PlanService: static
-/// funcs, Bearer auth via AuthService. Save goes through the existing
-/// /profile/seed endpoint (which updates only the fields it's given).
+/// Reads/writes the family profile. Mirrors ContentService/PlanService: static
+/// funcs, Bearer auth via AuthService. Reads via GET /profile; writes the rich
+/// fields via PATCH /profile and PATCH /profile/kids/{name} (list fields are
+/// replaced server-side, so edits/removals stick).
 enum ProfileService {
 
     @MainActor
@@ -48,31 +136,46 @@ enum ProfileService {
         return try JSONDecoder().decode(FamilyProfileDTO.self, from: data)
     }
 
-    /// Save the editable parent fields. Sends only non-empty values so blank
-    /// fields never clobber existing data (matches /profile/seed semantics).
-    static func saveParentProfile(
-        baseURL: URL,
-        userID: String,
-        name: String,
-        postalCode: String,
-        country: String
-    ) async throws {
-        let url = baseURL.appendingPathComponent("profile/seed")
+    // MARK: - Writes (PATCH)
+
+    /// Partial-update the parent profile. `fields` are snake_case keys → values
+    /// (String / Int / [String]); list fields are replaced server-side.
+    @discardableResult
+    static func updateParent(
+        baseURL: URL, userID: String, fields: [String: Any]
+    ) async throws -> FamilyProfileDTO {
+        try await patch(path: "profile", baseURL: baseURL, userID: userID, fields: fields)
+    }
+
+    /// Partial-update (or CREATE if new — covers add-a-kid) a child profile.
+    @discardableResult
+    static func updateKid(
+        baseURL: URL, userID: String, name: String, fields: [String: Any]
+    ) async throws -> FamilyProfileDTO {
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        return try await patch(
+            path: "profile/kids/\(encoded)", baseURL: baseURL, userID: userID, fields: fields
+        )
+    }
+
+    private static func patch(
+        path: String, baseURL: URL, userID: String, fields: [String: Any]
+    ) async throws -> FamilyProfileDTO {
+        let url = baseURL.appendingPathComponent(path)
         var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         for (k, v) in await authHeader(userID: userID, baseURL: baseURL) {
             request.setValue(v, forHTTPHeaderField: k)
         }
-        // parent_name is required by the seed schema; send the current value.
-        var body: [String: Any] = ["user_id": userID, "parent_name": name]
-        if !postalCode.isEmpty { body["postal_code"] = postalCode }
-        if !country.isEmpty { body["country"] = country }
+        var body = fields
+        body["user_id"] = userID
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
+        return try JSONDecoder().decode(FamilyProfileDTO.self, from: data)
     }
 }
