@@ -1711,6 +1711,15 @@ def health_check():
     return {"status": "ok"}
 
 
+@app.get("/debug/sentry-test")
+def sentry_test(_: None = Depends(require_admin_token)):
+    """Admin-gated verification lever: deliberately raise an unhandled exception so
+    Sentry's FastAPI integration captures a REAL production event (full request
+    context), confirming error tracking works end-to-end. Returns 500. Safe — gated
+    by ADMIN_TOKEN, touches no data. (Standard Sentry verification pattern.)"""
+    raise RuntimeError("Deliberate Sentry verification error from /debug/sentry-test")
+
+
 # ── Serve built CMS static files ─────────────────────────────────────
 
 _cms_dist = Path(__file__).resolve().parent.parent / "cms" / "dist"
