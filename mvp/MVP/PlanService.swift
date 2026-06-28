@@ -42,12 +42,14 @@ struct ResearchProgress: Codable, Hashable {
     let detail: String?           // current action headline ("Searching for …", "Thinking…")
     let candidatesFound: Int?     // running count
     let candidatesTarget: Int?    // how many we're aiming for
+    let candidatesConsidered: Int? // size of the pool we curated the surfaced set from
     let recent: [String]?         // recent milestones, oldest→newest
 
     enum CodingKeys: String, CodingKey {
         case phase, detail, recent
         case candidatesFound = "candidates_found"
         case candidatesTarget = "candidates_target"
+        case candidatesConsidered = "candidates_considered"
     }
 }
 

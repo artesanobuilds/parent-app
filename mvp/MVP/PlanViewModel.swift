@@ -117,6 +117,17 @@ final class PlanViewModel: ObservableObject {
         return "\(discoveryFound) found"
     }
 
+    /// Header above the surfaced results. When we curated the shown set from a
+    /// larger searched pool, say so ("Top 3 of 28 reviewed") so the parent knows
+    /// a small count is hand-picked from a deep search, not a shallow one.
+    var discoveryResultLabel: String {
+        let shown = candidates.count
+        if let considered = runStatus?.progress?.candidatesConsidered, considered > shown {
+            return "Top \(shown) of \(considered) reviewed"
+        }
+        return "\(shown) found"
+    }
+
     var hasRun: Bool { runStatus != nil }
 
     /// A run finished but produced no candidates — distinct from "not run yet".

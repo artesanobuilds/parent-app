@@ -121,6 +121,16 @@ class ResearchWorker:
             n = self._storage.insert_activity_candidates(
                 run_id=run_id, user_id=user_id, candidates=candidates
             )
+            # Carry the "of M reviewed" breadcrumb (set by discover when it trimmed
+            # a deep pool to the surfaced top N) into the terminal frame so the
+            # results screen can honestly say "top N of M reviewed".
+            done_progress: Dict[str, Any] = {"phase": "done", "candidates_found": n}
+            try:
+                prev = (self._storage.get_research_run(run_id) or {}).get("progress") or {}
+                if prev.get("candidates_considered"):
+                    done_progress["candidates_considered"] = prev["candidates_considered"]
+            except Exception:  # breadcrumb is cosmetic; never block finalize
+                pass
             # Finalize only if the run is still 'running'. If the parent cancelled
             # it during the (long) discovery, don't resurrect it to done — drop the
             # work so a cancel actually sticks (terminal state stays terminal).
@@ -128,7 +138,7 @@ class ResearchWorker:
                 run_id,
                 status="done",
                 candidate_count=n,
-                progress={"phase": "done", "candidates_found": n},
+                progress=done_progress,
             ):
                 logger.info("[research] run %s done with %d candidate(s)", run_id, n)
             else:

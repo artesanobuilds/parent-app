@@ -423,7 +423,7 @@ struct PlanView: View {
     private var candidateList: some View {
         VStack(alignment: .leading, spacing: .hearth400) {
             HStack {
-                Text("\(viewModel.candidates.count) found")
+                Text(viewModel.discoveryResultLabel)
                     .font(.hearthBodyLG.weight(.semibold))
                     .foregroundColor(.inkPrimary)
                 Spacer()

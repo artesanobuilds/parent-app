@@ -94,6 +94,7 @@ export interface ResearchProgress {
   detail?: string;             // human-friendly current action ("Searching: …")
   candidates_found?: number;   // running count
   candidates_target?: number;  // how many we're aiming for
+  candidates_considered?: number; // pool size the surfaced set was curated from
   recent?: string[];           // last few actions, oldest→newest
   [k: string]: unknown;
 }

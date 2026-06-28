@@ -16,7 +16,9 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.research.graph import (  # noqa: E402
     _FOCUS_CLOSE,
     _FOCUS_OPEN,
-    _resolve_target,
+    _rank_and_trim,
+    _resolve_discovery_target,
+    _resolve_surface_count,
     _task_message,
 )
 
@@ -30,7 +32,9 @@ def test_radius_and_focus_surfaced():
     assert "within about 25 miles" in msg
     assert _FOCUS_OPEN in msg and _FOCUS_CLOSE in msg
     assert "art camps only for Ceiba" in msg
-    assert "up to 20" in msg
+    # The prompt reflects DISCOVERY depth, not the surface count: a request to
+    # surface 20 still searches the floor (25) so we curate 20 out of many.
+    assert "up to 25" in msg
     # radius_miles + focus are pulled out of the raw params JSON dump (presented
     # deliberately instead), so they don't leak un-hardened.
     assert '"focus"' not in msg
@@ -55,7 +59,7 @@ def test_no_focus_no_radius_is_clean():
     msg = _task_message({"postal_code": "x"}, [{"name": "Kid", "age": 5}], {})
     assert _FOCUS_OPEN not in msg
     assert "miles of that location" not in msg
-    assert "Aim for up to 25" in msg  # default max_candidates
+    assert "up to 25" in msg  # default discovery depth
 
 
 def test_empty_focus_string_is_ignored():
@@ -64,18 +68,47 @@ def test_empty_focus_string_is_ignored():
     assert "miles of that location" not in msg  # radius 0 → not surfaced
 
 
-def test_max_candidates_clamped():
-    # Parent-controlled + API-supplied → guarded to a sane range (1–100).
-    assert _resolve_target({"max_candidates": 5}) == 5
-    assert _resolve_target({"max_candidates": 50}) == 50
-    assert _resolve_target({"max_candidates": 500}) == 100   # ceiling
-    assert _resolve_target({"max_candidates": 0}) == 1        # floor
-    assert _resolve_target({"max_candidates": -10}) == 1
-    assert _resolve_target({"max_candidates": "garbage"}) == 25  # bad → default
-    assert _resolve_target({}) == 25                          # absent → default
-    assert _resolve_target(None) == 25
+def test_surface_count_clamped():
+    # How many we SURFACE — parent-controlled + API-supplied → clamp 1–100.
+    assert _resolve_surface_count({"max_candidates": 3}) == 3
+    assert _resolve_surface_count({"max_candidates": 50}) == 50
+    assert _resolve_surface_count({"max_candidates": 500}) == 100   # ceiling
+    assert _resolve_surface_count({"max_candidates": 0}) == 1        # floor
+    assert _resolve_surface_count({"max_candidates": -10}) == 1
+    assert _resolve_surface_count({"max_candidates": "garbage"}) == 25  # bad → default
+    assert _resolve_surface_count({}) == 25
+    assert _resolve_surface_count(None) == 25
 
 
-def test_clamped_count_reaches_prompt():
-    msg = _task_message({"postal_code": "x"}, [], {"max_candidates": 999})
-    assert "up to 100" in msg  # clamped, not 999
+def test_discovery_target_decoupled_from_surface_count():
+    # A small "show me 3" still searches the floor (25) so we curate out of many.
+    assert _resolve_surface_count({"max_candidates": 3}) == 3
+    assert _resolve_discovery_target({"max_candidates": 3}) == 25
+    # A large request searches that broadly (up to the ceiling).
+    assert _resolve_discovery_target({"max_candidates": 50}) == 50
+    assert _resolve_discovery_target({"max_candidates": 999}) == 100
+    # Default stays the floor.
+    assert _resolve_discovery_target({}) == 25
+    assert _resolve_discovery_target(None) == 25
+
+
+def test_discovery_depth_reaches_prompt_not_surface_count():
+    # max_candidates=3 → the prompt tells the agent to discover the FLOOR (25),
+    # never a shallow 3.
+    msg = _task_message({"postal_code": "x"}, [], {"max_candidates": 3})
+    assert "up to 25" in msg
+    assert "up to 3" not in msg
+
+
+def test_rank_and_trim_keeps_best_n():
+    pool = [
+        {"name": "low", "fit_score": 0.2},
+        {"name": "high", "fit_score": 0.9},
+        {"name": "none"},                      # missing score → sorts last
+        {"name": "mid", "fit_score": 0.5},
+    ]
+    top2 = _rank_and_trim(pool, 2)
+    assert [c["name"] for c in top2] == ["high", "mid"]
+    # Missing scores rank last, never crash; a generous limit keeps everything.
+    allc = _rank_and_trim(pool, 10)
+    assert [c["name"] for c in allc] == ["high", "mid", "low", "none"]

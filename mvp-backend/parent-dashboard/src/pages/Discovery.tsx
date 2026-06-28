@@ -323,6 +323,18 @@ export default function Discovery() {
         </div>
       )}
 
+      {candidates.length > 0 && (
+        <div className="flex items-baseline justify-between mb-300">
+          <h2 className="font-display text-2xl text-ink-primary">Best matches</h2>
+          <span className="text-ink-muted font-mono text-sm">
+            {/* When we curated from a larger searched pool, say so: a small count
+                is hand-picked from a deep search, not a shallow one. */}
+            {progress?.candidates_considered && progress.candidates_considered > candidates.length
+              ? `Top ${candidates.length} of ${progress.candidates_considered} reviewed`
+              : `${candidates.length} found`}
+          </span>
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-500">
         {candidates.map((c) => (
           <div key={c.id} className="bg-elevated border border-hairline rounded-xl p-600">
