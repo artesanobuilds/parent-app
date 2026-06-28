@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Bookmark, BookmarkCheck, Loader2 } from 'lucide-react';
+import { Bookmark, BookmarkCheck, Loader2, X } from 'lucide-react';
 import {
   createResearchRun,
+  deleteActivity,
   getActivities,
   getCandidates,
   getProfile,
@@ -66,6 +67,28 @@ export default function Discovery() {
         n.delete(c.id);
         return n;
       });
+    }
+  }
+
+  // Un-track an activity (un-pin from Exploring). refreshShortlist recomputes
+  // savedIds, so a saved candidate's button flips back to "Save".
+  async function removeActivity(activityId: string) {
+    try {
+      await deleteActivity(activityId);
+      await refreshShortlist();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not remove from shortlist');
+    }
+  }
+
+  // Save if not saved; un-save (remove the linked tracked activity) if it is.
+  async function toggleSave(c: Candidate) {
+    if (savingIds.has(c.id)) return;
+    if (savedIds.has(c.id)) {
+      const act = exploring.find((a) => a.candidate_id === c.id);
+      if (act) await removeActivity(act.id);
+    } else {
+      await saveCandidate(c);
     }
   }
 
@@ -262,11 +285,20 @@ export default function Discovery() {
                     <span className="text-ink-secondary text-sm truncate">{a.provider}</span>
                   )}
                 </div>
-                {a.price_amount != null && (
-                  <span className="font-mono text-sm text-ink-secondary shrink-0">
-                    ${Math.round(a.price_amount)}
-                  </span>
-                )}
+                <div className="flex items-center gap-300 shrink-0">
+                  {a.price_amount != null && (
+                    <span className="font-mono text-sm text-ink-secondary">
+                      ${Math.round(a.price_amount)}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => removeActivity(a.id)}
+                    className="text-ink-muted hover:text-error p-100"
+                    aria-label="Remove from shortlist"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -322,9 +354,10 @@ export default function Discovery() {
                 <span />
               )}
               <button
-                onClick={() => saveCandidate(c)}
-                disabled={savedIds.has(c.id) || savingIds.has(c.id)}
-                className="flex items-center gap-200 text-sm rounded-lg px-300 py-200 border border-hairline disabled:opacity-100 hover:border-accent"
+                onClick={() => toggleSave(c)}
+                disabled={savingIds.has(c.id)}
+                className="flex items-center gap-200 text-sm rounded-lg px-300 py-200 border border-hairline hover:border-accent group"
+                aria-label={savedIds.has(c.id) ? 'Saved — click to remove' : 'Save to shortlist'}
               >
                 {savingIds.has(c.id) ? (
                   <Loader2 className="animate-spin" size={15} />

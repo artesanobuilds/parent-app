@@ -358,4 +358,30 @@ final class PlanViewModel: ObservableObject {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
+
+    /// Un-track an activity (un-pin from the Exploring shortlist). Used by the
+    /// Exploring row's bookmark and by toggling a saved discovery candidate.
+    func removeActivity(_ activityId: String) async {
+        guard let baseURL = baseURL else { return }
+        let uid = userId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uid.isEmpty else { return }
+        do {
+            try await PlanService.deleteActivity(baseURL: baseURL, userID: uid, activityId: activityId)
+            await loadPlan()  // rebuilds activities + savedCandidateIds
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Save if not saved, un-save (remove the linked tracked activity) if it is.
+    func toggleSave(_ candidate: ActivityCandidate) async {
+        if savedCandidateIds.contains(candidate.id) {
+            guard let act = activities.first(where: { $0.candidateId == candidate.id }) else { return }
+            savingCandidateIds.insert(candidate.id)
+            defer { savingCandidateIds.remove(candidate.id) }
+            await removeActivity(act.id)
+        } else {
+            await saveCandidate(candidate)
+        }
+    }
 }

@@ -164,6 +164,19 @@ def patch_activity(
     return {"id": activity_id, "activity": storage.get_tracked_activity(activity_id)}
 
 
+@router.delete("/activities/{activity_id}")
+def delete_activity(activity_id: str, user_id: str = Depends(current_user)):
+    """Un-track an activity (e.g. un-pin from the Exploring shortlist). Ownership is
+    enforced via the existing row, so no body is needed."""
+    storage = _storage()
+    existing = storage.get_tracked_activity(activity_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="tracked activity not found")
+    authorize_user_match(authenticated=user_id, claimed=existing["user_id"])
+    storage.delete_tracked_activity(activity_id)
+    return {"id": activity_id, "deleted": True}
+
+
 # --------------------------------------------------------------------------- #
 # Calendar
 # --------------------------------------------------------------------------- #

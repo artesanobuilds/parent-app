@@ -455,6 +455,19 @@ enum PlanService {
         return resp.id
     }
 
+    /// Un-track an activity (un-pin from the Exploring shortlist). Ownership is
+    /// enforced server-side via the row, so no body is needed.
+    static func deleteActivity(baseURL: URL, userID: String, activityId: String) async throws {
+        let url = baseURL.appendingPathComponent("cos/activities/\(activityId)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        for (k, v) in await authHeader(userID: userID, baseURL: baseURL) {
+            request.setValue(v, forHTTPHeaderField: k)
+        }
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+    }
+
     // MARK: Ingestion
 
     /// Extract structured activity info from a pasted email / forwarded iMessage.

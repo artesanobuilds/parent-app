@@ -138,6 +138,10 @@ export const trackActivity = (body: {
     body: JSON.stringify({ user_id: uid(), status: 'exploring', ...body }),
   });
 
+// Un-track an activity (un-pin from the Exploring shortlist).
+export const deleteActivity = (id: string) =>
+  api<{ id: string; deleted: boolean }>(`/cos/activities/${id}`, { method: 'DELETE' });
+
 export const getTodos = (status?: string) =>
   api<{ todos: Todo[] }>(`/cos/todos${status ? `?status=${status}` : ''}`).then(
     (r) => r.todos,

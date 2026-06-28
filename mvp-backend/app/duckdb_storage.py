@@ -2422,6 +2422,10 @@ class DuckDBStorage(StorageBackend):
             json_cols=("contact_json", "details_json"),
         )
 
+    def delete_tracked_activity(self, activity_id: str) -> None:
+        """Remove a tracked activity (e.g. un-pin from the Exploring shortlist)."""
+        self._con.execute("DELETE FROM tracked_activities WHERE id = ?", [activity_id])
+
     # calendar_entries ------------------------------------------------------
 
     _CALENDAR_COLS = (

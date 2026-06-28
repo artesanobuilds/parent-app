@@ -317,7 +317,7 @@ struct PlanView: View {
         let saved = viewModel.isSaved(candidate)
         let saving = viewModel.isSaving(candidate)
         return Button {
-            Task { await viewModel.saveCandidate(candidate) }
+            Task { await viewModel.toggleSave(candidate) }
         } label: {
             Group {
                 if saving {
@@ -331,8 +331,8 @@ struct PlanView: View {
             .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
-        .disabled(saved || saving)
-        .accessibilityLabel(saved ? "Saved to shortlist" : "Save to shortlist")
+        .disabled(saving)  // tappable when saved → un-saves
+        .accessibilityLabel(saved ? "Saved — tap to remove" : "Save to shortlist")
     }
 
     // MARK: - Exploring shortlist (R1)
@@ -386,9 +386,16 @@ struct PlanView: View {
                     .foregroundColor(.inkPrimary)
                     .multilineTextAlignment(.leading)
                 Spacer()
-                Image(systemName: "bookmark.fill")
-                    .font(.system(size: 13))
-                    .foregroundColor(.accentDefault)
+                Button {
+                    Task { await viewModel.removeActivity(activity.id) }
+                } label: {
+                    Image(systemName: "bookmark.fill")
+                        .font(.system(size: 15))
+                        .foregroundColor(.accentDefault)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove from shortlist")
             }
             HStack(spacing: .hearth300) {
                 if let kid = activity.kidName {
