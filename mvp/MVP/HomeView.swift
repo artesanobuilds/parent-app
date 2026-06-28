@@ -9,6 +9,10 @@ struct HomeView: View {
     // Drives whether the greeting's Hand-to-kid CTA renders.
     @AppStorage("has_kid_companions") private var hasKidCompanions: Bool = false
     @State private var isShowingSettings = false
+    // Bumped when the Settings sheet closes so the Companions list re-fetches —
+    // otherwise edits/adds/deletes made in Settings → Profile don't show on Home
+    // until the app is relaunched (the section's .task only runs on first appear).
+    @State private var homeRefreshToken = 0
 
     var body: some View {
         NavigationStack {
@@ -27,7 +31,7 @@ struct HomeView: View {
                                 .padding(.horizontal, .hearth700)
 
                             if let baseURL = configuration.baseURL, !username.isEmpty {
-                                KidsHomeSection(userID: username, baseURL: baseURL)
+                                KidsHomeSection(userID: username, baseURL: baseURL, refreshToken: homeRefreshToken)
                                     .padding(.horizontal, .hearth700)
                             }
 
@@ -51,7 +55,7 @@ struct HomeView: View {
             // The toolbar(.hidden) modifier fully collapses it.
             .toolbar(.hidden, for: .navigationBar)
             .withContentNavigationDestinations()
-            .sheet(isPresented: $isShowingSettings) {
+            .sheet(isPresented: $isShowingSettings, onDismiss: { homeRefreshToken += 1 }) {
                 NavigationStack {
                     SettingsView(configuration: configuration, userID: username)
                         .navigationTitle("Settings")

@@ -168,3 +168,30 @@ def test_cos_messages_append_and_ordering(store):
 
     other = store.get_cos_messages("u1", thread_id="other")
     assert len(other) == 1 and other[0]["content"] == "elsewhere"
+
+
+def test_delete_kid_data_cascades_agent_rows(store):
+    """Deleting a kid's data removes its config + messages so a removed kid
+    can't linger as an orphan agent. A sibling kid's data is untouched."""
+    cfg = store.save_kid_agent_config(
+        user_id="u1", kid_name="little one",
+        invariants={"agent_display_name": "Buddy"}, free_text_brief="",
+        system_prompt="p", content_hash="h", model="m", enabled=True,
+    )
+    store.append_kid_message(agent_id=cfg["id"], thread_id="default", role="user", content="hi")
+    store.set_kid_pin("u1", "little one", "hash")
+    # A sibling that must survive.
+    sib = store.save_kid_agent_config(
+        user_id="u1", kid_name="Lily",
+        invariants={"agent_display_name": "Pal"}, free_text_brief="",
+        system_prompt="p", content_hash="h2", model="m", enabled=True,
+    )
+
+    deleted = store.delete_kid_data(user_id="u1", kid_name="little one")
+    assert deleted["kid_agent_configs"] >= 1
+    assert deleted["kid_messages"] >= 1
+
+    # The deleted kid is gone; the sibling remains.
+    assert store.get_kid_agent_config("u1", "little one") is None
+    assert store.get_kid_agent_config("u1", "Lily") is not None
+    assert store.get_kid_pin_hash("u1", "little one") is None

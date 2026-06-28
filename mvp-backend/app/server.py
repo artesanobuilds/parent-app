@@ -895,8 +895,15 @@ def delete_kid(
     user_id: str = Depends(current_user),
 ):
     """Remove a child profile (a mistakenly-added kid, or a duplicate the coach
-    created before it learned the real name). Scoped to the authenticated user."""
+    created before it learned the real name). Scoped to the authenticated user.
+    Also cascades the kid's agent data (config/messages/credentials/etc.) so the
+    delete is complete — otherwise an orphan kid-agent lingers and can resurface
+    the kid."""
     profiling_service.remove_child_profile(user_id, kid_name)
+    try:
+        storage_backend.delete_kid_data(user_id=user_id, kid_name=kid_name)
+    except Exception:  # noqa: BLE001 — profile removal already succeeded; cleanup is best-effort
+        logger.exception("[profile/kids] kid-agent cleanup failed for %s/%s", user_id, kid_name)
     persist_state(user_id)
     return profiling_service.get_family_profile(user_id)
 

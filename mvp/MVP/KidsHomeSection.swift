@@ -6,15 +6,19 @@ import SwiftUI
 struct KidsHomeSection: View {
     let userID: String
     let baseURL: URL
+    /// Bumped by HomeView when the Settings sheet closes; a change re-runs the
+    /// refresh so profile edits/adds/deletes show without an app relaunch.
+    var refreshToken: Int = 0
 
     @StateObject private var vm: KidsHomeViewModel
     // Persisted flag so HomeView's greeting header can conditionally show
     // the "Hand to kid" button only when at least one companion exists.
     @AppStorage("has_kid_companions") private var hasKidCompanions: Bool = false
 
-    init(userID: String, baseURL: URL) {
+    init(userID: String, baseURL: URL, refreshToken: Int = 0) {
         self.userID = userID
         self.baseURL = baseURL
+        self.refreshToken = refreshToken
         _vm = StateObject(wrappedValue: KidsHomeViewModel(userID: userID, baseURL: baseURL))
     }
 
@@ -57,7 +61,7 @@ struct KidsHomeSection: View {
                     .navigationBarTitleDisplayMode(.inline)
             }
         }
-        .task {
+        .task(id: refreshToken) {
             await vm.refresh()
             // Surface ACTIVE-companion count to the flag — draft/missing
             // configs don't count: the Hand-to-kid handoff opens a picker

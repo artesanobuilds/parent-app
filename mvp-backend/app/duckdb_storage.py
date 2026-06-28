@@ -1584,6 +1584,50 @@ class DuckDBStorage(StorageBackend):
             )
         return {"counts": deleted, "agent_ids": agent_ids}
 
+    def delete_kid_data(self, *, user_id: str, kid_name: str) -> Dict[str, int]:
+        """Cascade-delete the kid-agent data for ONE child (used when a parent
+        removes a kid profile). Without this, deleting the profile child leaves
+        an orphan kid_agent_config + messages/credentials behind — which keep the
+        kid reachable via /kid-agent and can resurrect it. Mirrors the per-kid
+        slice of `delete_family`. Does NOT touch the profiles blob (the caller's
+        profiling_service already removed the child there)."""
+        deleted: Dict[str, int] = {}
+        with self._con.transaction():
+            agent_ids = [r[0] for r in self._con.execute(
+                "SELECT id FROM kid_agent_configs WHERE user_id = ? AND kid_name = ?",
+                [user_id, kid_name],
+            ).fetchall()]
+            if agent_ids:
+                placeholders = ",".join(["?"] * len(agent_ids))
+                deleted["kid_messages"] = self._con.execute(
+                    f"SELECT count(*) FROM kid_messages WHERE agent_id IN ({placeholders})",
+                    agent_ids,
+                ).fetchone()[0]
+                self._con.execute(
+                    f"DELETE FROM kid_messages WHERE agent_id IN ({placeholders})",
+                    agent_ids,
+                )
+            else:
+                deleted["kid_messages"] = 0
+
+            for table in [
+                "kid_agent_crisis_locks",
+                "kid_agent_configs",
+                "kid_credentials",
+                "moderation_events",
+                "daily_summaries",
+            ]:
+                pre = self._con.execute(
+                    f"SELECT count(*) FROM {table} WHERE user_id = ? AND kid_name = ?",
+                    [user_id, kid_name],
+                ).fetchone()[0]
+                self._con.execute(
+                    f"DELETE FROM {table} WHERE user_id = ? AND kid_name = ?",
+                    [user_id, kid_name],
+                )
+                deleted[table] = pre
+        return deleted
+
     # ── Crisis locks ─────────────────────────────────────────────────
 
     def lock_kid_agent_for_crisis(
