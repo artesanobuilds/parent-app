@@ -877,14 +877,18 @@ def _make_untrack_activity_tool(user_id: str):
 def _make_start_discovery_tool(user_id: str):
     @tool
     def StartDiscovery(
-        focus: Optional[str] = None, radius_miles: Optional[int] = None
+        focus: Optional[str] = None,
+        radius_miles: Optional[int] = None,
+        max_candidates: Optional[int] = None,
     ) -> str:
         """Kick off a background web-discovery run to find NEW camps/activities for
         the family near their saved location. Use when the parent wants you to go
         find options ("find art camps for Ceiba", "what swim classes are near us").
         Optional ``focus`` biases what to surface (category / which kid / vibe);
-        ``radius_miles`` limits distance. Returns once queued — finds stream onto
-        the Discover tab; afterwards use SearchActivities to read them."""
+        ``radius_miles`` limits distance; ``max_candidates`` sets how many to aim
+        for (e.g. "find ~10 swim classes" → 10; clamped 1–100, default 25). Returns
+        once queued — finds stream onto the Discover tab; afterwards use
+        SearchActivities to read them."""
         storage = _storage()
         from app.profiling import profiling_service
 
@@ -915,6 +919,8 @@ def _make_start_discovery_tool(user_id: str):
             params["focus"] = focus
         if radius_miles:
             params["radius_miles"] = radius_miles
+        if max_candidates:
+            params["max_candidates"] = max_candidates
         try:
             result = storage.enqueue_research_run(
                 user_id=user_id, location=location, kids=kids, params=params

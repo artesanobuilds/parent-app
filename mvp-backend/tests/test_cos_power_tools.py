@@ -185,12 +185,18 @@ def test_start_discovery_enqueues_with_profile(monkeypatch):
     _seed_kids()
     storage = FakeStorage()
     monkeypatch.setattr(cos_tools, "_storage", lambda: storage)
-    out = _tool("StartDiscovery").invoke({"focus": "art camps", "radius_miles": 25})
+    out = _tool("StartDiscovery").invoke(
+        {"focus": "art camps", "radius_miles": 25, "max_candidates": 10}
+    )
     assert "Started a discovery run" in out
     assert storage.enqueued, "a run should be enqueued"
     run = storage.enqueued[0]
     assert run["location"]["postal_code"] == "95448"
-    assert run["params"] == {"focus": "art camps", "radius_miles": 25}
+    assert run["params"] == {
+        "focus": "art camps",
+        "radius_miles": 25,
+        "max_candidates": 10,
+    }
     assert run["kids"][0]["name"] == "Ceiba"
 
 

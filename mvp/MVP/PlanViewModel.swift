@@ -26,6 +26,13 @@ final class PlanViewModel: ObservableObject {
     /// Preset radius options for the segmented picker.
     let radiusOptions: [Int] = [5, 10, 25, 50]
 
+    /// How many candidates the discovery run should aim for. Sent as
+    /// `params.max_candidates`; default 25 matches the backend default so the
+    /// behavior is unchanged unless the parent picks another count. The backend
+    /// clamps it (1–100); these presets are the UX surface ("top 5" … "top 50").
+    @Published var maxCandidates: Int = 25
+    let candidateCountOptions: [Int] = [5, 15, 25, 50]
+
     // Discovery run.
     @Published private(set) var runStatus: ResearchRunStatus?
     @Published private(set) var candidates: [ActivityCandidate] = []
@@ -140,7 +147,10 @@ final class PlanViewModel: ObservableObject {
 
         let zip = locationQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let location: [String: Any]? = zip.isEmpty ? nil : ["postal_code": zip, "country": "US"]
-        var params: [String: Any] = ["radius_miles": radiusMiles]
+        var params: [String: Any] = [
+            "radius_miles": radiusMiles,
+            "max_candidates": maxCandidates,
+        ]
         let focus = focusText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !focus.isEmpty { params["focus"] = focus }
 

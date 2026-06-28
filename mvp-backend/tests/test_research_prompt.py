@@ -13,7 +13,12 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.research.graph import _FOCUS_CLOSE, _FOCUS_OPEN, _task_message  # noqa: E402
+from app.research.graph import (  # noqa: E402
+    _FOCUS_CLOSE,
+    _FOCUS_OPEN,
+    _resolve_target,
+    _task_message,
+)
 
 
 def test_radius_and_focus_surfaced():
@@ -57,3 +62,20 @@ def test_empty_focus_string_is_ignored():
     msg = _task_message({}, [], {"focus": "   ", "radius_miles": 0})
     assert _FOCUS_OPEN not in msg          # blank focus → no block
     assert "miles of that location" not in msg  # radius 0 → not surfaced
+
+
+def test_max_candidates_clamped():
+    # Parent-controlled + API-supplied → guarded to a sane range (1–100).
+    assert _resolve_target({"max_candidates": 5}) == 5
+    assert _resolve_target({"max_candidates": 50}) == 50
+    assert _resolve_target({"max_candidates": 500}) == 100   # ceiling
+    assert _resolve_target({"max_candidates": 0}) == 1        # floor
+    assert _resolve_target({"max_candidates": -10}) == 1
+    assert _resolve_target({"max_candidates": "garbage"}) == 25  # bad → default
+    assert _resolve_target({}) == 25                          # absent → default
+    assert _resolve_target(None) == 25
+
+
+def test_clamped_count_reaches_prompt():
+    msg = _task_message({"postal_code": "x"}, [], {"max_candidates": 999})
+    assert "up to 100" in msg  # clamped, not 999

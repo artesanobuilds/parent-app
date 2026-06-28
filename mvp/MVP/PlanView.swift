@@ -55,6 +55,22 @@ struct PlanView: View {
                 viewModel.baseURL = configuration.baseURL
                 cosVM.setUserID(userID)
             }
+            // Keep the plan-derived segments fresh. They only loaded once on first
+            // appear, so the chief-of-staff chat (which can track activities, add or
+            // complete to-dos, etc. via its tools) left the Shortlist/Calendar stale.
+            // Reload when the parent lands on a plan-derived segment …
+            .onChange(of: segment) { _, newValue in
+                if newValue == .shortlist || newValue == .calendar {
+                    Task { await viewModel.loadPlan() }
+                }
+            }
+            // … and right after a chat turn finishes, so a chat-driven change shows
+            // up even while the parent is already on (or returns to) those segments.
+            .onChange(of: cosVM.isSending) { wasSending, isSending in
+                if wasSending && !isSending {
+                    Task { await viewModel.loadPlan() }
+                }
+            }
         }
     }
 
@@ -275,6 +291,19 @@ struct PlanView: View {
                 Picker("Search radius", selection: $viewModel.radiusMiles) {
                     ForEach(viewModel.radiusOptions, id: \.self) { mi in
                         Text("\(mi) mi").tag(mi)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            // How many candidates to aim for ("top 5" … "top 50").
+            VStack(alignment: .leading, spacing: .hearth300) {
+                Text("How many to find")
+                    .font(.hearthBodySM.weight(.semibold))
+                    .foregroundColor(.inkSecondary)
+                Picker("How many to find", selection: $viewModel.maxCandidates) {
+                    ForEach(viewModel.candidateCountOptions, id: \.self) { n in
+                        Text("\(n)").tag(n)
                     }
                 }
                 .pickerStyle(.segmented)

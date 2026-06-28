@@ -17,9 +17,11 @@ export default function Discovery() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [zip, setZip] = useState('');
   const [radius, setRadius] = useState(15);
+  const [count, setCount] = useState(25);
   const [focus, setFocus] = useState('');
   const [showFocus, setShowFocus] = useState(false);
   const radiusOptions = [5, 10, 25, 50];
+  const countOptions = [5, 15, 25, 50];
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -111,7 +113,11 @@ export default function Discovery() {
     setProgress(null);
     try {
       const trimmedZip = zip.trim();
-      const params: Record<string, unknown> = { season: 'summer 2026', radius_miles: radius };
+      const params: Record<string, unknown> = {
+        season: 'summer 2026',
+        radius_miles: radius,
+        max_candidates: count,
+      };
       const f = focus.trim();
       if (f) params.focus = f;
       const { run_id } = await createResearchRun(
@@ -173,6 +179,18 @@ export default function Discovery() {
             {radiusOptions.map((mi) => (
               <option key={mi} value={mi}>
                 {mi} mi
+              </option>
+            ))}
+          </select>
+          <select
+            value={count}
+            onChange={(e) => setCount(Number(e.target.value))}
+            className="border border-strong rounded-lg px-400 py-300 bg-elevated outline-none focus:border-accent"
+            aria-label="How many to find"
+          >
+            {countOptions.map((n) => (
+              <option key={n} value={n}>
+                Find {n}
               </option>
             ))}
           </select>

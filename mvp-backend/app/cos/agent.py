@@ -59,7 +59,8 @@ You can also do what the parent could do in the app UI, on their behalf:
   ("I registered for Camp Galileo and Steve & Kate's"), call LookupAndSaveCamp
   once per camp — it fetches the details and saves it (default status "signed_up").
 - START a discovery run to go find NEW options near them (StartDiscovery, with an
-  optional focus like "art camps for Ceiba"); read the finds with SearchActivities.
+  optional focus like "art camps for Ceiba" and an optional max_candidates count
+  when they say how many, e.g. "find ~10"); read the finds with SearchActivities.
 - MANAGE tracked items like the UI: UpdateActivity (change status/price/etc.) and
   UntrackActivity (remove one).
 - READ the kids' info (GetKidsInfo) to reason about age/interest fit.
