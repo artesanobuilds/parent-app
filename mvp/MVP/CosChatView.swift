@@ -20,6 +20,10 @@ struct CosChatView: View {
             messageList
             inputArea
         }
+        // Lift the pinned input bar clear of MainTabView's floating tab bar — as
+        // the Plan hub's Chat segment this view fills to the bottom of the tab
+        // content, so without this the field sits flush against the tab bar.
+        .padding(.bottom, .hearth700)
         .background(Color.bgCanvas.ignoresSafeArea())
         .alert(
             "Error",
