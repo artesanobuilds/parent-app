@@ -131,6 +131,18 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
              ).fetchall()
          } else con.execute("ALTER TABLE activity_candidates ADD COLUMN region TEXT")),
      )),
+    # Nearest sort: activity_candidates gains straight-line distance (miles) from
+    # the parent's ZIP, computed at insert from the candidate's city. Guarded
+    # column-add, idempotent against fresh (CREATE-IF-NOT-EXISTS) + legacy DBs.
+    (9, "activity_candidates.add_distance_mi",
+     lambda con: (
+         None if "distance_mi" in {
+             r[0] for r in con.execute(
+                 "SELECT column_name FROM information_schema.columns "
+                 "WHERE table_name = 'activity_candidates'"
+             ).fetchall()
+         } else con.execute("ALTER TABLE activity_candidates ADD COLUMN distance_mi DOUBLE")
+     )),
 ]
 
 _MIGRATIONS_DDL = """

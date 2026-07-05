@@ -131,3 +131,23 @@ def test_unknown_zip_falls_back_to_soft_radius():
     msg = _task_message({"postal_code": "00000"}, [], {"radius_miles": 25})
     assert "within about 25 miles" in msg
     assert "search several distinct towns" in msg
+
+
+def test_record_tool_dedupes_by_name_and_place():
+    from app.research.graph import _build_record_tool, _candidate_key
+    assert _candidate_key({"name": " Art Camp ", "city": "Sebastopol"}) \
+        == _candidate_key({"name": "art camp", "city": "SEBASTOPOL"})
+    coll = []
+    tool = _build_record_tool(coll)
+    tool.invoke({"candidates": [
+        {"name": "Art Camp", "city": "Sebastopol"},
+        {"name": "Swim", "city": "Windsor"},
+    ]})
+    assert len(coll) == 2
+    # A repeat of "Art Camp/Sebastopol" is skipped; a new one is added.
+    tool.invoke({"candidates": [
+        {"name": "Art Camp", "city": "Sebastopol"},
+        {"name": "Pottery", "city": "Sonoma"},
+    ]})
+    assert len(coll) == 3
+    assert {c["name"] for c in coll} == {"Art Camp", "Swim", "Pottery"}

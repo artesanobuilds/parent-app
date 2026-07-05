@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from deepagents import create_deep_agent
 
 from app.cost_logging import CostLoggingCallbackHandler, new_workflow_id
-from app.research.geo import nearby_towns
+from app.research.geo import distance_for_city, nearby_towns
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +259,14 @@ class ActivityCandidate(BaseModel):
     )
 
 
+def _candidate_key(c: Dict[str, Any]) -> tuple:
+    """Identity for dedupe: same activity name in the same town/provider is the
+    same option even if two searches surfaced it."""
+    name = str(c.get("name") or "").strip().lower()
+    where = str(c.get("city") or c.get("provider") or "").strip().lower()
+    return (name, where)
+
+
 def _build_record_tool(
     collector: List[Dict[str, Any]],
     on_each: Optional[Callable[[str], None]] = None,
@@ -286,17 +294,29 @@ def _build_record_tool(
         if not candidates:
             return "Recorded 0 candidates (empty batch)."
         start = len(collector)
+        # Dedupe by (name, city|provider) so the pool isn't padded with the same
+        # camp found via two searches — a real count (e.g. "50") should be 50
+        # DISTINCT options, not 50 rows with duplicates.
+        seen = {_candidate_key(c) for c in collector}
         names: List[str] = []
+        skipped = 0
         for candidate in candidates:
-            collector.append(candidate.model_dump(exclude_none=True))
+            row = candidate.model_dump(exclude_none=True)
+            key = _candidate_key(row)
+            if key in seen:
+                skipped += 1
+                continue
+            seen.add(key)
+            collector.append(row)
             names.append(candidate.name)
             if on_each is not None:
                 try:
                     on_each(candidate.name)
                 except Exception:  # progress is cosmetic; never break recording
                     pass
+        dupe_note = f" ({skipped} duplicate(s) skipped)" if skipped else ""
         return (
-            f"Recorded {len(candidates)} candidate(s) "
+            f"Recorded {len(names)} candidate(s){dupe_note} "
             f"(#{start + 1}–#{len(collector)}): " + ", ".join(names)
         )
 
@@ -427,9 +447,12 @@ def _task_message(
         )
     # Tell the agent how broadly to search — the DISCOVERY depth, not the (often
     # smaller) number we'll ultimately surface. We rank + trim afterward.
+    target = _resolve_discovery_target(params)
     lines.append(
-        f"\nAim to discover up to {_resolve_discovery_target(params)} strong, "
-        "distinct candidates — cast a wide net; we curate the best afterward."
+        f"\nAim to discover up to {target} strong, DISTINCT candidates (no "
+        "duplicates) — cast a wide net; we curate the best afterward. The larger "
+        "that number, the MORE searches you should run — spread them across more "
+        "of the listed towns and more interest/age angles so you actually reach it."
     )
     return "\n".join(lines)
 
@@ -518,6 +541,15 @@ def discover_activities(
     # and synthesized, rather than a shallow search that stopped at 3.
     found = len(collector)
     result = _rank_and_trim(collector, surface_count)
+
+    # Annotate each surfaced candidate with straight-line distance from the
+    # parent's ZIP (via its city), so the client can offer a "Nearest" sort.
+    origin_zip = (location or {}).get("postal_code")
+    if origin_zip:
+        for c in result:
+            d = distance_for_city(origin_zip, c.get("city"), c.get("region"))
+            if d is not None:
+                c["distance_mi"] = d
 
     # Latency breakdown: total wall-clock vs LLM reasoning vs each tool. This is
     # what to read to decide where to optimize (model turns vs Tavily vs records).

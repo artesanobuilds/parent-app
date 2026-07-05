@@ -104,6 +104,8 @@ struct ActivityCandidate: Codable, Identifiable, Hashable {
     // Structured town/state for filtering (free-text locationText is unreliable).
     let city: String?
     let region: String?
+    // Straight-line miles from the parent's ZIP (for the Nearest sort).
+    let distanceMi: Double?
     let signupURL: String?
     let sourceURL: String?
     // `contact` is a JSON object {name,phone,email} on the wire — not decoded here
@@ -133,6 +135,7 @@ struct ActivityCandidate: Codable, Identifiable, Hashable {
         case priceAmount = "price_amount"
         case locationText = "location_text"
         case city, region
+        case distanceMi = "distance_mi"
         case signupURL = "signup_url"
         case sourceURL = "source_url"
         case fitScore = "fit_score"

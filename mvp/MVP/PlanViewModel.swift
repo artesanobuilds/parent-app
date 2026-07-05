@@ -148,6 +148,7 @@ final class PlanViewModel: ObservableObject {
     @Published var selectedCities: Set<String> = []
     @Published var selectedCategories: Set<String> = []
     @Published var selectedKids: Set<String> = []
+    @Published var sortKey: SortKey = .relevance
 
     var availableCities: [String] { Self.distinct(candidates.compactMap { $0.city }) }
     var availableCategories: [String] { Self.distinct(candidates.compactMap { $0.category }) }
@@ -171,6 +172,42 @@ final class PlanViewModel: ObservableObject {
 
     func clearFilters() {
         selectedCities = []; selectedCategories = []; selectedKids = []
+    }
+
+    /// Reset BOTH sort and filters (the sheet's "Reset").
+    func resetSortAndFilters() {
+        clearFilters()
+        sortKey = .relevance
+    }
+
+    /// The list the results view renders: filtered, then sorted by `sortKey`.
+    /// Missing sort values always sort last so a null price/date/distance never
+    /// jumps to the top.
+    var sortedFilteredCandidates: [ActivityCandidate] {
+        let items = filteredCandidates
+        switch sortKey {
+        case .relevance:
+            return items.sorted { ($0.fitScore ?? -1) > ($1.fitScore ?? -1) }
+        case .price:
+            return items.sorted { Self.nilLast($0.priceAmount, $1.priceAmount) }
+        case .soonest:
+            return items.sorted { Self.nilLast($0.startDate, $1.startDate) }
+        case .age:
+            return items.sorted { Self.nilLast($0.ageMin, $1.ageMin) }
+        case .nearest:
+            return items.sorted { Self.nilLast($0.distanceMi, $1.distanceMi) }
+        case .name:
+            return items.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+    }
+
+    /// Ascending, with nils last.
+    private static func nilLast<T: Comparable>(_ a: T?, _ b: T?) -> Bool {
+        switch (a, b) {
+        case let (x?, y?): return x < y
+        case (_?, nil):    return true   // b is nil → a first
+        default:           return false  // a is nil → a after b (or both nil)
+        }
     }
 
     private static func distinct(_ xs: [String]) -> [String] {
@@ -201,7 +238,7 @@ final class PlanViewModel: ObservableObject {
 
         errorMessage = nil
         candidates = []
-        clearFilters()
+        resetSortAndFilters()
         isDiscovering = true
         discoveryStartedAt = Date()
         pollTask?.cancel()
@@ -503,6 +540,32 @@ final class PlanViewModel: ObservableObject {
             await removeActivity(act.id)
         } else {
             await saveCandidate(candidate)
+        }
+    }
+}
+
+/// Sort options for discovery results, shown in the Sort & Filter sheet.
+enum SortKey: String, CaseIterable, Identifiable {
+    case relevance, price, soonest, age, nearest, name
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .relevance: return "Best match"
+        case .price:     return "Price: low to high"
+        case .soonest:   return "Starting soonest"
+        case .age:       return "Age"
+        case .nearest:   return "Nearest"
+        case .name:      return "Name A–Z"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .relevance: return "sparkles"
+        case .price:     return "dollarsign.circle"
+        case .soonest:   return "calendar"
+        case .age:       return "figure.child"
+        case .nearest:   return "location"
+        case .name:      return "textformat.abc"
         }
     }
 }

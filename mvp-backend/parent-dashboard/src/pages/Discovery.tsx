@@ -1,5 +1,13 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
-import { Bookmark, BookmarkCheck, Loader2, X } from 'lucide-react';
+import {
+  ArrowUpDown,
+  Bookmark,
+  BookmarkCheck,
+  Check,
+  Loader2,
+  SlidersHorizontal,
+  X,
+} from 'lucide-react';
 import {
   createResearchRun,
   deleteActivity,
@@ -25,6 +33,57 @@ const clearStoredRun = () => {
 
 const fmtElapsed = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+// ── Sorting ────────────────────────────────────────────────────────────
+type SortKey = 'relevance' | 'price' | 'soonest' | 'age' | 'nearest' | 'name';
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'relevance', label: 'Best match' },
+  { key: 'price', label: 'Price: low → high' },
+  { key: 'soonest', label: 'Starting soonest' },
+  { key: 'age', label: 'Age' },
+  { key: 'nearest', label: 'Nearest' },
+  { key: 'name', label: 'Name A–Z' },
+];
+
+// Numeric compare with null/undefined always sorted last. `dir` = 1 asc, -1 desc.
+const cmpNum = (a: number | null | undefined, b: number | null | undefined, dir: 1 | -1) => {
+  const an = a == null;
+  const bn = b == null;
+  if (an && bn) return 0;
+  if (an) return 1;
+  if (bn) return -1;
+  return (a - b) * dir;
+};
+
+// Ascending string compare (ISO dates compare lexicographically) with nulls last.
+const cmpStr = (a: string | null | undefined, b: string | null | undefined) => {
+  const an = a == null || a === '';
+  const bn = b == null || b === '';
+  if (an && bn) return 0;
+  if (an) return 1;
+  if (bn) return -1;
+  return a < b ? -1 : a > b ? 1 : 0;
+};
+
+function compareBySort(a: Candidate, b: Candidate, key: SortKey): number {
+  switch (key) {
+    case 'relevance':
+      return cmpNum(a.fit_score, b.fit_score, -1);
+    case 'price':
+      return cmpNum(a.price_amount, b.price_amount, 1);
+    case 'soonest':
+      return cmpStr(a.start_date, b.start_date);
+    case 'age':
+      return cmpNum(a.age_min, b.age_min, 1);
+    case 'nearest':
+      return cmpNum(a.distance_mi, b.distance_mi, 1);
+    case 'name':
+      return a.name.localeCompare(b.name);
+    default:
+      return 0;
+  }
+}
+
 export default function Discovery() {
   const [progress, setProgress] = useState<ResearchProgress | null>(null);
   const [runStatus, setRunStatus] = useState<string | null>(null);
@@ -44,6 +103,10 @@ export default function Discovery() {
   const [cityFilter, setCityFilter] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set());
   const [kidFilter, setKidFilter] = useState<Set<string>>(new Set());
+
+  // Sort + the unified "Sort & filter" bottom sheet.
+  const [sortKey, setSortKey] = useState<SortKey>('relevance');
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   // R1 — "Exploring" shortlist.
   const [exploring, setExploring] = useState<TrackedActivity[]>([]);
@@ -177,6 +240,7 @@ export default function Discovery() {
     setProgress(null);
     setRunStatus(null);
     clearFilters();
+    setSortKey('relevance');
     try {
       const trimmedZip = zip.trim();
       const params: Record<string, unknown> = {
@@ -284,6 +348,35 @@ export default function Discovery() {
   const hasFacetBar =
     candidates.length > 0 &&
     (cityFacets.length >= 2 || categoryFacets.length >= 2 || kidFacets.length >= 2);
+
+  // Stable sort of the filtered pool (index tiebreak keeps original order on ties).
+  const sorted = filtered
+    .map((c, i) => [c, i] as const)
+    .sort(([a, ai], [b, bi]) => {
+      const primary = compareBySort(a, b, sortKey);
+      return primary !== 0 ? primary : ai - bi;
+    })
+    .map(([c]) => c);
+
+  const currentSortLabel = SORT_OPTIONS.find((o) => o.key === sortKey)?.label ?? 'Best match';
+  // Show the control bar when there's something to sort or filter.
+  const showControlBar = candidates.length > 0 && (hasFacetBar || candidates.length > 1);
+
+  // Removable active-filter chip (mirrors the sheet's facet selections outside it).
+  const removableChip = (
+    prefix: string,
+    v: string,
+    setter: Dispatch<SetStateAction<Set<string>>>,
+  ) => (
+    <button
+      key={`${prefix}-${v}`}
+      onClick={() => toggleFacet(setter, v)}
+      className="flex items-center gap-100 rounded-full border border-accent bg-accent-tint px-300 py-100 text-sm text-ink-primary hover:opacity-80"
+    >
+      {v}
+      <X size={12} />
+    </button>
+  );
 
   const facetGroup = (
     label: string,
@@ -566,25 +659,118 @@ export default function Discovery() {
         </div>
       )}
 
-      {/* Phase B — instant client-side facet filters over the loaded pool. */}
-      {hasFacetBar && (
-        <div className="bg-elevated border border-hairline rounded-xl p-500 mb-500 flex flex-col gap-300">
-          {facetGroup('City', cityFacets, cityFilter, setCityFilter)}
-          {facetGroup('Type', categoryFacets, categoryFilter, setCategoryFilter)}
-          {facetGroup('Kid', kidFacets, kidFilter, setKidFilter)}
+      {/* Unified Sort & Filter control bar + live active-filter summary. */}
+      {showControlBar && (
+        <div className="mb-500 flex flex-col gap-300">
+          <button
+            onClick={() => setSheetOpen(true)}
+            className="self-start flex items-center gap-200 rounded-xl border border-hairline bg-elevated px-400 py-300 text-sm hover:border-accent"
+          >
+            <SlidersHorizontal size={16} className="text-ink-secondary" />
+            <span className="font-medium text-ink-primary">Sort &amp; filter</span>
+            <span className="text-ink-muted">· {currentSortLabel}</span>
+            {activeFilterCount > 0 && (
+              <span className="ml-100 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-100 text-xs text-ink-on-photo-light">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
           {activeFilterCount > 0 && (
-            <button
-              onClick={clearFilters}
-              className="self-start flex items-center gap-100 text-sm text-ink-muted hover:text-ink-secondary"
-            >
-              <X size={14} /> Clear {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''}
-            </button>
+            <div className="flex flex-wrap items-center gap-200">
+              {[...cityFilter].map((v) => removableChip('city', v, setCityFilter))}
+              {[...categoryFilter].map((v) => removableChip('cat', v, setCategoryFilter))}
+              {[...kidFilter].map((v) => removableChip('kid', v, setKidFilter))}
+              <button
+                onClick={clearFilters}
+                className="flex items-center gap-100 text-sm text-ink-muted hover:text-ink-secondary"
+              >
+                <X size={14} /> Clear all
+              </button>
+            </div>
           )}
         </div>
       )}
 
+      {/* The Sort & Filter bottom sheet — selections apply instantly to the grid. */}
+      {sheetOpen && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center md:items-center">
+          <div className="fixed inset-0 bg-black/40" onClick={() => setSheetOpen(false)} />
+          <div
+            className="relative flex w-full flex-col rounded-t-2xl border border-hairline bg-elevated shadow-xl md:max-w-lg md:rounded-2xl"
+            style={{ maxHeight: '80vh' }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-hairline px-500 py-400">
+              <h3 className="font-display text-xl text-ink-primary">Sort &amp; filter</h3>
+              <button
+                onClick={() => setSheetOpen(false)}
+                className="p-100 text-ink-muted hover:text-ink-secondary"
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Scrollable body */}
+            <div className="flex flex-col gap-500 overflow-y-auto px-500 py-400">
+              {/* Sort */}
+              <div>
+                <div className="mb-300 flex items-center gap-200 text-xs uppercase tracking-wide text-ink-muted">
+                  <ArrowUpDown size={14} /> Sort
+                </div>
+                <div className="flex flex-col gap-100">
+                  {SORT_OPTIONS.map((o) => (
+                    <button
+                      key={o.key}
+                      onClick={() => setSortKey(o.key)}
+                      className={`flex items-center justify-between rounded-lg border px-400 py-300 text-sm ${
+                        sortKey === o.key
+                          ? 'bg-accent-tint border-accent text-ink-primary'
+                          : 'border-hairline text-ink-secondary hover:border-accent'
+                      }`}
+                    >
+                      <span>{o.label}</span>
+                      {sortKey === o.key && <Check size={16} className="text-accent" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Filter */}
+              {hasFacetBar && (
+                <div className="flex flex-col gap-400">
+                  <div className="text-xs uppercase tracking-wide text-ink-muted">Filter</div>
+                  {facetGroup('City', cityFacets, cityFilter, setCityFilter)}
+                  {facetGroup('Type', categoryFacets, categoryFilter, setCategoryFilter)}
+                  {facetGroup('Kid', kidFacets, kidFilter, setKidFilter)}
+                </div>
+              )}
+            </div>
+
+            {/* Sticky footer */}
+            <div className="flex items-center gap-300 border-t border-hairline px-500 py-400">
+              <button
+                onClick={() => {
+                  clearFilters();
+                  setSortKey('relevance');
+                }}
+                className="px-300 py-300 text-sm text-ink-muted hover:text-ink-secondary"
+              >
+                Reset
+              </button>
+              <button
+                onClick={() => setSheetOpen(false)}
+                className="flex-1 rounded-lg bg-accent px-500 py-300 font-medium text-ink-on-photo-light"
+              >
+                Show {sorted.length} result{sorted.length === 1 ? '' : 's'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-500">
-        {filtered.map((c) => (
+        {sorted.map((c) => (
           <div key={c.id} className="bg-elevated border border-hairline rounded-xl p-600">
             <div className="flex items-start justify-between gap-400">
               <h2 className="font-medium text-ink-primary">{c.name}</h2>

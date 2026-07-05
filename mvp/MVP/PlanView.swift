@@ -13,6 +13,7 @@ struct PlanView: View {
 
     @State private var segment: PlanSegment = .chat
     @State private var showIngest = false
+    @State private var showSortFilter = false
 
     /// The Plan hub's sub-views. The Chief of Staff (chat) is the front door;
     /// the structured views hang off it one tap away.
@@ -39,6 +40,11 @@ struct PlanView: View {
             .background(Color.bgCanvas.ignoresSafeArea())
             .sheet(isPresented: $showIngest) {
                 IngestView(viewModel: viewModel)
+            }
+            .sheet(isPresented: $showSortFilter) {
+                sortFilterSheet
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
             }
             .navigationDestination(for: CandidateRoute.self) { route in
                 CandidateDetailView(candidate: route.candidate)
@@ -491,9 +497,9 @@ struct PlanView: View {
                 }
             }
 
-            filterBar
+            sortFilterBar
 
-            let shown = viewModel.filteredCandidates
+            let shown = viewModel.sortedFilteredCandidates
             if shown.isEmpty && viewModel.hasActiveFilters {
                 Text("No results match those filters.")
                     .font(.hearthBodyMD)
@@ -512,35 +518,150 @@ struct PlanView: View {
         }
     }
 
-    // MARK: - Result filters (client-side facets)
+    // MARK: - Result sort & filter
 
+    // Compact entry to the unified Sort & Filter sheet + a removable summary of
+    // active filters, so state is visible without opening the sheet.
     @ViewBuilder
-    private var filterBar: some View {
-        let cities = viewModel.availableCities
-        let cats = viewModel.availableCategories
-        let kids = viewModel.availableKids
-        if cities.count >= 2 || cats.count >= 2 || kids.count >= 2 {
+    private var sortFilterBar: some View {
+        let hasFacets = viewModel.availableCities.count >= 2
+            || viewModel.availableCategories.count >= 2
+            || viewModel.availableKids.count >= 2
+        if hasFacets || viewModel.candidates.count > 1 {
             VStack(alignment: .leading, spacing: .hearth300) {
-                HStack {
-                    Text("Filter")
-                        .font(.hearthBodySM.weight(.semibold))
-                        .foregroundColor(.inkSecondary)
-                    Spacer()
-                    if viewModel.hasActiveFilters {
-                        Button {
-                            withAnimation(.hearthFast) { viewModel.clearFilters() }
-                        } label: {
-                            Text("Clear (\(viewModel.activeFilterCount))")
-                                .font(.hearthBodySM)
-                                .foregroundColor(.accentDefault)
+                Button { showSortFilter = true } label: {
+                    HStack(spacing: .hearth300) {
+                        Image(systemName: "slider.horizontal.3")
+                        Text("Sort & Filter")
+                        Text("· \(viewModel.sortKey.label)")
+                            .foregroundColor(.inkMuted)
+                        Spacer()
+                        if viewModel.hasActiveFilters {
+                            Text("\(viewModel.activeFilterCount)")
+                                .font(.hearthBodySM.weight(.bold))
+                                .foregroundColor(.inkOnPhotoLight)
+                                .padding(.horizontal, 8).padding(.vertical, 2)
+                                .background(Capsule().fill(Color.accentDefault))
+                        }
+                        Image(systemName: "chevron.down").font(.caption).foregroundColor(.inkMuted)
+                    }
+                    .font(.hearthBodySM.weight(.semibold))
+                    .foregroundColor(.inkPrimary)
+                    .padding(.horizontal, .hearth500)
+                    .padding(.vertical, .hearth400)
+                    .background(
+                        RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                            .fill(Color.bgElevated)
+                            .overlay(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                                .stroke(Color.borderHairline, lineWidth: 1))
+                    )
+                }
+                .buttonStyle(.plain)
+
+                if viewModel.hasActiveFilters {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: .hearth300) {
+                            removableChips(viewModel.selectedCities) { viewModel.selectedCities.remove($0) }
+                            removableChips(viewModel.selectedCategories) { viewModel.selectedCategories.remove($0) }
+                            removableChips(viewModel.selectedKids) { viewModel.selectedKids.remove($0) }
                         }
                     }
                 }
-                if cities.count >= 2 { facetRow(cities, selection: $viewModel.selectedCities) }
-                if cats.count >= 2 { facetRow(cats, selection: $viewModel.selectedCategories) }
-                if kids.count >= 2 { facetRow(kids, selection: $viewModel.selectedKids) }
             }
             .padding(.bottom, .hearth300)
+        }
+    }
+
+    @ViewBuilder
+    private func removableChips(_ values: Set<String>, remove: @escaping (String) -> Void) -> some View {
+        ForEach(Array(values).sorted(), id: \.self) { v in
+            HStack(spacing: 4) {
+                Text(v).font(.hearthBodySM).foregroundColor(.inkPrimary)
+                Button { withAnimation(.hearthFast) { remove(v) } } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12)).foregroundColor(.inkMuted)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.leading, .hearth400).padding(.trailing, 6).padding(.vertical, 5)
+            .background(Capsule().fill(Color.accentTint))
+        }
+    }
+
+    // The unified bottom sheet: Sort (single-select) + Filter (multi-select) with
+    // a sticky "Show N results" footer.
+    private var sortFilterSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: .hearth700) {
+                    VStack(alignment: .leading, spacing: .hearth300) {
+                        Text("SORT").font(.hearthLabel).tracking(0.6).foregroundColor(.inkMuted)
+                        VStack(spacing: 0) {
+                            ForEach(SortKey.allCases) { key in
+                                Button { withAnimation(.hearthFast) { viewModel.sortKey = key } } label: {
+                                    HStack(spacing: .hearth400) {
+                                        Image(systemName: key.icon).frame(width: 22).foregroundColor(.accentDefault)
+                                        Text(key.label).font(.hearthBodyMD).foregroundColor(.inkPrimary)
+                                        Spacer()
+                                        if viewModel.sortKey == key {
+                                            Image(systemName: "checkmark").foregroundColor(.accentDefault)
+                                        }
+                                    }
+                                    .padding(.vertical, .hearth400)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                if key != SortKey.allCases.last {
+                                    Divider().background(Color.borderHairline)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, .hearth500)
+                        .background(RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous).fill(Color.bgElevated))
+                    }
+
+                    let cities = viewModel.availableCities
+                    let cats = viewModel.availableCategories
+                    let kids = viewModel.availableKids
+                    if cities.count >= 2 || cats.count >= 2 || kids.count >= 2 {
+                        VStack(alignment: .leading, spacing: .hearth500) {
+                            Text("FILTER").font(.hearthLabel).tracking(0.6).foregroundColor(.inkMuted)
+                            if cities.count >= 2 { facetGroup("City", cities, selection: $viewModel.selectedCities) }
+                            if cats.count >= 2 { facetGroup("Type", cats, selection: $viewModel.selectedCategories) }
+                            if kids.count >= 2 { facetGroup("Kid", kids, selection: $viewModel.selectedKids) }
+                        }
+                    }
+                }
+                .padding(.hearth700)
+            }
+            .background(Color.bgCanvas.ignoresSafeArea())
+            .navigationTitle("Sort & filter")
+            .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                HStack(spacing: .hearth400) {
+                    Button("Reset") { withAnimation(.hearthFast) { viewModel.resetSortAndFilters() } }
+                        .font(.hearthBodyMD)
+                        .foregroundColor(.inkSecondary)
+                    Spacer()
+                    Button { showSortFilter = false } label: {
+                        Text("Show \(viewModel.sortedFilteredCandidates.count) results")
+                            .font(.hearthBodyMD.weight(.semibold))
+                            .foregroundColor(.inkOnPhotoLight)
+                            .padding(.horizontal, .hearth600).padding(.vertical, .hearth400)
+                            .background(Capsule().fill(Color.accentDefault))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, .hearth700).padding(.vertical, .hearth400)
+                .background(.ultraThinMaterial)
+            }
+        }
+    }
+
+    private func facetGroup(_ label: String, _ values: [String], selection: Binding<Set<String>>) -> some View {
+        VStack(alignment: .leading, spacing: .hearth300) {
+            Text(label).font(.hearthBodySM.weight(.semibold)).foregroundColor(.inkSecondary)
+            facetRow(values, selection: selection)
         }
     }
 

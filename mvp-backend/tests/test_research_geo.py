@@ -74,3 +74,17 @@ def test_distance_grows_with_radius():
     far = nearby_towns("95448", 50)
     assert _cities(near).issubset(_cities(far))
     assert len(far) >= len(near)
+
+
+def test_distance_for_city():
+    from app.research.geo import distance_for_city
+    # Healdsburg (95448) -> Sebastopol is ~15-18 miles.
+    d = distance_for_city("95448", "Sebastopol", "CA")
+    assert d is not None and 10 < d < 25
+    # Origin city -> ~0.
+    d0 = distance_for_city("95448", "Healdsburg", "CA")
+    assert d0 is not None and d0 < 3
+    # Unknown town / ZIP -> None (sorts last under Nearest).
+    assert distance_for_city("95448", "Nowheresville", "CA") is None
+    assert distance_for_city("00000", "Sebastopol", "CA") is None
+    assert distance_for_city("95448", None) is None

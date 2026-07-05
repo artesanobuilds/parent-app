@@ -370,6 +370,7 @@ class DuckDBStorage(StorageBackend):
         location_text TEXT,
         city          TEXT,                         -- town/city, for filtering (migration v8)
         region        TEXT,                         -- state/region abbr, e.g. CA
+        distance_mi   DOUBLE,                        -- miles from the parent ZIP, for Nearest sort (migration v9)
         signup_url    TEXT,
         source_url    TEXT,                         -- provenance page we extracted from
         contact_json  JSON,                         -- {name, phone, email, person}
@@ -2008,6 +2009,24 @@ class DuckDBStorage(StorageBackend):
         with self._con.transaction():
             active = self.get_active_research_run(user_id)
             if active is not None:
+                # A run still `queued` hasn't been claimed by a worker yet — so
+                # RETARGET it to the NEW request (params/location/kids). Otherwise
+                # a re-picked count/radius/focus is silently dropped and the run
+                # keeps the old defaults (the "select 50 → get 25" bug). A run
+                # already `running` can't be retargeted mid-flight, so it dedupes
+                # as-is. The `status='queued'` guard makes the update a no-op if a
+                # worker claimed it between the read and the write.
+                if active.get("status") == "queued":
+                    self._con.execute(
+                        "UPDATE research_runs SET location_json = ?, kids_json = ?, "
+                        "params_json = ? WHERE id = ? AND status = 'queued'",
+                        [
+                            json.dumps(location, ensure_ascii=False),
+                            json.dumps(kids, ensure_ascii=False),
+                            json.dumps(params or {}, ensure_ascii=False),
+                            active["id"],
+                        ],
+                    )
                 return {"run_id": active["id"], "status": active["status"], "deduped": True}
             run_id = self.create_research_run(
                 user_id=user_id, location=location, kids=kids, params=params
@@ -2220,7 +2239,8 @@ class DuckDBStorage(StorageBackend):
             "id", "run_id", "user_id", "kid_name", "name", "provider", "category",
             "age_min", "age_max", "start_date", "end_date", "schedule_text",
             "price_text", "price_amount", "location_text", "city", "region",
-            "signup_url", "source_url", "contact_json", "fit_score", "raw_json",
+            "distance_mi", "signup_url", "source_url", "contact_json", "fit_score",
+            "raw_json",
         )
         placeholders = ", ".join(["?"] * len(cols))
         with self._con.transaction() as con:
@@ -2234,7 +2254,7 @@ class DuckDBStorage(StorageBackend):
                         c.get("category"), c.get("age_min"), c.get("age_max"),
                         c.get("start_date"), c.get("end_date"), c.get("schedule_text"),
                         c.get("price_text"), c.get("price_amount"), c.get("location_text"),
-                        c.get("city"), c.get("region"),
+                        c.get("city"), c.get("region"), c.get("distance_mi"),
                         c.get("signup_url"), c.get("source_url"),
                         json.dumps(c.get("contact") or {}, ensure_ascii=False) if c.get("contact") else None,
                         c.get("fit_score"),
@@ -2268,8 +2288,8 @@ class DuckDBStorage(StorageBackend):
             f"""
             SELECT id, run_id, user_id, kid_name, name, provider, category,
                    age_min, age_max, start_date, end_date, schedule_text,
-                   price_text, price_amount, location_text, city, region, signup_url,
-                   source_url, contact_json, fit_score, raw_json, created_at
+                   price_text, price_amount, location_text, city, region, distance_mi,
+                   signup_url, source_url, contact_json, fit_score, raw_json, created_at
             FROM activity_candidates
             {clause}
             ORDER BY fit_score DESC NULLS LAST, created_at
@@ -2287,11 +2307,12 @@ class DuckDBStorage(StorageBackend):
                 "end_date": r[10].isoformat() if r[10] else None,
                 "schedule_text": r[11], "price_text": r[12], "price_amount": r[13],
                 "location_text": r[14], "city": r[15], "region": r[16],
-                "signup_url": r[17], "source_url": r[18],
-                "contact": json.loads(r[19]) if r[19] else None,
-                "fit_score": r[20],
-                "raw": json.loads(r[21]) if r[21] else None,
-                "created_at": r[22].isoformat() if r[22] else None,
+                "distance_mi": r[17],
+                "signup_url": r[18], "source_url": r[19],
+                "contact": json.loads(r[20]) if r[20] else None,
+                "fit_score": r[21],
+                "raw": json.loads(r[22]) if r[22] else None,
+                "created_at": r[23].isoformat() if r[23] else None,
             })
         return out
 

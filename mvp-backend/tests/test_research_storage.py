@@ -52,6 +52,39 @@ def test_run_lifecycle_queue_claim_finish(store):
     assert done["finished_at"] is not None
 
 
+def test_enqueue_dedupe_retargets_queued_run_params(store):
+    """The 'select 50 → get 25' bug: a second enqueue must NOT silently drop the
+    new params. A still-queued run gets RETARGETED to the new request."""
+    first = store.enqueue_research_run(
+        user_id="u1", location={"postal_code": "95448"}, kids=[],
+        params={"max_candidates": 25},
+    )
+    assert first["deduped"] is False
+    # Re-pick 50 and re-submit while the run is still queued.
+    second = store.enqueue_research_run(
+        user_id="u1", location={"postal_code": "95448"}, kids=[],
+        params={"max_candidates": 50, "radius_miles": 50},
+    )
+    assert second["deduped"] is True
+    assert second["run_id"] == first["run_id"]  # same run reused …
+    run = store.get_research_run(first["run_id"])
+    assert run["params"]["max_candidates"] == 50   # … but retargeted to the new params
+    assert run["params"]["radius_miles"] == 50
+
+
+def test_enqueue_dedupe_running_run_is_not_retargeted(store):
+    """A run already RUNNING can't be retargeted mid-flight — it dedupes as-is."""
+    first = store.enqueue_research_run(
+        user_id="u2", location={}, kids=[], params={"max_candidates": 25},
+    )
+    store.claim_next_queued_run()  # flip it to running
+    second = store.enqueue_research_run(
+        user_id="u2", location={}, kids=[], params={"max_candidates": 50},
+    )
+    assert second["deduped"] is True
+    assert store.get_research_run(first["run_id"])["params"]["max_candidates"] == 25
+
+
 def test_requeue_stale_running_runs(store):
     run_id = store.create_research_run(
         user_id="u1", location={"postal_code": "1"}, kids=[],

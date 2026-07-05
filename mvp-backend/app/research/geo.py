@@ -57,6 +57,52 @@ def _load() -> Dict[str, Tuple[float, float, str, str]]:
         return _ZIPS
 
 
+# (city_lower, state_upper) -> (lat, lng). Built lazily from the same table.
+_CITY_INDEX: Optional[Dict[Tuple[str, str], Tuple[float, float]]] = None
+
+
+def _city_index() -> Dict[Tuple[str, str], Tuple[float, float]]:
+    global _CITY_INDEX
+    if _CITY_INDEX is not None:
+        return _CITY_INDEX
+    with _LOAD_LOCK:
+        if _CITY_INDEX is not None:
+            return _CITY_INDEX
+        idx: Dict[Tuple[str, str], Tuple[float, float]] = {}
+        for lat, lng, city, state in _load().values():
+            key = (city.strip().lower(), state.strip().upper())
+            idx.setdefault(key, (lat, lng))  # first ZIP centroid for the town
+        _CITY_INDEX = idx
+        return _CITY_INDEX
+
+
+def distance_for_city(
+    postal_code: Optional[str], city: Optional[str], region: Optional[str] = None
+) -> Optional[float]:
+    """Straight-line miles from `postal_code` to `city` (in `region`/state), for
+    the "Nearest" sort. Returns None when the ZIP or town can't be resolved (the
+    candidate then sorts last under Nearest). If `region` is missing, prefer a
+    same-state match with the origin, else any state with that city name."""
+    if not postal_code or not city:
+        return None
+    origin = _load().get(str(postal_code).strip()[:5])
+    if origin is None:
+        return None
+    olat, olng, _, ostate = origin
+    idx = _city_index()
+    cl = city.strip().lower()
+    coords = None
+    if region:
+        coords = idx.get((cl, region.strip().upper()))
+    if coords is None:
+        coords = idx.get((cl, ostate.strip().upper()))  # same state as the parent
+    if coords is None:  # any state with that town name
+        coords = next((v for (c, _s), v in idx.items() if c == cl), None)
+    if coords is None:
+        return None
+    return round(_haversine_mi(olat, olng, coords[0], coords[1]), 1)
+
+
 def _haversine_mi(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)

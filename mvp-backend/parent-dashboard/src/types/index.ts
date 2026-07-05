@@ -133,6 +133,7 @@ export interface Candidate {
   location_text: string | null;
   city?: string | null;
   region?: string | null;
+  distance_mi?: number | null;
   signup_url: string | null;
   source_url: string | null;
   contact: Record<string, unknown> | null;
