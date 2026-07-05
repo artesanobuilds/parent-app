@@ -368,6 +368,8 @@ class DuckDBStorage(StorageBackend):
         price_text    TEXT,
         price_amount  DOUBLE,
         location_text TEXT,
+        city          TEXT,                         -- town/city, for filtering (migration v8)
+        region        TEXT,                         -- state/region abbr, e.g. CA
         signup_url    TEXT,
         source_url    TEXT,                         -- provenance page we extracted from
         contact_json  JSON,                         -- {name, phone, email, person}
@@ -2217,8 +2219,8 @@ class DuckDBStorage(StorageBackend):
         cols = (
             "id", "run_id", "user_id", "kid_name", "name", "provider", "category",
             "age_min", "age_max", "start_date", "end_date", "schedule_text",
-            "price_text", "price_amount", "location_text", "signup_url",
-            "source_url", "contact_json", "fit_score", "raw_json",
+            "price_text", "price_amount", "location_text", "city", "region",
+            "signup_url", "source_url", "contact_json", "fit_score", "raw_json",
         )
         placeholders = ", ".join(["?"] * len(cols))
         with self._con.transaction() as con:
@@ -2232,6 +2234,7 @@ class DuckDBStorage(StorageBackend):
                         c.get("category"), c.get("age_min"), c.get("age_max"),
                         c.get("start_date"), c.get("end_date"), c.get("schedule_text"),
                         c.get("price_text"), c.get("price_amount"), c.get("location_text"),
+                        c.get("city"), c.get("region"),
                         c.get("signup_url"), c.get("source_url"),
                         json.dumps(c.get("contact") or {}, ensure_ascii=False) if c.get("contact") else None,
                         c.get("fit_score"),
@@ -2265,7 +2268,7 @@ class DuckDBStorage(StorageBackend):
             f"""
             SELECT id, run_id, user_id, kid_name, name, provider, category,
                    age_min, age_max, start_date, end_date, schedule_text,
-                   price_text, price_amount, location_text, signup_url,
+                   price_text, price_amount, location_text, city, region, signup_url,
                    source_url, contact_json, fit_score, raw_json, created_at
             FROM activity_candidates
             {clause}
@@ -2283,11 +2286,12 @@ class DuckDBStorage(StorageBackend):
                 "start_date": r[9].isoformat() if r[9] else None,
                 "end_date": r[10].isoformat() if r[10] else None,
                 "schedule_text": r[11], "price_text": r[12], "price_amount": r[13],
-                "location_text": r[14], "signup_url": r[15], "source_url": r[16],
-                "contact": json.loads(r[17]) if r[17] else None,
-                "fit_score": r[18],
-                "raw": json.loads(r[19]) if r[19] else None,
-                "created_at": r[20].isoformat() if r[20] else None,
+                "location_text": r[14], "city": r[15], "region": r[16],
+                "signup_url": r[17], "source_url": r[18],
+                "contact": json.loads(r[19]) if r[19] else None,
+                "fit_score": r[20],
+                "raw": json.loads(r[21]) if r[21] else None,
+                "created_at": r[22].isoformat() if r[22] else None,
             })
         return out
 

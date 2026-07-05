@@ -44,12 +44,33 @@ struct ResearchProgress: Codable, Hashable {
     let candidatesTarget: Int?    // how many we're aiming for
     let candidatesConsidered: Int? // size of the pool we curated the surfaced set from
     let recent: [String]?         // recent milestones, oldest→newest
+    // Live preview of what's been found so far, so results render as they arrive
+    // (skeleton → cards) instead of a spinner for 1–2 min.
+    let candidatesPreview: [CandidatePreview]?
 
     enum CodingKeys: String, CodingKey {
         case phase, detail, recent
         case candidatesFound = "candidates_found"
         case candidatesTarget = "candidates_target"
         case candidatesConsidered = "candidates_considered"
+        case candidatesPreview = "candidates_preview"
+    }
+}
+
+/// A lightweight, in-flight candidate shown while discovery is still running.
+struct CandidatePreview: Codable, Hashable, Identifiable {
+    let name: String?
+    let city: String?
+    let category: String?
+    let fitScore: Double?
+    let kidName: String?
+
+    var id: String { (name ?? "?") + "|" + (city ?? "") }
+
+    enum CodingKeys: String, CodingKey {
+        case name, city, category
+        case fitScore = "fit_score"
+        case kidName = "kid_name"
     }
 }
 
@@ -80,6 +101,9 @@ struct ActivityCandidate: Codable, Identifiable, Hashable {
     let priceText: String?
     let priceAmount: Double?
     let locationText: String?
+    // Structured town/state for filtering (free-text locationText is unreliable).
+    let city: String?
+    let region: String?
     let signupURL: String?
     let sourceURL: String?
     // `contact` is a JSON object {name,phone,email} on the wire — not decoded here
@@ -108,6 +132,7 @@ struct ActivityCandidate: Codable, Identifiable, Hashable {
         case priceText = "price_text"
         case priceAmount = "price_amount"
         case locationText = "location_text"
+        case city, region
         case signupURL = "signup_url"
         case sourceURL = "source_url"
         case fitScore = "fit_score"

@@ -112,3 +112,22 @@ def test_rank_and_trim_keeps_best_n():
     # Missing scores rank last, never crash; a generous limit keeps everything.
     allc = _rank_and_trim(pool, 10)
     assert [c["name"] for c in allc] == ["high", "mid", "low", "none"]
+
+
+def test_radius_grounds_prompt_with_real_nearby_towns():
+    # The 50-mile radius from 95448 must enumerate real towns (incl. Sebastopol,
+    # the one the un-grounded agent missed) so the agent covers a spread.
+    msg = _task_message(
+        {"postal_code": "95448", "country": "US"},
+        [{"name": "Ceiba", "age": 8}],
+        {"radius_miles": 50},
+    )
+    assert "Sebastopol" in msg
+    assert "Santa Rosa" in msg
+    assert "spread" in msg.lower() or "distinct towns" in msg.lower()
+
+
+def test_unknown_zip_falls_back_to_soft_radius():
+    msg = _task_message({"postal_code": "00000"}, [], {"radius_miles": 25})
+    assert "within about 25 miles" in msg
+    assert "search several distinct towns" in msg

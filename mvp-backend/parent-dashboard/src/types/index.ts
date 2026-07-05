@@ -96,6 +96,14 @@ export interface ResearchProgress {
   candidates_target?: number;  // how many we're aiming for
   candidates_considered?: number; // pool size the surfaced set was curated from
   recent?: string[];           // last few actions, oldest→newest
+  // Live, capped preview of what's been found so far (streamed during a run).
+  candidates_preview?: {
+    name: string;
+    city: string | null;
+    category: string | null;
+    fit_score: number | null;
+    kid_name: string | null;
+  }[];
   [k: string]: unknown;
 }
 
@@ -123,6 +131,8 @@ export interface Candidate {
   price_text: string | null;
   price_amount: number | null;
   location_text: string | null;
+  city?: string | null;
+  region?: string | null;
   signup_url: string | null;
   source_url: string | null;
   contact: Record<string, unknown> | null;

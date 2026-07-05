@@ -112,6 +112,25 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
              "ON calendar_entries (user_id, provider_event_id)"
          ),
      )),
+    # Discovery geo-grounding: activity_candidates gains a structured city + region
+    # so results are filterable by town (the free-text location_text was unreliable).
+    # New columns come via CREATE-IF-NOT-EXISTS on fresh DBs; existing DBs need this
+    # guarded column-add. Column-presence guards = idempotent against fresh + legacy.
+    (8, "activity_candidates.add_city_region",
+     lambda con: (
+         (None if "city" in {
+             r[0] for r in con.execute(
+                 "SELECT column_name FROM information_schema.columns "
+                 "WHERE table_name = 'activity_candidates'"
+             ).fetchall()
+         } else con.execute("ALTER TABLE activity_candidates ADD COLUMN city TEXT")),
+         (None if "region" in {
+             r[0] for r in con.execute(
+                 "SELECT column_name FROM information_schema.columns "
+                 "WHERE table_name = 'activity_candidates'"
+             ).fetchall()
+         } else con.execute("ALTER TABLE activity_candidates ADD COLUMN region TEXT")),
+     )),
 ]
 
 _MIGRATIONS_DDL = """

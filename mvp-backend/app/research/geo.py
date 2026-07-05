@@ -1,0 +1,126 @@
+"""Offline ZIP → nearby-towns lookup for grounding the discovery radius.
+
+The research agent used to receive only a bare ZIP + a soft "within about N miles"
+sentence, so it invented town names from LLM memory and anchored on the nearest
+famous city (e.g. Santa Rosa for 95448) — never searching smaller towns well
+inside the radius (Sebastopol). This module gives the radius real geographic
+grounding: it enumerates the actual towns within the radius so the prompt can
+tell the agent to cover a spread of them.
+
+Data: a bundled, gzipped trim of the GeoNames US postal dataset (public domain,
+CC-BY) at `data/us_zip_centroids.csv.gz` — `zip,lat,lng,city,state`, one centroid
+per ZIP. Deterministic, no runtime network (Railway is egress-only), no new
+runtime dependency (stdlib csv + math). Loaded once into memory on first use;
+callers run in the research worker, off the request path.
+"""
+from __future__ import annotations
+
+import csv
+import gzip
+import math
+import threading
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+_DATA_PATH = Path(__file__).resolve().parent / "data" / "us_zip_centroids.csv.gz"
+
+# zip -> (lat, lng, city, state). Loaded lazily under a lock.
+_ZIPS: Optional[Dict[str, Tuple[float, float, str, str]]] = None
+_LOAD_LOCK = threading.Lock()
+
+_EARTH_RADIUS_MI = 3958.7613
+
+
+def _load() -> Dict[str, Tuple[float, float, str, str]]:
+    global _ZIPS
+    if _ZIPS is not None:
+        return _ZIPS
+    with _LOAD_LOCK:
+        if _ZIPS is not None:  # another thread won the race
+            return _ZIPS
+        table: Dict[str, Tuple[float, float, str, str]] = {}
+        try:
+            with gzip.open(_DATA_PATH, "rt", encoding="utf-8", newline="") as f:
+                for row in csv.DictReader(f):
+                    try:
+                        table[row["zip"]] = (
+                            float(row["lat"]), float(row["lng"]),
+                            row["city"], row["state"],
+                        )
+                    except (KeyError, ValueError):
+                        continue
+        except FileNotFoundError:
+            # Missing dataset must not break discovery — callers degrade to the
+            # old bare-ZIP behavior when the table is empty.
+            pass
+        _ZIPS = table
+        return _ZIPS
+
+
+def _haversine_mi(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlmb = math.radians(lng2 - lng1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
+    return _EARTH_RADIUS_MI * 2 * math.asin(math.sqrt(a))
+
+
+def nearby_towns(
+    postal_code: Optional[str],
+    radius_miles: float,
+    *,
+    max_towns: int = 20,
+    outer_band: int = 5,
+) -> List[Dict[str, object]]:
+    """Distinct towns within `radius_miles` of `postal_code`, deduped by
+    (city, state), returned nearest-first with the origin town first.
+
+    When more towns fall in the radius than `max_towns`, the selection SPANS the
+    radius rather than just taking the closest cluster: it keeps the nearest
+    `max_towns - outer_band` towns AND the farthest `outer_band` towns inside the
+    radius. That way a 50-mile search actually reaches the far towns the parent
+    asked for (Petaluma, Sonoma, Napa…) instead of stopping ~16 miles out — while
+    still guaranteeing the dense nearby cluster.
+
+    Returns `[{"city": str, "state": str, "distance_mi": float}, ...]`, or `[]`
+    when the ZIP is unknown or the dataset is missing — the caller then degrades
+    to the old un-grounded behavior (a plain "within N miles" instruction).
+    """
+    if not postal_code or radius_miles <= 0:
+        return []
+    table = _load()
+    zc = str(postal_code).strip()[:5]
+    origin = table.get(zc)
+    if origin is None:
+        return []
+    olat, olng, ocity, ostate = origin
+
+    # Best (shortest) distance per (city, state) within the radius.
+    best: Dict[Tuple[str, str], float] = {}
+    for lat, lng, city, state in table.values():
+        d = _haversine_mi(olat, olng, lat, lng)
+        if d > radius_miles:
+            continue
+        key = (city, state)
+        if key not in best or d < best[key]:
+            best[key] = d
+
+    best[(ocity, ostate)] = 0.0  # origin always included, distance 0
+    ordered = sorted(best.items(), key=lambda kv: kv[1])
+
+    if len(ordered) > max_towns and outer_band > 0:
+        # Nearest cluster + the farthest band inside the radius, re-sorted so the
+        # combined list stays nearest-first (and any overlap is de-duplicated).
+        near = ordered[: max_towns - outer_band]
+        far = ordered[-outer_band:]
+        merged = {key: dist for key, dist in near}
+        for key, dist in far:
+            merged.setdefault(key, dist)
+        ordered = sorted(merged.items(), key=lambda kv: kv[1])
+    else:
+        ordered = ordered[:max_towns]
+
+    return [
+        {"city": city, "state": state, "distance_mi": round(dist, 1)}
+        for (city, state), dist in ordered
+    ]

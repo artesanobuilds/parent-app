@@ -48,6 +48,7 @@ struct PlanView: View {
                 viewModel.baseURL = configuration.baseURL
                 cosVM.setUserID(userID)
                 await viewModel.prefillLocation()
+                await viewModel.reattachIfNeeded()  // resume an in-flight discovery
                 await viewModel.loadPlan()
             }
             .onAppear {
@@ -400,24 +401,78 @@ struct PlanView: View {
                     .foregroundColor(.inkSecondary)
             }
 
-            if !viewModel.discoveryRecent.isEmpty {
+            // Time expectation + live elapsed — kills the "is it frozen?" anxiety.
+            HStack {
+                Text(viewModel.isQueued ? "Waiting for a free research slot…"
+                                        : "Usually takes 1–2 minutes.")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+                Spacer()
+                if let started = viewModel.discoveryStartedAt, !viewModel.isQueued {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let secs = max(0, Int(context.date.timeIntervalSince(started)))
+                        Text("\(secs / 60):\(String(format: "%02d", secs % 60)) elapsed")
+                            .font(.hearthBodySM.monospacedDigit())
+                            .foregroundColor(.inkMuted)
+                    }
+                }
+            }
+
+            // Live results filling in (skeleton → cards) instead of a bare spinner.
+            if !viewModel.discoveryPreview.isEmpty {
                 Divider().background(Color.borderHairline)
                 VStack(alignment: .leading, spacing: .hearth300) {
-                    ForEach(Array(viewModel.discoveryRecent.reversed().enumerated()), id: \.offset) { idx, item in
-                        Text(item)
-                            .font(.hearthBodySM)
-                            .foregroundColor(idx == 0 ? .inkPrimary : .inkMuted)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(viewModel.discoveryPreview) { p in
+                        previewRow(p)
                     }
+                }
+            } else if !viewModel.isQueued {
+                Divider().background(Color.borderHairline)
+                VStack(alignment: .leading, spacing: .hearth300) {
+                    ForEach(0..<3, id: \.self) { _ in skeletonRow }
                 }
             }
         }
         .padding(.hearth600)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(cardBackground)
-        .animation(.hearthFast, value: viewModel.discoveryRecent)
+        .animation(.hearthFast, value: viewModel.discoveryPreview)
+    }
+
+    private func previewRow(_ p: CandidatePreview) -> some View {
+        HStack(spacing: .hearth400) {
+            Circle().fill(Color.accentTint).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(p.name ?? "Activity")
+                    .font(.hearthBodySM.weight(.semibold))
+                    .foregroundColor(.inkPrimary)
+                    .lineLimit(1)
+                let meta = [p.city, p.category].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                if !meta.isEmpty {
+                    Text(meta).font(.hearthBodySM).foregroundColor(.inkMuted).lineLimit(1)
+                }
+            }
+            Spacer()
+            if let fit = p.fitScore {
+                Text("\(Int(fit * 100))%")
+                    .font(.hearthBodySM.monospacedDigit())
+                    .foregroundColor(.accentDefault)
+            }
+        }
+    }
+
+    private var skeletonRow: some View {
+        HStack(spacing: .hearth400) {
+            Circle().fill(Color.borderHairline).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 4) {
+                RoundedRectangle(cornerRadius: 4).fill(Color.borderHairline)
+                    .frame(width: 160, height: 9)
+                RoundedRectangle(cornerRadius: 4).fill(Color.borderHairline.opacity(0.6))
+                    .frame(width: 100, height: 8)
+            }
+            Spacer()
+        }
+        .opacity(0.7)
     }
 
     private var candidateList: some View {
@@ -435,13 +490,79 @@ struct PlanView: View {
                         .foregroundColor(.accentDefault)
                 }
             }
-            ForEach(viewModel.candidates) { candidate in
+
+            filterBar
+
+            let shown = viewModel.filteredCandidates
+            if shown.isEmpty && viewModel.hasActiveFilters {
+                Text("No results match those filters.")
+                    .font(.hearthBodyMD)
+                    .foregroundColor(.inkMuted)
+                    .padding(.vertical, .hearth400)
+            }
+            ForEach(shown) { candidate in
                 HStack(alignment: .center, spacing: .hearth300) {
                     NavigationLink(value: CandidateRoute(candidate: candidate)) {
                         CandidateRow(candidate: candidate)
                     }
                     .buttonStyle(.plain)
                     saveButton(for: candidate)
+                }
+            }
+        }
+    }
+
+    // MARK: - Result filters (client-side facets)
+
+    @ViewBuilder
+    private var filterBar: some View {
+        let cities = viewModel.availableCities
+        let cats = viewModel.availableCategories
+        let kids = viewModel.availableKids
+        if cities.count >= 2 || cats.count >= 2 || kids.count >= 2 {
+            VStack(alignment: .leading, spacing: .hearth300) {
+                HStack {
+                    Text("Filter")
+                        .font(.hearthBodySM.weight(.semibold))
+                        .foregroundColor(.inkSecondary)
+                    Spacer()
+                    if viewModel.hasActiveFilters {
+                        Button {
+                            withAnimation(.hearthFast) { viewModel.clearFilters() }
+                        } label: {
+                            Text("Clear (\(viewModel.activeFilterCount))")
+                                .font(.hearthBodySM)
+                                .foregroundColor(.accentDefault)
+                        }
+                    }
+                }
+                if cities.count >= 2 { facetRow(cities, selection: $viewModel.selectedCities) }
+                if cats.count >= 2 { facetRow(cats, selection: $viewModel.selectedCategories) }
+                if kids.count >= 2 { facetRow(kids, selection: $viewModel.selectedKids) }
+            }
+            .padding(.bottom, .hearth300)
+        }
+    }
+
+    private func facetRow(_ values: [String], selection: Binding<Set<String>>) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: .hearth300) {
+                ForEach(values, id: \.self) { v in
+                    let on = selection.wrappedValue.contains(v)
+                    Button {
+                        withAnimation(.hearthFast) {
+                            if on { selection.wrappedValue.remove(v) }
+                            else { selection.wrappedValue.insert(v) }
+                        }
+                    } label: {
+                        Text(v)
+                            .font(.hearthBodySM)
+                            .foregroundColor(on ? .inkOnPhotoLight : .inkPrimary)
+                            .padding(.horizontal, .hearth400)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(on ? Color.accentDefault : Color.accentTint))
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }

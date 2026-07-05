@@ -136,6 +136,54 @@ final class PlanViewModel: ObservableObject {
         !isDiscovering && candidates.isEmpty && runStatus?.status == "done"
     }
 
+    /// Camps found SO FAR, streamed live during the run — rendered as preview
+    /// cards so the parent watches results fill in instead of staring at a spinner.
+    var discoveryPreview: [CandidatePreview] { runStatus?.progress?.candidatesPreview ?? [] }
+
+    /// When the current run started, for a live "elapsed" readout. nil when idle.
+    @Published private(set) var discoveryStartedAt: Date?
+
+    // MARK: - Result filters (client-side facets over the loaded candidates)
+
+    @Published var selectedCities: Set<String> = []
+    @Published var selectedCategories: Set<String> = []
+    @Published var selectedKids: Set<String> = []
+
+    var availableCities: [String] { Self.distinct(candidates.compactMap { $0.city }) }
+    var availableCategories: [String] { Self.distinct(candidates.compactMap { $0.category }) }
+    var availableKids: [String] { Self.distinct(candidates.flatMap { $0.displayKids }) }
+
+    var hasActiveFilters: Bool {
+        !(selectedCities.isEmpty && selectedCategories.isEmpty && selectedKids.isEmpty)
+    }
+    var activeFilterCount: Int {
+        selectedCities.count + selectedCategories.count + selectedKids.count
+    }
+
+    /// The candidates to render: AND across facet groups, OR within a group.
+    var filteredCandidates: [ActivityCandidate] {
+        candidates.filter { c in
+            (selectedCities.isEmpty || (c.city.map(selectedCities.contains) ?? false))
+                && (selectedCategories.isEmpty || (c.category.map(selectedCategories.contains) ?? false))
+                && (selectedKids.isEmpty || !selectedKids.isDisjoint(with: Set(c.displayKids)))
+        }
+    }
+
+    func clearFilters() {
+        selectedCities = []; selectedCategories = []; selectedKids = []
+    }
+
+    private static func distinct(_ xs: [String]) -> [String] {
+        Array(Set(xs.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })).sorted()
+    }
+
+    // Durable pointer to an in-flight run so returning to Plan re-attaches to a
+    // running/finished discovery instead of showing the empty form.
+    private static let activeRunKey = "discovery_active_run"
+    private static func setActiveRun(_ id: String) { UserDefaults.standard.set(id, forKey: activeRunKey) }
+    private static func activeRun() -> String? { UserDefaults.standard.string(forKey: activeRunKey) }
+    private static func clearActiveRun() { UserDefaults.standard.removeObject(forKey: activeRunKey) }
+
     // MARK: - Discovery
 
     /// Trigger a new research run and poll until it reaches a terminal state,
@@ -153,7 +201,9 @@ final class PlanViewModel: ObservableObject {
 
         errorMessage = nil
         candidates = []
+        clearFilters()
         isDiscovering = true
+        discoveryStartedAt = Date()
         pollTask?.cancel()
 
         let zip = locationQuery.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -171,53 +221,101 @@ final class PlanViewModel: ObservableObject {
                 let handle = try await PlanService.createRun(
                     baseURL: baseURL, userID: userId, location: location, params: params
                 )
+                Self.setActiveRun(handle.runId)  // durable so we can re-attach later
                 self.runStatus = ResearchRunStatus(
                     runId: handle.runId, status: handle.status,
                     progress: nil, candidateCount: 0, error: nil
                 )
-
-                // Live updates over SSE — one held connection, no 2s polling. Fall
-                // back to polling if the stream errors (proxy/network) or ends early
-                // (server-side cap). The run keeps going on the backend regardless.
-                var reachedTerminal = false
-                do {
-                    for try await status in PlanService.streamRun(
-                        baseURL: baseURL, userID: userId, runId: handle.runId
-                    ) {
-                        if Task.isCancelled { return }
-                        self.runStatus = status
-                        if status.isTerminal { reachedTerminal = true; break }
-                    }
-                } catch {
-                    if Task.isCancelled { return }
-                    reachedTerminal = await self.pollUntilTerminal(
-                        baseURL: baseURL, userId: userId, runId: handle.runId
-                    )
-                }
-                if !reachedTerminal, !Task.isCancelled {
-                    reachedTerminal = await self.pollUntilTerminal(
-                        baseURL: baseURL, userId: userId, runId: handle.runId
-                    )
-                }
-
-                if Task.isCancelled { return }
-                if let status = self.runStatus, status.status == "done" {
-                    self.candidates = try await PlanService.candidates(
-                        baseURL: baseURL, userID: userId, runId: status.runId
-                    )
-                } else if let status = self.runStatus, status.status == "failed" {
-                    self.errorMessage = status.error ?? "The discovery run failed."
-                } else if !reachedTerminal {
-                    self.errorMessage = "This is taking longer than usual. It's still "
-                        + "working in the background — tap Find activities again in a "
-                        + "moment to pick up where it left off."
-                }
+                await self.consumeRun(baseURL: baseURL, userId: userId, runId: handle.runId)
             } catch {
                 if !Task.isCancelled {
                     self.errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 }
             }
             self.isDiscovering = false
+            self.discoveryStartedAt = nil
+        }
+    }
+
+    /// Drive a run to a terminal state (SSE with poll fallback) and load its
+    /// candidates. Shared by `startDiscovery` (fresh run) and `reattachIfNeeded`
+    /// (an in-flight run we reconnected to). Clears the durable run pointer on a
+    /// terminal state so we don't re-attach to a finished run.
+    private func consumeRun(baseURL: URL, userId: String, runId: String) async {
+        // Live updates over SSE — one held connection, no 2s polling. Fall back
+        // to polling if the stream errors (proxy/network) or ends early
+        // (server-side cap). The run keeps going on the backend regardless.
+        var reachedTerminal = false
+        do {
+            for try await status in PlanService.streamRun(
+                baseURL: baseURL, userID: userId, runId: runId
+            ) {
+                if Task.isCancelled { return }
+                self.runStatus = status
+                if status.isTerminal { reachedTerminal = true; break }
+            }
+        } catch {
+            if Task.isCancelled { return }
+            reachedTerminal = await self.pollUntilTerminal(
+                baseURL: baseURL, userId: userId, runId: runId
+            )
+        }
+        if !reachedTerminal, !Task.isCancelled {
+            reachedTerminal = await self.pollUntilTerminal(
+                baseURL: baseURL, userId: userId, runId: runId
+            )
+        }
+
+        if Task.isCancelled { return }
+        if let status = self.runStatus, status.status == "done" {
+            Self.clearActiveRun()
+            self.candidates = (try? await PlanService.candidates(
+                baseURL: baseURL, userID: userId, runId: status.runId
+            )) ?? []
+        } else if let status = self.runStatus, status.status == "failed" {
+            Self.clearActiveRun()
+            self.errorMessage = status.error ?? "The discovery run failed."
+        } else if !reachedTerminal {
+            // Still running server-side — keep the pointer so a return re-attaches.
+            self.errorMessage = "This is taking longer than usual. It's still "
+                + "working in the background — tap Find activities again in a "
+                + "moment to pick up where it left off."
+        }
+    }
+
+    /// On returning to Plan, re-attach to an in-flight/finished run instead of
+    /// showing the empty form. No-op if nothing is stored or a run is already
+    /// visible. Called from `PlanView.task`.
+    func reattachIfNeeded() async {
+        guard !isDiscovering, runStatus == nil, candidates.isEmpty else { return }
+        guard let baseURL = baseURL else { return }
+        let uid = userId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uid.isEmpty, let runId = Self.activeRun() else { return }
+        guard let status = try? await PlanService.runStatus(
+            baseURL: baseURL, userID: uid, runId: runId
+        ) else {
+            Self.clearActiveRun(); return
+        }
+        self.runStatus = status
+        switch status.status {
+        case "done":
+            candidates = (try? await PlanService.candidates(
+                baseURL: baseURL, userID: uid, runId: runId
+            )) ?? []
+            Self.clearActiveRun()
+        case "failed", "canceled":
+            Self.clearActiveRun()
+            self.runStatus = nil
+        default:  // queued / running — resume driving it
+            isDiscovering = true
+            discoveryStartedAt = Date()
+            pollTask?.cancel()
+            pollTask = Task { [weak self] in
+                guard let self else { return }
+                await self.consumeRun(baseURL: baseURL, userId: uid, runId: runId)
+                self.isDiscovering = false
+                self.discoveryStartedAt = nil
+            }
         }
     }
 
@@ -240,6 +338,8 @@ final class PlanViewModel: ObservableObject {
     func cancelDiscovery() {
         pollTask?.cancel()
         isDiscovering = false
+        discoveryStartedAt = nil
+        Self.clearActiveRun()
     }
 
     /// Prefill the ZIP from the saved profile (only when the field is empty, so
