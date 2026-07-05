@@ -1,0 +1,41 @@
+spec:
+  name: discovery-geo-coverage
+  tier: 2
+  modules: [research, geo]
+  intent: >
+    Acceptance test for the radius geo-grounding fix. Before, a discovery run had
+    no geographic grounding — it anchored on the single nearest big city and, from
+    ZIP 95448 (Healdsburg), a 50-mile "art" search reached only Santa Rosa and
+    MISSED Sebastopol (~18mi, well inside the radius) where a real camp is. Now the
+    prompt enumerates the actual towns within the radius, so the agent covers a
+    spread. This flow runs that exact search live and asserts the results are
+    geographically spread across the radius — not clustered on one town — and,
+    ideally, reach Sebastopol.
+
+  personas:
+    parent:
+      preset: new-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "RUN_OPENAI_FLOWS=true (a discovery run executes against OpenAI + web search; skipped otherwise)"
+    - "The bundled ZIP dataset (app/research/data/us_zip_centroids.csv.gz) is present so 95448 resolves to nearby towns"
+
+  invariants:
+    - "POST /research/runs with location {postal_code: 95448} + params {focus: art, radius_miles: 50} returns a fresh run_id"
+    - "The run reaches status=done within the timeout"
+    - "GET /research/runs/{run_id}/candidates returns at least one candidate"
+    - "The candidates span at least 2 distinct towns (distinct non-null city values) — geographic spread across the radius, not a single-city cluster"
+    - "At least one candidate is in a town other than the ZIP's own city (Healdsburg) — the radius actually reached out; Sebastopol is the target town"
+    - "The created run is left in a terminal state (no cleanup cancel needed once done)"
+
+  boundary_contracts:
+    - endpoint: POST /research/runs
+      as: parent
+      status: 200
+      response_includes: [run_id, status]
+
+    - endpoint: GET /research/runs/{run_id}/candidates
+      as: parent
+      status: 200
+      response_includes: [candidates]
