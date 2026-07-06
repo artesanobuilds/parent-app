@@ -123,8 +123,11 @@ _CRISIS_PATTERNS: List[_CrisisPattern] = [
     _cp(r"\b(razor|blade|x-?acto)\s+(blade|to\s+(cut|hurt))\b", "self_harm", "imminent"),
 
     # ── abuse_disclosure ─────────────────────────────────────────────
+    # Every verb requires the victim object "…me" — a bare "hits?" with no object
+    # false-fired on benign phrases like "she hit a guardrail" and locked a
+    # companion. "he hits me" / "uncle hit me" still match.
     _cp(r"\b(he|she|they|mom|mommy|dad|daddy|stepdad|stepmom|grandpa|grandma|uncle|aunt|teacher|coach|babysitter)\s+"
-        r"(hits?|hit\s+me|punche[sd]?\s+me|kicke[sd]?\s+me|chokes?\s+me|burns?\s+me|"
+        r"(hits?\s+me|punche[sd]?\s+me|kicke[sd]?\s+me|chokes?\s+me|burns?\s+me|"
         r"hurts?\s+me|made\s+me|forces?\s+me|slaps?\s+me|whip\w*\s+me)\b", "abuse", "high"),
     _cp(r"\b(I\s+am|I'?m|im)\s+being\s+(hit|hurt|abused|touched|forced)\b", "abuse", "high"),
     _cp(r"\b(touched|grabbed|kissed)\s+me\s+(weird|wrong|where|in\s+(a\s+)?(bad|weird)\s+place|down\s+there)\b",

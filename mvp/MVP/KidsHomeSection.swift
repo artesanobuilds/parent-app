@@ -14,6 +14,8 @@ struct KidsHomeSection: View {
     // Persisted flag so HomeView's greeting header can conditionally show
     // the "Hand to kid" button only when at least one companion exists.
     @AppStorage("has_kid_companions") private var hasKidCompanions: Bool = false
+    // A crisis-locked companion the parent tapped to review + reactivate.
+    @State private var reactivateTarget: KidsHomeViewModel.KidEntry?
 
     init(userID: String, baseURL: URL, refreshToken: Int = 0) {
         self.userID = userID
@@ -41,15 +43,29 @@ struct KidsHomeSection: View {
             } else {
                 VStack(spacing: .hearth400) {
                     ForEach(vm.kids, id: \.kidName) { kid in
-                        NavigationLink(value: KidNavigation.review(kidName: kid.kidName)) {
-                            KidCard(
-                                kidName: kid.kidName,
-                                agentName: kid.invariants.agentDisplayName,
-                                summary: kid.summary,
-                                status: kid.status
-                            )
+                        if kid.status == .locked {
+                            // A crisis-locked companion routes to a deliberate
+                            // parent review + reactivate, not the intro screen.
+                            Button { reactivateTarget = kid } label: {
+                                KidCard(
+                                    kidName: kid.kidName,
+                                    agentName: kid.invariants.agentDisplayName,
+                                    summary: kid.summary,
+                                    status: kid.status
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            NavigationLink(value: KidNavigation.review(kidName: kid.kidName)) {
+                                KidCard(
+                                    kidName: kid.kidName,
+                                    agentName: kid.invariants.agentDisplayName,
+                                    summary: kid.summary,
+                                    status: kid.status
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -71,6 +87,26 @@ struct KidsHomeSection: View {
         }
         .onChange(of: vm.kids.filter({ $0.status == .active }).count) { _, activeCount in
             hasKidCompanions = activeCount > 0
+        }
+        .confirmationDialog(
+            reactivateTarget.map { "\($0.kidName)'s companion is paused for safety" } ?? "",
+            isPresented: Binding(
+                get: { reactivateTarget != nil },
+                set: { if !$0 { reactivateTarget = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let target = reactivateTarget, let agentID = target.agentID {
+                Button("Reactivate companion") {
+                    reactivateTarget = nil
+                    Task { await vm.reactivate(agentID: agentID) }
+                }
+                Button("Cancel", role: .cancel) { reactivateTarget = nil }
+            }
+        } message: {
+            Text("A message was flagged by the safety filter, so this companion was "
+                 + "paused. Review your child's recent chat if you're unsure. "
+                 + "Reactivating clears the pause and lets them talk again.")
         }
     }
 
@@ -138,6 +174,7 @@ private struct KidCard: View {
             case .active:  return ("Active",    .inkOnPhotoLight, .accentDefault)
             case .draft:   return ("Introduce", .accentDefault,   .accentTint)
             case .missing: return ("Set up",    .inkMuted,        .bgElevated)
+            case .locked:  return ("Review",    .inkOnPhotoLight, .statusError)
             }
         }()
         return Text(label)
@@ -148,7 +185,8 @@ private struct KidCard: View {
             .padding(.horizontal, .hearth400).padding(.vertical, .hearth300)
             .background(bg)
             .overlay(
-                Capsule().stroke(status == .active ? Color.clear : Color.accentDefault.opacity(0.4),
+                Capsule().stroke(status == .active || status == .locked
+                                 ? Color.clear : Color.accentDefault.opacity(0.4),
                                  lineWidth: 1)
             )
             .clipShape(Capsule())
@@ -162,10 +200,11 @@ enum KidNavigation: Hashable {
 @MainActor
 final class KidsHomeViewModel: ObservableObject {
 
-    enum Status { case active, draft, missing }
+    enum Status { case active, draft, missing, locked }
 
     struct KidEntry: Identifiable {
         let kidName: String
+        let agentID: String?     // for revive; nil when there's no config yet
         let invariants: KidAgentInvariants
         let summary: String
         let status: Status
@@ -204,11 +243,17 @@ final class KidsHomeViewModel: ObservableObject {
 
             self.kids = family.map { child in
                 if let cfg = configByName[child.name] {
+                    // A crisis lock takes priority over enabled: the companion was
+                    // paused for safety and needs a parent review, NOT a re-setup.
+                    let locked = cfg.crisisLocked ?? false
+                    let status: Status = locked ? .locked : (cfg.enabled ? .active : .draft)
                     return KidEntry(
                         kidName: cfg.kidName,
+                        agentID: cfg.id,
                         invariants: cfg.invariants,
-                        summary: cfg.invariants.interestsSummary,
-                        status: cfg.enabled ? .active : .draft
+                        summary: locked ? "Paused for safety — tap to review"
+                                        : cfg.invariants.interestsSummary,
+                        status: status
                     )
                 }
                 let summary: String = {
@@ -217,6 +262,7 @@ final class KidsHomeViewModel: ObservableObject {
                 }()
                 return KidEntry(
                     kidName: child.name,
+                    agentID: nil,
                     invariants: .empty,
                     summary: summary,
                     status: .missing
@@ -225,6 +271,17 @@ final class KidsHomeViewModel: ObservableObject {
         } catch {
             self.error = error.localizedDescription
             print("[KidsHome] refresh failed: \(error)")
+        }
+    }
+
+    /// Parent-reviewed reactivation of a crisis-locked companion: clears the lock,
+    /// re-enables, and refreshes so the card flips back to Active.
+    func reactivate(agentID: String) async {
+        do {
+            try await service.revive(agentID: agentID)
+            await refresh()
+        } catch {
+            self.error = "Couldn't reactivate. Check your connection and try again."
         }
     }
 

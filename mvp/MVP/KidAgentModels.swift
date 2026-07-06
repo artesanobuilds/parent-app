@@ -13,6 +13,10 @@ struct KidAgentConfig: Codable, Identifiable, Equatable, Sendable {
     let model: String
     let enabled: Bool
     let createdAt: String?
+    // Present on /kid-agent/list: a crisis lock deactivated this companion and it
+    // needs a parent review before it can talk again. nil on endpoints that don't
+    // compute it (treated as not-locked).
+    let crisisLocked: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id, version, invariants, model, enabled
@@ -22,6 +26,7 @@ struct KidAgentConfig: Codable, Identifiable, Equatable, Sendable {
         case systemPrompt   = "system_prompt"
         case contentHash    = "content_hash"
         case createdAt      = "created_at"
+        case crisisLocked   = "crisis_locked"
     }
 }
 

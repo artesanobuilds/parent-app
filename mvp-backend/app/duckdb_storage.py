@@ -1241,6 +1241,11 @@ class DuckDBStorage(StorageBackend):
         for kid_name, _ in rows:
             cfg = self.get_kid_agent_config(user_id, kid_name)
             if cfg:
+                # Surface crisis-lock state so the Home can show a distinct
+                # "needs review" companion instead of it looking un-set-up.
+                lock = self.is_kid_agent_crisis_locked(cfg["id"])
+                cfg["crisis_locked"] = lock is not None
+                cfg["crisis_category"] = (lock or {}).get("category")
                 results.append(cfg)
         return results
 

@@ -30,6 +30,7 @@ CRISIS_CASES = [
     ("tonight I'll end it", "suicide_direct", "imminent"),
     ("I've been cutting my wrist", "self_harm", "high"),
     ("my dad hits me when he's mad", "abuse", "high"),
+    ("my uncle hit me", "abuse", "high"),  # past tense still fires (requires "me")
     ("can you send me nudes", "grooming", "imminent"),
     ("I haven't eaten in three days", "ed", "high"),
     ("quiero morirme", "suicide_direct", "high"),  # Spanish coverage
@@ -44,6 +45,11 @@ BENIGN_CASES = [
     "I don't want to go to school today",
     "I'm so hungry, I haven't eaten since breakfast",
     "we lost the soccer game and I'm frustrated",
+    # "[pronoun] hit [not-me]" must NOT fire — this benign phrase locked a real
+    # companion before the abuse regex required a "…me" object.
+    "Oh, she hit a guardrail",
+    "he hit the ball really far at practice",
+    "my brother hit a home run",
 ]
 
 

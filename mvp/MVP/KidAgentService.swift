@@ -197,6 +197,15 @@ struct KidAgentService {
         return try await send(request, as: KidAgentConfig.self)
     }
 
+    /// Clear a crisis lock and re-enable the companion after the parent reviews.
+    /// POST /kid-agent/{agent_id}/revive.
+    func revive(agentID: String) async throws {
+        struct Ack: Codable { let ok: Bool }
+        let body = try JSONSerialization.data(withJSONObject: ["user_id": userID])
+        let request = try await authedRequest("kid-agent/\(agentID)/revive", method: "POST", body: body)
+        _ = try await send(request, as: Ack.self)
+    }
+
     // MARK: - Kid chat (parent-side, e.g. preview / test sandbox)
 
     /// One decoded event from the `/kid-chat` SSE stream: `token` text deltas
