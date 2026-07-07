@@ -24,7 +24,7 @@ from langchain_core.messages import HumanMessage
 
 from app.auth import current_user, authorize_user_match
 from app.rate_limit import enforce as rate_limit_enforce
-from app.cos import planning
+from app.cos import lifecycle, planning
 from app.cos.agent import get_cos_agent
 
 logger = logging.getLogger(__name__)
@@ -141,8 +141,15 @@ class TrackActivityPatch(BaseModel):
 @router.post("/activities/track")
 def track_activity(body: TrackActivityBody, user_id: str = Depends(current_user)):
     authorize_user_match(authenticated=user_id, claimed=body.user_id)
+    storage = _storage()
     payload = body.model_dump(exclude={"user_id"})
-    activity_id = _storage().track_activity(user_id, **payload)
+    activity_id = storage.track_activity(user_id, **payload)
+    # Created straight into a watched status (= already registered) — fire the
+    # same registration side effects as a transition (see cos/lifecycle).
+    if (payload.get("status") or "").strip().lower() in lifecycle.WATCHED:
+        created = storage.get_tracked_activity(activity_id)
+        if created:
+            lifecycle.on_enter_watched(storage, user_id, created)
     return {"id": activity_id}
 
 
@@ -163,7 +170,25 @@ def patch_activity(
     authorize_user_match(authenticated=user_id, claimed=existing["user_id"])
     fields = body.model_dump(exclude={"user_id"}, exclude_none=True)
     storage.update_tracked_activity(activity_id, **fields)
-    return {"id": activity_id, "activity": storage.get_tracked_activity(activity_id)}
+    updated = storage.get_tracked_activity(activity_id)
+    # Registering flips on email tracking + baseline to-dos (see cos/lifecycle).
+    if "status" in fields and lifecycle.entered_watched(existing.get("status"), fields["status"]):
+        lifecycle.on_enter_watched(storage, user_id, updated)
+    return {"id": activity_id, "activity": updated}
+
+
+@router.get("/plan/board")
+def plan_board(user_id: str = Depends(current_user)):
+    """The lifecycle board: activities grouped by stage (Considering → To
+    register → Registered · needs action → All set …), each joined with its open
+    to-dos and a computed next_step. One payload drives BOTH clients — the
+    grouping/CTA logic lives in cos/lifecycle.py, never per surface."""
+    storage = _storage()
+    return lifecycle.build_board(
+        storage.list_tracked_activities(user_id),
+        storage.list_todos(user_id),
+        gmail_connected=lifecycle.gmail_connected(storage, user_id),
+    )
 
 
 @router.delete("/activities/{activity_id}")

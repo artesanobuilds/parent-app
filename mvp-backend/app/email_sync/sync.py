@@ -6,9 +6,9 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-logger = logging.getLogger(__name__)
+from app.cos.lifecycle import WATCHED as _REGISTERED
 
-_REGISTERED = ("confirmed", "signed_up")
+logger = logging.getLogger(__name__)
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _SYNC_WINDOW = "newer_than:14d"
 

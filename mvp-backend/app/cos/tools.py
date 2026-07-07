@@ -130,10 +130,14 @@ def _make_track_activity_tool(user_id: str):
         """Track a camp/class/activity the parent is considering or has committed to.
 
         Default status is "exploring" (on the shortlist, considering — not yet
-        decided). Keep the decision explicit via ``status`` ("exploring",
-        "pending_eligibility", "signed_up", "confirmed", "declined"). Move items
-        off "exploring" once the parent settles. ``price_status`` is "tbd" or
-        "confirmed". Returns a short confirmation including the new id.
+        decided). The lifecycle the parent sees: "exploring" (considering) →
+        "planned" (they said WE'LL DO IT but haven't registered yet) →
+        "signed_up" (registered — the app starts watching that camp's emails
+        and tracking payment/form to-dos) → "done". Also: "pending_eligibility",
+        "waitlisted", "declined". Use "planned" when the parent decides but
+        hasn't registered; use "signed_up" only once they actually registered.
+        ``price_status`` is "tbd" or "confirmed". Returns a short confirmation
+        including the new id.
         """
         try:
             activity_id = _storage().track_activity(
@@ -154,9 +158,27 @@ def _make_track_activity_tool(user_id: str):
             logger.warning("[cos_tool] TrackActivity failed: %s", exc)
             return f"Could not track '{name}': {exc}"
         who = f" for {kid_name}" if kid_name else ""
+        _maybe_enter_watched(user_id, activity_id, status)
         return f"Tracked '{name}'{who} as {status} (id={activity_id})."
 
     return TrackActivity
+
+
+def _maybe_enter_watched(user_id: str, activity_id: str, status: Optional[str]) -> None:
+    """Creating an activity directly in a watched status (e.g. LookupAndSaveCamp
+    defaults to signed_up) is also a registration — fire the same side effects
+    as a status transition: seed to-dos + start watching. Never raises."""
+    from app.cos import lifecycle
+
+    if (status or "").strip().lower() not in lifecycle.WATCHED:
+        return
+    try:
+        storage = _storage()
+        activity = storage.get_tracked_activity(activity_id)
+        if activity:
+            lifecycle.on_enter_watched(storage, user_id, activity)
+    except Exception:  # noqa: BLE001 — best-effort nicety
+        logger.warning("[cos_tool] enter-watched side effects failed for %s", activity_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -727,6 +749,7 @@ def _make_lookup_and_save_camp_tool(user_id: str):
                 )
             except Exception as exc:
                 return _tool_error("LookupAndSaveCamp", exc, user_id)
+            _maybe_enter_watched(user_id, activity_id, status)
             return (
                 f"Saved '{match.get('name') or camp_name}' as {status} "
                 f"(matched one of your discovered options, id={activity_id})."
@@ -779,6 +802,7 @@ def _make_lookup_and_save_camp_tool(user_id: str):
             )
         except Exception as exc:
             return _tool_error("LookupAndSaveCamp", exc, user_id)
+        _maybe_enter_watched(user_id, activity_id, status)
 
         bits = []
         if extracted.provider:
@@ -813,10 +837,14 @@ def _make_update_activity_tool(user_id: str):
         notes: Optional[str] = None,
         decision_rationale: Optional[str] = None,
     ) -> str:
-        """Update fields on an existing tracked activity — e.g. move it
-        exploring→signed_up/confirmed/declined, set the price, add a signup link,
-        or set the week. Send only the fields to change. ALWAYS include
-        ``decision_rationale`` when you change ``status`` (decision log)."""
+        """Update fields on an existing tracked activity — e.g. advance it along
+        the lifecycle: "exploring" (considering) → "planned" (parent said we'll
+        do it, not yet registered) → "signed_up" (registered — the app then
+        watches that camp's emails + tracks payment/form to-dos) → "done"; or
+        "declined" to pass. Use "planned" for decided-but-not-registered; only
+        use "signed_up"/"confirmed" once they actually registered. Send only the
+        fields to change. ALWAYS include ``decision_rationale`` when you change
+        ``status`` (decision log)."""
         storage = _storage()
         existing = storage.get_tracked_activity(activity_id)
         if not existing:
@@ -842,6 +870,13 @@ def _make_update_activity_tool(user_id: str):
             storage.update_tracked_activity(activity_id, **fields)
         except Exception as exc:
             return _tool_error("UpdateActivity", exc, user_id)
+        if "status" in fields:
+            from app.cos import lifecycle
+
+            if lifecycle.entered_watched(existing.get("status"), fields["status"]):
+                updated = storage.get_tracked_activity(activity_id)
+                if updated:
+                    lifecycle.on_enter_watched(storage, user_id, updated)
         return f"Updated '{existing.get('name')}': {', '.join(fields)} (id={activity_id})."
 
     return UpdateActivity

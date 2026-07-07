@@ -7,13 +7,17 @@ caregiver coverage gaps.
 
 Everything here is intentionally PURE: functions take plain lists of dicts
 (matching the shapes the storage layer returns) and return plain dicts/lists.
-No I/O, no DB, no network, no imports from ``app.*`` — only the stdlib. This
-keeps the logic trivially testable and reusable by the agent layer.
+No I/O, no DB, no network — only the stdlib plus the equally-pure status
+groups in ``app.cos.lifecycle`` (the single source of truth for the activity
+lifecycle). This keeps the logic trivially testable and reusable by the agent
+layer.
 """
 from __future__ import annotations
 
 from datetime import datetime, time
 from typing import Any, Optional
+
+from app.cos.lifecycle import UNDECIDED
 
 __all__ = [
     "cost_summary",
@@ -28,14 +32,10 @@ __all__ = [
 _COVERING_KINDS = {"camp", "class", "program"}
 
 # Statuses that mean "still on the shortlist / not yet settled" — what the
-# decision/triage mode (R2) compares.
-_UNDECIDED_STATUSES = {
-    "exploring",
-    "interested",
-    "pending_eligibility",
-    "waitlisted",
-    "reference",
-}
+# decision/triage mode (R2) compares. Sourced from cos/lifecycle.py so the
+# grouping can't drift from email-sync/export (`planned` is decided, so it is
+# deliberately NOT undecided).
+_UNDECIDED_STATUSES = UNDECIDED
 
 
 def cost_summary(tracked: list[dict]) -> dict:

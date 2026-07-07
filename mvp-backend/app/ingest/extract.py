@@ -278,30 +278,37 @@ def materialize(
             except Exception as exc:  # noqa: BLE001 — one bad date shouldn't abort
                 logger.warning("[ingest] calendar entry skipped for %r: %s", d, exc)
 
-        # Action-item to-dos. Always add a confirm-this when pending.
-        todos = list(extracted.action_items)
+        # Action-item to-dos, TYPED (kind payment|form|action) so the lifecycle
+        # board can surface "needs payment" etc. Always add a confirm-this when
+        # pending. Only the payment to-do carries the payment due date.
+        todos: list[tuple[str, str, Optional[str]]] = [
+            (t, "action", None) for t in extracted.action_items
+        ]
         if pending_reason:
-            todos.insert(0, f"Confirm eligibility: {pending_reason}")
+            todos.insert(0, (f"Confirm eligibility: {pending_reason}", "action", None))
         if extracted.payment_due_date and extracted.amount_due:
-            todos.append(
-                f"Pay ${extracted.amount_due:g} by {extracted.payment_due_date}"
-            )
+            todos.append((
+                f"Pay ${extracted.amount_due:g} by {extracted.payment_due_date}",
+                "payment",
+                extracted.payment_due_date,
+            ))
         for form in extracted.forms_required:
-            todos.append(f"Submit form: {form}")
-        for t in todos:
+            todos.append((f"Submit form: {form}", "form", None))
+        for title, kind, due in todos:
             try:
                 todo_id = storage.add_todo(
                     user_id,
-                    title=t,
+                    title=title,
                     kid_name=extracted.kid_fit,
                     activity_id=activity_id,
+                    kind=kind,
                     detail="Auto-created from an ingested message/photo — review.",
-                    due_date=extracted.payment_due_date,
+                    due_date=due,
                     source="email" if extracted.is_welcome_letter else "manual",
                     source_artifact_id=artifact_id,
                 )
                 created["todo_ids"].append(todo_id)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("[ingest] todo skipped for %r: %s", t, exc)
+                logger.warning("[ingest] todo skipped for %r: %s", title, exc)
 
     return created

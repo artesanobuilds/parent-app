@@ -48,10 +48,12 @@ def _autosize(ws) -> None:
 
 
 def _confirmedish(status: Optional[str], price_status: Optional[str] = None) -> Optional[bool]:
+    from app.cos.lifecycle import COMMITTED, CONSIDERING, PLANNED
+
     s = (status or "").lower()
-    if s in ("confirmed", "signed_up", "done"):
+    if s in COMMITTED:  # single source of truth: cos/lifecycle.py
         return True
-    if "pending" in s or s in ("exploring", "interested", "tbd", "waitlisted") or price_status == "tbd":
+    if "pending" in s or s in CONSIDERING or s in PLANNED or s in ("tbd", "waitlisted") or price_status == "tbd":
         return False
     return None
 
