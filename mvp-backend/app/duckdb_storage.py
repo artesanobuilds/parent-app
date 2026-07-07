@@ -273,6 +273,21 @@ class DuckDBStorage(StorageBackend):
 
     CREATE INDEX IF NOT EXISTS idx_push_device_tokens_user ON push_device_tokens (user_id);
 
+    -- Phase 3b: scoped, read-only, expiring share links (nanny/therapist views).
+    -- Only the sha256 hash is stored like auth_tokens, the raw token lives in the
+    -- URL. `scope` prunes which plan data the public view exposes.
+    CREATE TABLE IF NOT EXISTS share_tokens (
+        token       TEXT PRIMARY KEY,            -- sha256 of the raw link token
+        user_id     TEXT NOT NULL,
+        scope       TEXT NOT NULL,               -- full | logistics | therapy
+        label       TEXT,                         -- e.g. "Nanny", free-text
+        created_at  TIMESTAMPTZ DEFAULT now(),
+        expires_at  TIMESTAMPTZ,
+        revoked_at  TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_share_tokens_user ON share_tokens (user_id);
+
     CREATE TABLE IF NOT EXISTS consent_records (
         id                 TEXT PRIMARY KEY,        -- uuid
         user_id            TEXT NOT NULL,
@@ -648,6 +663,7 @@ class DuckDBStorage(StorageBackend):
         ("audit_events", "audit_events.parquet"),
         ("auth_tokens", "auth_tokens.parquet"),
         ("push_device_tokens", "push_device_tokens.parquet"),
+        ("share_tokens", "share_tokens.parquet"),
         ("tts_usage_daily", "tts_usage_daily.parquet"),
         # Activity planning + Chief-of-Staff (user state — exclude from image
         # build context in .dockerignore so local data never overwrites prod).
@@ -1528,6 +1544,55 @@ class DuckDBStorage(StorageBackend):
     def delete_push_token(self, token: str) -> None:
         self._con.execute("DELETE FROM push_device_tokens WHERE token = ?", [token])
 
+    # ── Share tokens (scoped read-only plan links) ───────────────────
+
+    def issue_share_token(
+        self, *, user_id: str, scope: str, label: Optional[str] = None, ttl_days: int = 30
+    ) -> str:
+        """Mint a scoped, expiring, read-only share link token. Returns the RAW
+        token (stored hashed, like auth_tokens) — it's only ever returned here."""
+        import secrets
+        raw = secrets.token_urlsafe(24)
+        self._con.execute(
+            "INSERT INTO share_tokens (token, user_id, scope, label, expires_at) "
+            "VALUES (?, ?, ?, ?, now() + INTERVAL (?) DAY)",
+            [self._hash_token(raw), user_id, scope, label, ttl_days],
+        )
+        return raw
+
+    def lookup_share_token(self, raw_token: str) -> Optional[Dict[str, Any]]:
+        """Resolve a raw share token → {user_id, scope, label} if valid (not
+        revoked, not expired). None otherwise."""
+        row = self._con.execute(
+            "SELECT user_id, scope, label FROM share_tokens WHERE token = ? "
+            "AND revoked_at IS NULL AND expires_at IS NOT NULL AND expires_at > now()",
+            [self._hash_token(raw_token)],
+        ).fetchone()
+        if not row:
+            return None
+        return {"user_id": row[0], "scope": row[1], "label": row[2]}
+
+    def list_share_tokens(self, user_id: str) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            "SELECT scope, label, created_at, expires_at, revoked_at "
+            "FROM share_tokens WHERE user_id = ? ORDER BY created_at DESC",
+            [user_id],
+        ).fetchall()
+        return [
+            {"scope": r[0], "label": r[1],
+             "created_at": r[2].isoformat() if r[2] else None,
+             "expires_at": r[3].isoformat() if r[3] else None,
+             "revoked": r[4] is not None}
+            for r in rows
+        ]
+
+    def revoke_share_token(self, *, user_id: str, raw_token: str) -> bool:
+        cur = self._con.execute(
+            "UPDATE share_tokens SET revoked_at = now() WHERE token = ? AND user_id = ?",
+            [self._hash_token(raw_token), user_id],
+        )
+        return True
+
     def write_audit_event(
         self, *, user_id: Optional[str], actor: Optional[str],
         action: str, details: Optional[Dict[str, Any]] = None,
@@ -1594,6 +1659,7 @@ class DuckDBStorage(StorageBackend):
                 "moderation_events",
                 "auth_tokens",
                 "push_device_tokens",
+                "share_tokens",
                 "daily_summaries",
                 "consent_records",
                 "user_data",

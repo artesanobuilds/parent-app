@@ -522,6 +522,94 @@ def _dispatch_crisis_push(user_id: str, kid_name: str, agent_id: str) -> Optiona
         return None
 
 
+# ── Public scoped share view (Phase 3b) ──────────────────────────────
+
+@app.get("/share/{token}")
+def share_view(token: str):
+    """Public, no-login, read-only view of a family's plan, scoped by the share
+    token (nanny → logistics; therapist → therapy; full → everything). Renders a
+    minimal HTML page so a link is directly usable by someone without the app."""
+    from fastapi.responses import HTMLResponse
+    from app.cos import planning as _planning
+
+    info = storage_backend.lookup_share_token(token)
+    if info is None:
+        return HTMLResponse(_share_html("This link is invalid or has expired.", []), status_code=404)
+
+    uid, scope = info["user_id"], info["scope"]
+    calendar = storage_backend.list_calendar_entries(uid)
+    logistics = storage_backend.list_logistics_assignments(uid)
+    caregivers = storage_backend.list_caregivers(uid)
+    recurring = storage_backend.list_recurring_appointments(uid)
+    tracked = storage_backend.list_tracked_activities(uid)
+    cg = {c.get("id"): c.get("name") for c in caregivers}
+
+    sections: List[tuple] = []
+    if scope in ("full", "logistics"):
+        sections.append(("Schedule", ["Week", "Kid", "Activity", "When", "Where"], [
+            [e.get("week_start"), e.get("kid_name"), e.get("title"),
+             " – ".join(x for x in [e.get("start_ts"), e.get("end_ts")] if x) or "",
+             e.get("location_text")]
+            for e in sorted(calendar, key=lambda x: (x.get("week_start") or ""))
+            if scope == "full" or e.get("kind") in ("camp", "class", "program", "appointment")
+        ]))
+        sections.append(("Coverage", ["Week", "Kid", "Task", "Who", "Status"], [
+            [l.get("week_start"), l.get("kid_name"), l.get("task"),
+             cg.get(l.get("caregiver_id")) or ("— GAP —" if l.get("status") == "gap" else ""),
+             l.get("status")]
+            for l in sorted(logistics, key=lambda x: (x.get("week_start") or ""))
+        ]))
+    if scope in ("full", "therapy"):
+        sections.append(("Therapy & appointments", ["Kid", "Title", "Provider", "Weekday", "Time"], [
+            [r.get("kid_name"), r.get("title"), r.get("provider_name"),
+             ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][r["weekday"]] if isinstance(r.get("weekday"), int) and 0 <= r["weekday"] < 7 else r.get("weekday"),
+             " – ".join(x for x in [r.get("start_time"), r.get("end_time")] if x)]
+            for r in recurring
+        ]))
+        sections.append(("Therapy sessions", ["Week", "Kid", "Title", "When"], [
+            [e.get("week_start"), e.get("kid_name"), e.get("title"),
+             " – ".join(x for x in [e.get("start_ts"), e.get("end_ts")] if x)]
+            for e in calendar if e.get("kind") in ("therapy", "appointment")
+        ]))
+    if scope == "full":
+        sections.append(("Activities", ["Kid", "Activity", "Status", "Provider"], [
+            [a.get("kid_name"), a.get("name"), a.get("status"), a.get("provider")] for a in tracked
+        ]))
+
+    title = {"logistics": "Family schedule & coverage", "therapy": "Therapy schedule"}.get(scope, "Family plan")
+    return HTMLResponse(_share_html(title, sections))
+
+
+def _share_html(title: str, sections: List[Any]) -> str:
+    import html
+    def esc(v: Any) -> str:
+        return html.escape("" if v is None else str(v))
+    body = [
+        "<!doctype html><meta charset='utf-8'>",
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>",
+        f"<title>{esc(title)}</title>",
+        "<style>body{font-family:-apple-system,system-ui,sans-serif;background:#F3F0EB;color:#1A1A1A;",
+        "margin:0;padding:24px;max-width:900px;margin:auto}h1{font-size:22px}h2{font-size:16px;color:#4F5D3A;",
+        "margin-top:28px}table{border-collapse:collapse;width:100%;background:#fff;border-radius:10px;overflow:hidden}",
+        "th{background:#4F5D3A;color:#fff;text-align:left;padding:8px 10px;font-size:13px}",
+        "td{padding:8px 10px;border-top:1px solid #eee;font-size:14px}",
+        ".gap{color:#A03A3A;font-weight:600}.muted{color:#6F6A60;font-size:13px}</style>",
+        f"<h1>{esc(title)}</h1><p class='muted'>Read-only. Shared from the MVP parenting app.</p>",
+    ]
+    for name, headers, rows in sections:
+        body.append(f"<h2>{esc(name)}</h2>")
+        if not rows:
+            body.append("<p class='muted'>Nothing here yet.</p>"); continue
+        body.append("<table><tr>" + "".join(f"<th>{esc(h)}</th>" for h in headers) + "</tr>")
+        for r in rows:
+            cells = "".join(
+                f"<td class='{'gap' if str(c)=='— GAP —' else ''}'>{esc(c)}</td>" for c in r
+            )
+            body.append(f"<tr>{cells}</tr>")
+        body.append("</table>")
+    return "".join(body)
+
+
 # ── Consent ──────────────────────────────────────────────────────────
 
 @app.post("/consent/submit")

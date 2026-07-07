@@ -157,6 +157,20 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
              "ON push_device_tokens (user_id)"
          ),
      )),
+    # Phase 3b: scoped read-only share links. New table via CREATE-IF-NOT-EXISTS
+    # on fresh DBs; legacy DBs need this create.
+    (11, "share_tokens.create",
+     lambda con: (
+         con.execute(
+             "CREATE TABLE IF NOT EXISTS share_tokens ("
+             "token TEXT PRIMARY KEY, user_id TEXT NOT NULL, scope TEXT NOT NULL, "
+             "label TEXT, created_at TIMESTAMPTZ DEFAULT now(), "
+             "expires_at TIMESTAMPTZ, revoked_at TIMESTAMPTZ)"
+         ),
+         con.execute(
+             "CREATE INDEX IF NOT EXISTS idx_share_tokens_user ON share_tokens (user_id)"
+         ),
+     )),
 ]
 
 _MIGRATIONS_DDL = """

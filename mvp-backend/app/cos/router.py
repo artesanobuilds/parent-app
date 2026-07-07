@@ -15,7 +15,9 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
@@ -568,6 +570,29 @@ def plan_export_xlsx(user_id: str = Depends(current_user)):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="family-plan.xlsx"'},
     )
+
+
+class ShareLinkRequest(BaseModel):
+    user_id: str
+    scope: str = "full"        # full | logistics | therapy
+    label: Optional[str] = None
+
+
+@router.post("/plan/share")
+def plan_create_share(req: ShareLinkRequest, request: Request, user_id: str = Depends(current_user)):
+    """Phase 3b: mint a scoped, read-only, expiring share link (nanny sees
+    logistics, therapist sees therapy, or full)."""
+    from app.auth import authorize_user_match
+    authorize_user_match(authenticated=user_id, claimed=req.user_id)
+    scope = req.scope if req.scope in ("full", "logistics", "therapy") else "full"
+    raw = _storage().issue_share_token(user_id=user_id, scope=scope, label=req.label)
+    base = os.getenv("PUBLIC_BASE_URL", "").rstrip("/") or str(request.base_url).rstrip("/")
+    return {"token": raw, "scope": scope, "url": f"{base}/share/{raw}"}
+
+
+@router.get("/plan/shares")
+def plan_list_shares(user_id: str = Depends(current_user)):
+    return {"shares": _storage().list_share_tokens(user_id)}
 
 
 @router.get("/plan/compare")

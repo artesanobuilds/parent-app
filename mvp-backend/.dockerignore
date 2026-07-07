@@ -18,6 +18,7 @@ data/*.duckdb.wal
 data/mvp.parquet
 data/auth_tokens.parquet
 data/push_device_tokens.parquet
+data/share_tokens.parquet
 data/kid_credentials.parquet
 data/kid_messages.parquet
 data/consent_records.parquet
