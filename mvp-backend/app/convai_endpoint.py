@@ -27,6 +27,20 @@ from app.prompt_synthesis import _age_band as _kid_age_band
 
 logger = logging.getLogger(__name__)
 
+
+def _crisis_push(storage: Any, user_id: str, kid_name: str, agent_id: str) -> Optional[str]:
+    """Dispatch the crisis-lock push (no-op when APNs unconfigured); return an ISO
+    timestamp for `parent_notified_at` when dispatched. Never raises."""
+    from app import push
+    if not push.is_enabled():
+        return None
+    try:
+        push.send_crisis_push(storage=storage, user_id=user_id, kid_name=kid_name, agent_id=agent_id)
+        from datetime import datetime, timezone
+        return datetime.now(timezone.utc).isoformat()
+    except Exception:  # noqa: BLE001
+        return None
+
 router = APIRouter()
 
 CONVAI_SECRET = os.getenv("ELEVENLABS_CONVAI_SECRET", "")
@@ -188,7 +202,7 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
                 category=pre.category, action="crisis_routed",
                 agent_id=agent_id, message_id=user_msg_id,
                 details={"reason": pre.reason},
-                parent_notified_at=None,
+                parent_notified_at=_crisis_push(storage, user_id, kid_name, agent_id),
             )
             telemetry.alert_crisis(
                 user_id=user_id, kid_name=kid_name, agent_id=agent_id,
@@ -240,7 +254,7 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
                 category=sm.block_reason.category, action="crisis_routed",
                 agent_id=agent_id, message_id=user_msg_id,
                 details={"side": "output"},
-                parent_notified_at=None,
+                parent_notified_at=_crisis_push(storage, user_id, kid_name, agent_id),
             )
             telemetry.alert_crisis(
                 user_id=user_id, kid_name=kid_name, agent_id=agent_id,

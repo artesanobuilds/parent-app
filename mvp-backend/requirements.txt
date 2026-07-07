@@ -29,6 +29,11 @@ pyyaml==6.0.2
 pytest==8.3.4
 elevenlabs==2.50.0
 httpx==0.28.1
+# HTTP/2 for httpx — required by token-based APNs (api.push.apple.com is HTTP/2).
+# Crisis push signs its own ES256 JWT with the already-present `cryptography`.
+h2==4.1.0
+# Phase 3b: regenerate the family plan as a workbook-style .xlsx (openpyxl).
+openpyxl==3.1.5
 # R5 integrations: Fernet encryption-at-rest for OAuth refresh tokens, and the
 # Google adapters (Gmail + Calendar). The google libs are imported lazily, so
 # they're only exercised once the OAuth flow lands (R3).

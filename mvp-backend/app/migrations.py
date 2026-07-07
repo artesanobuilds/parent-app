@@ -143,6 +143,20 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
              ).fetchall()
          } else con.execute("ALTER TABLE activity_candidates ADD COLUMN distance_mi DOUBLE")
      )),
+    # Crisis-lock push notifications: APNs device tokens per parent. New table
+    # comes via CREATE-IF-NOT-EXISTS on fresh DBs; legacy DBs need this create.
+    (10, "push_device_tokens.create",
+     lambda con: (
+         con.execute(
+             "CREATE TABLE IF NOT EXISTS push_device_tokens ("
+             "token TEXT PRIMARY KEY, user_id TEXT NOT NULL, platform TEXT, "
+             "created_at TIMESTAMPTZ DEFAULT now(), last_seen_at TIMESTAMPTZ DEFAULT now())"
+         ),
+         con.execute(
+             "CREATE INDEX IF NOT EXISTS idx_push_device_tokens_user "
+             "ON push_device_tokens (user_id)"
+         ),
+     )),
 ]
 
 _MIGRATIONS_DDL = """

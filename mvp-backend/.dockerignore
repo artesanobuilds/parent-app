@@ -17,6 +17,7 @@ data/*.duckdb.wal
 # articles, community_posts, post_replies) are meant to seed prod.
 data/mvp.parquet
 data/auth_tokens.parquet
+data/push_device_tokens.parquet
 data/kid_credentials.parquet
 data/kid_messages.parquet
 data/consent_records.parquet

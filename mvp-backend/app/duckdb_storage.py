@@ -262,6 +262,17 @@ class DuckDBStorage(StorageBackend):
 
     CREATE INDEX IF NOT EXISTS idx_auth_tokens_user ON auth_tokens (user_id);
 
+    -- APNs device tokens for crisis-lock push notifications (migration v10).
+    CREATE TABLE IF NOT EXISTS push_device_tokens (
+        token         TEXT PRIMARY KEY,           -- the APNs device token
+        user_id       TEXT NOT NULL,
+        platform      TEXT,                        -- ios
+        created_at    TIMESTAMPTZ DEFAULT now(),
+        last_seen_at  TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_push_device_tokens_user ON push_device_tokens (user_id);
+
     CREATE TABLE IF NOT EXISTS consent_records (
         id                 TEXT PRIMARY KEY,        -- uuid
         user_id            TEXT NOT NULL,
@@ -636,6 +647,7 @@ class DuckDBStorage(StorageBackend):
         ("daily_summaries", "daily_summaries.parquet"),
         ("audit_events", "audit_events.parquet"),
         ("auth_tokens", "auth_tokens.parquet"),
+        ("push_device_tokens", "push_device_tokens.parquet"),
         ("tts_usage_daily", "tts_usage_daily.parquet"),
         # Activity planning + Chief-of-Staff (user state — exclude from image
         # build context in .dockerignore so local data never overwrites prod).
@@ -1492,6 +1504,30 @@ class DuckDBStorage(StorageBackend):
             [token_hash],
         )
 
+    # ── Push device tokens (crisis-lock notifications) ───────────────
+
+    def save_push_token(self, *, user_id: str, token: str, platform: str = "ios") -> None:
+        """Register (or refresh) an APNs device token for a parent. Idempotent —
+        re-registering the same token just bumps last_seen_at."""
+        self._con.execute(
+            """
+            INSERT INTO push_device_tokens (token, user_id, platform, last_seen_at)
+            VALUES (?, ?, ?, now())
+            ON CONFLICT (token) DO UPDATE SET user_id = excluded.user_id,
+                platform = excluded.platform, last_seen_at = now()
+            """,
+            [token, user_id, platform],
+        )
+
+    def list_push_tokens(self, user_id: str) -> List[str]:
+        rows = self._con.execute(
+            "SELECT token FROM push_device_tokens WHERE user_id = ?", [user_id]
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def delete_push_token(self, token: str) -> None:
+        self._con.execute("DELETE FROM push_device_tokens WHERE token = ?", [token])
+
     def write_audit_event(
         self, *, user_id: Optional[str], actor: Optional[str],
         action: str, details: Optional[Dict[str, Any]] = None,
@@ -1557,6 +1593,7 @@ class DuckDBStorage(StorageBackend):
                 "kid_credentials",
                 "moderation_events",
                 "auth_tokens",
+                "push_device_tokens",
                 "daily_summaries",
                 "consent_records",
                 "user_data",

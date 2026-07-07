@@ -47,6 +47,8 @@ if not verbose_external_logs:
 # so it wraps app creation + the workers. See app/observability + setup/sentry-setup.md.
 from app.observability import init_sentry
 init_sentry()
+from app.push import init_push
+init_push()
 
 storage_backend = DuckDBStorage()
 content_service.init(storage_backend)
@@ -482,6 +484,42 @@ def auth_issue_token_endpoint(request: AuthIssueRequest, http_request: Request):
     rate_limit_enforce(client_ip_for(http_request), "auth")
     token = auth_issue_token(request.user_id)
     return {"token": token, "user_id": request.user_id}
+
+
+# ── Push notifications ───────────────────────────────────────────────
+
+class PushRegisterRequest(BaseModel):
+    user_id: str
+    device_token: str
+    platform: str = "ios"
+
+
+@app.post("/push/register-device")
+def push_register_device(req: PushRegisterRequest, user_id: str = Depends(current_user)):
+    """Register the caller's APNs device token so crisis-lock pushes can reach
+    them. Idempotent. A no-op registration is harmless when APNs is unconfigured."""
+    authorize_user_match(authenticated=user_id, claimed=req.user_id)
+    token = req.device_token.strip()
+    if token:
+        storage_backend.save_push_token(user_id=req.user_id, token=token, platform=req.platform)
+    return {"ok": True}
+
+
+def _dispatch_crisis_push(user_id: str, kid_name: str, agent_id: str) -> Optional[str]:
+    """Fire the crisis-lock push to the parent (no-op when APNs is unconfigured)
+    and return an ISO timestamp to record in `parent_notified_at` when we actually
+    dispatched one. Fire-and-forget; never raises."""
+    from app import push
+    if not push.is_enabled():
+        return None
+    try:
+        push.send_crisis_push(
+            storage=storage_backend, user_id=user_id, kid_name=kid_name, agent_id=agent_id
+        )
+        from datetime import datetime, timezone
+        return datetime.now(timezone.utc).isoformat()
+    except Exception:  # noqa: BLE001 — notification must never break crisis handling
+        return None
 
 
 # ── Consent ──────────────────────────────────────────────────────────
@@ -1194,7 +1232,7 @@ async def generate_kid_stream(
                 category=pre.category, action="crisis_routed",
                 agent_id=agent_id, message_id=msg_id,
                 details={"reason": pre.reason},
-                parent_notified_at=None,  # TODO: real push notification hook (APNs)
+                parent_notified_at=_dispatch_crisis_push(user_id, kid_name, agent_id),
             )
             telemetry.alert_crisis(
                 user_id=user_id, kid_name=kid_name, agent_id=agent_id,
@@ -1268,7 +1306,7 @@ async def generate_kid_stream(
                 category=sm.block_reason.category, action="crisis_routed",
                 agent_id=agent_id, message_id=user_msg_id,
                 details={"side": "output"},
-                parent_notified_at=None,  # TODO: real push notification hook (APNs)
+                parent_notified_at=_dispatch_crisis_push(user_id, kid_name, agent_id),
             )
             telemetry.alert_crisis(
                 user_id=user_id, kid_name=kid_name, agent_id=agent_id,
