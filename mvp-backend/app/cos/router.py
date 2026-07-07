@@ -535,6 +535,41 @@ def plan_summary(weeks: Optional[str] = None, user_id: str = Depends(current_use
     )
 
 
+@router.get("/plan/export.xlsx")
+def plan_export_xlsx(user_id: str = Depends(current_user)):
+    """Phase 3b: regenerate the whole family plan as a workbook-style .xlsx
+    (activities, calendar, logistics/coverage, cost, to-dos)."""
+    from fastapi.responses import Response
+    from app.profiling import profiling_service
+    from app.cos import export as plan_export
+
+    storage = _storage()
+    fam = profiling_service.get_family_profile(user_id) or {}
+    kids = [
+        {"name": (p or {}).get("name") or n, "age": (p or {}).get("age")}
+        for n, p in (fam.get("children") or {}).items()
+    ]
+    tracked = storage.list_tracked_activities(user_id)
+    calendar = storage.list_calendar_entries(user_id)
+    recurring = storage.list_recurring_appointments(user_id)
+    logistics = storage.list_logistics_assignments(user_id)
+    summary = planning.build_plan_summary(
+        tracked=tracked, calendar_entries=calendar, recurring=recurring,
+        logistics=logistics, kids=kids, weeks=[],
+    )
+    xlsx = plan_export.build_plan_workbook(
+        tracked=tracked, calendar=calendar, recurring=recurring,
+        caregivers=storage.list_caregivers(user_id), logistics=logistics,
+        todos=storage.list_todos(user_id), summary=summary,
+        family_name=(fam.get("parent") or {}).get("name") or "Family",
+    )
+    return Response(
+        content=xlsx,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="family-plan.xlsx"'},
+    )
+
+
 @router.get("/plan/compare")
 def plan_compare(user_id: str = Depends(current_user)):
     """R2: tabulate the shortlist (undecided activities) for a decision —
