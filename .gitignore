@@ -28,3 +28,10 @@ mvp-backend/data/eval_reports/
 .vix/
 mvp-backend/.vix/
 mvp/MVP/.vix/
+
+# Secrets — never commit key material (APNs .p8, service-account keys, etc.).
+# Ignore all .p8 anywhere + everything under secrets/ EXCEPT the README that
+# documents the convention.
+*.p8
+mvp-backend/secrets/*
+!mvp-backend/secrets/README.md
