@@ -60,7 +60,19 @@ def init_push() -> bool:
     key_id = os.getenv("APNS_KEY_ID")
     team_id = os.getenv("APNS_TEAM_ID")
     bundle_id = os.getenv("APNS_BUNDLE_ID")
+    # The .p8 can be supplied inline (APNS_AUTH_KEY, the PEM contents — used on
+    # Railway) or as a file path (APNS_AUTH_KEY_FILE — convenient for local dev,
+    # points at the repo's gitignored secrets/ copy so the key is never pasted).
     auth_key = os.getenv("APNS_AUTH_KEY")
+    if not auth_key:
+        key_path = os.getenv("APNS_AUTH_KEY_FILE")
+        if key_path:
+            try:
+                with open(key_path, "r") as fh:
+                    auth_key = fh.read()
+            except OSError as exc:
+                logger.warning("[push] APNS_AUTH_KEY_FILE=%s unreadable: %s", key_path, exc)
+                return False
     if not (key_id and team_id and bundle_id and auth_key):
         return False
     try:

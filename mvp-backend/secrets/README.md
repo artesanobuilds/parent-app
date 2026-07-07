@@ -13,3 +13,7 @@ On Railway, this is supplied via env vars (NOT the file):
 - `APNS_BUNDLE_ID`— app bundle id (used as `apns-topic`)
 - `APNS_AUTH_KEY` — the full contents of the .p8 (paste the PEM; `\n` is tolerated)
 - `APNS_USE_SANDBOX` — leave unset for TestFlight/App Store (production APNs)
+
+Locally you can instead point at this file with
+`APNS_AUTH_KEY_FILE=secrets/AuthKey_<KEYID>.p8` (relative to `mvp-backend/`) so
+the key never gets pasted into `.env`. Railway uses `APNS_AUTH_KEY` (inline PEM).

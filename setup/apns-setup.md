@@ -21,6 +21,11 @@ The backend uses **token-based APNs** (an ES256 JWT signed with a `.p8` auth key
 | `APNS_AUTH_KEY` | *(paste the full `.p8` contents)* | `mvp-backend/secrets/AuthKey_K97TDFQ2UM.p8` |
 | `APNS_USE_SANDBOX` | *(leave unset)* | TestFlight/App Store = production APNs |
 
+> The `.p8` can be supplied two ways: **`APNS_AUTH_KEY`** = the inline PEM contents
+> (use this on Railway, which has no repo file), or **`APNS_AUTH_KEY_FILE`** = a path
+> to the `.p8` (convenient for local `.env` — e.g. `secrets/AuthKey_K97TDFQ2UM.p8`,
+> relative to `mvp-backend/` — so the key is never pasted). Inline wins if both set.
+
 > ⚠️ `APNS_TEAM_ID` must be the team you **created the key in**. It's `5K4ZDG6NFD`
 > here because that's the team the app ships under; confirm it matches the Team ID
 > shown top-right in the Apple Developer portal when you made the key. (The repo's
