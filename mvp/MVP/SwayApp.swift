@@ -1,7 +1,10 @@
 import SwiftUI
+import UIKit
+import UserNotifications
 
 @main
 struct MVPApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage("onboarding_completed") private var onboardingCompleted = false
     @AppStorage("user_name") private var userName = ""
 
@@ -22,6 +25,10 @@ struct MVPApp: App {
                         // there's nothing pending. This is what makes the seed
                         // durable across app restarts.
                         await flushPendingSeed()
+                        // Ask for notification permission + register for APNs so a
+                        // crisis-lock push can reach the parent. Post-onboarding so
+                        // the prompt lands in context, not on a cold first launch.
+                        PushRegistration.requestAndRegister()
                     }
             } else {
                 OnboardingView { data in
@@ -172,5 +179,74 @@ struct MVPApp: App {
             print("[profile/seed] transport error: \(error.localizedDescription)")
             return -1
         }
+    }
+}
+
+// MARK: - Push notifications (crisis-lock alerts)
+
+/// Handles APNs registration callbacks. A crisis-lock push tapped by the parent
+/// simply opens the app to Home, where the affected companion shows a red
+/// "Review" pill and the reactivate flow (KidsHomeSection). v1 keeps the deep
+/// link that light — no private-state routing.
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let token = deviceToken.map { String(format: "%02x", $0) }.joined()
+        Task { await PushRegistration.upload(deviceToken: token) }
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("[push] APNs registration failed: \(error.localizedDescription)")
+    }
+
+    // Show the alert even when the app is foregrounded.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification) async
+        -> UNNotificationPresentationOptions {
+        [.banner, .sound, .list]
+    }
+}
+
+/// Requests notification permission, registers for APNs, and uploads the device
+/// token to the backend so crisis-lock pushes can be delivered. Reuses the same
+/// AuthService bearer pattern as the onboarding seed.
+enum PushRegistration {
+    static func requestAndRegister() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            guard granted else { return }
+            DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() }
+        }
+    }
+
+    @MainActor
+    static func upload(deviceToken: String) async {
+        let defaults = UserDefaults.standard
+        guard let userID = defaults.string(forKey: "user_name"), !userID.isEmpty else { return }
+        let baseString = defaults.string(forKey: "chat.base_url") ?? ServerConfiguration.defaultURL
+        guard let baseURL = URL(string: baseString) else { return }
+        do {
+            _ = try await AuthService.shared.ensureToken(for: userID, baseURL: baseURL)
+        } catch {
+            print("[push] could not issue token for device-token upload: \(error)")
+            return
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent("push/register-device"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 15
+        for (k, v) in AuthService.shared.header(for: userID) {
+            request.setValue(v, forHTTPHeaderField: k)
+        }
+        request.httpBody = try? JSONSerialization.data(
+            withJSONObject: ["user_id": userID, "device_token": deviceToken, "platform": "ios"]
+        )
+        _ = try? await URLSession.shared.data(for: request)
     }
 }

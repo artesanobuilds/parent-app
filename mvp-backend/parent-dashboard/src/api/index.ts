@@ -186,6 +186,56 @@ export const getCalendar = (weekStart?: string) =>
 
 export const getPlanSummary = () => api<PlanSummary>('/cos/plan/summary');
 
+// ── Plan export / share ─────────────────────────────────────────────
+export type ShareScope = 'full' | 'logistics' | 'therapy';
+
+export interface ShareLink {
+  token: string;
+  scope: ShareScope;
+  url: string;
+}
+
+export interface ShareLinkRecord {
+  scope: ShareScope;
+  label: string | null;
+  created_at: string | null;
+  expires_at: string | null;
+  revoked: boolean;
+}
+
+// Download the family plan as an .xlsx. Uses a raw fetch (not api(), which
+// JSON-parses) so we can read the streamed blob, but reuses the same bearer auth.
+export async function downloadPlanXlsx(): Promise<void> {
+  const headers = new Headers();
+  const token = getToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const res = await fetch('/cos/plan/export.xlsx', { headers });
+  if (!res.ok) throw new Error(`Export failed (${res.status})`);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = 'family-plan.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+// Mint a public read-only share link for the plan at the given scope.
+export const createShareLink = (scope: ShareScope, label?: string) =>
+  api<ShareLink>('/cos/plan/share', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: uid(), scope, ...(label ? { label } : {}) }),
+  });
+
+// List previously-minted share links.
+export const getShareLinks = () =>
+  api<{ shares: ShareLinkRecord[] }>('/cos/plan/shares').then((r) => r.shares);
+
 // ── Chief-of-staff chat (SSE) ───────────────────────────────────────
 export async function streamCosChat(
   message: string,

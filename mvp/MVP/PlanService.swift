@@ -349,6 +349,12 @@ enum PlanServiceError: LocalizedError {
 /// static funcs, Bearer auth via `authHeader(userID:baseURL:)`, a `sendDecoded`
 /// helper, and an SSE stream for the chief-of-staff chat (modeled on
 /// `ChatService.streamResponse`).
+struct PlanShareLink: Codable, Hashable {
+    let token: String
+    let scope: String
+    let url: String
+}
+
 enum PlanService {
 
     // MARK: Request helpers
@@ -382,6 +388,33 @@ enum PlanService {
             request.setValue(v, forHTTPHeaderField: k)
         }
         return request
+    }
+
+    // MARK: Export / share (Phase 3b)
+
+    /// Download the family plan as an .xlsx to a temp file; returns the local URL
+    /// (hand to a share sheet). Reuses the same bearer auth as everything else.
+    static func exportXlsx(baseURL: URL, userID: String) async throws -> URL {
+        let url = baseURL.appendingPathComponent("cos/plan/export.xlsx")
+        let request = await authedGET(url, userID: userID, baseURL: baseURL)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+        let dest = FileManager.default.temporaryDirectory.appendingPathComponent("family-plan.xlsx")
+        try data.write(to: dest, options: .atomic)
+        return dest
+    }
+
+    /// Mint a scoped, read-only public share link (scope: full | logistics | therapy).
+    static func createShareLink(baseURL: URL, userID: String, scope: String) async throws -> PlanShareLink {
+        let url = baseURL.appendingPathComponent("cos/plan/share")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (k, v) in await authHeader(userID: userID, baseURL: baseURL) {
+            request.setValue(v, forHTTPHeaderField: k)
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["user_id": userID, "scope": scope])
+        return try await sendDecoded(request)
     }
 
     // MARK: Discovery (research)

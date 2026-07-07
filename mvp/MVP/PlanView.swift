@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The "Plan" tab: trigger a camp/activity discovery run and browse ranked
 /// candidates, see the chief-of-staff plan summary (cost, coverage gaps,
@@ -14,6 +15,16 @@ struct PlanView: View {
     @State private var segment: PlanSegment = .chat
     @State private var showIngest = false
     @State private var showSortFilter = false
+    // Phase 3b export/share: a prepared file or link URL handed to the share sheet.
+    @State private var shareItem: ShareItem?
+    @State private var isPreparingShare = false
+
+    /// A URL (exported .xlsx file or a share link) to present in the system
+    /// share sheet. Identifiable so `.sheet(item:)` drives it.
+    struct ShareItem: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
 
     /// The Plan hub's sub-views. The Chief of Staff (chat) is the front door;
     /// the structured views hang off it one tap away.
@@ -45,6 +56,9 @@ struct PlanView: View {
                 sortFilterSheet
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
+            }
+            .sheet(item: $shareItem) { item in
+                ShareSheet(items: [item.url])
             }
             .navigationDestination(for: CandidateRoute.self) { route in
                 CandidateDetailView(candidate: route.candidate)
@@ -84,18 +98,73 @@ struct PlanView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: .hearth300) {
-            Text("PLAN")
-                .font(.hearthLabel)
-                .tracking(0.66)
-                .foregroundColor(.inkMuted)
-            Text("Chief of Staff")
-                .font(.hearthDisplayMD)
-                .foregroundColor(.inkPrimary)
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: .hearth300) {
+                Text("PLAN")
+                    .font(.hearthLabel)
+                    .tracking(0.66)
+                    .foregroundColor(.inkMuted)
+                Text("Chief of Staff")
+                    .font(.hearthDisplayMD)
+                    .foregroundColor(.inkPrimary)
+            }
+            Spacer()
+            planMenu
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, .hearth700)
         .padding(.top, .hearth700)
+    }
+
+    /// Export the plan as a spreadsheet or mint a scoped read-only share link
+    /// (Phase 3b). Result is handed to the system share sheet.
+    private var planMenu: some View {
+        Menu {
+            Button { exportPlan() } label: {
+                Label("Export spreadsheet", systemImage: "tablecells")
+            }
+            Menu {
+                Button { sharePlan(scope: "full") } label: {
+                    Label("Full plan", systemImage: "doc.text")
+                }
+                Button { sharePlan(scope: "logistics") } label: {
+                    Label("Nanny · schedule & coverage", systemImage: "figure.2.and.child.holdinghands")
+                }
+                Button { sharePlan(scope: "therapy") } label: {
+                    Label("Therapist · therapy schedule", systemImage: "heart.text.square")
+                }
+            } label: {
+                Label("Share a link", systemImage: "link")
+            }
+        } label: {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.accentDefault)
+        }
+        .disabled(isPreparingShare)
+    }
+
+    private func exportPlan() {
+        guard let base = viewModel.baseURL else { return }
+        isPreparingShare = true
+        Task {
+            defer { isPreparingShare = false }
+            if let url = try? await PlanService.exportXlsx(baseURL: base, userID: userID) {
+                shareItem = ShareItem(url: url)
+            }
+        }
+    }
+
+    private func sharePlan(scope: String) {
+        guard let base = viewModel.baseURL else { return }
+        isPreparingShare = true
+        Task {
+            defer { isPreparingShare = false }
+            if let link = try? await PlanService.createShareLink(baseURL: base, userID: userID, scope: scope),
+               let url = URL(string: link.url) {
+                shareItem = ShareItem(url: url)
+            }
+        }
     }
 
     // MARK: - Segments
@@ -1186,4 +1255,14 @@ struct CandidateDetailView: View {
         default: return nil
         }
     }
+}
+
+/// Thin wrapper around UIActivityViewController so SwiftUI can present the
+/// system share sheet for a file (exported .xlsx) or a share-link URL.
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }

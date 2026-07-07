@@ -1,5 +1,15 @@
-import { useEffect, useState } from 'react';
-import { getActivities, getCalendar, getPlanSummary, getTodos, patchTodo } from '../api';
+import { useEffect, useRef, useState } from 'react';
+import { Check, Copy, Download, Share2, X } from 'lucide-react';
+import {
+  createShareLink,
+  downloadPlanXlsx,
+  getActivities,
+  getCalendar,
+  getPlanSummary,
+  getTodos,
+  patchTodo,
+} from '../api';
+import type { ShareScope } from '../api';
 import type { CalendarEntry, PlanSummary, Todo, TrackedActivity } from '../types';
 
 export default function Plan() {
@@ -54,7 +64,10 @@ export default function Plan() {
   return (
     <div className="p-700 max-w-6xl">
       <div className="text-ink-muted text-xs uppercase tracking-wide">Plan</div>
-      <h1 className="font-display text-3xl text-ink-primary mb-600">Your family's plan</h1>
+      <div className="flex items-start justify-between gap-500 mb-600">
+        <h1 className="font-display text-3xl text-ink-primary">Your family's plan</h1>
+        <PlanToolbar onError={setErr} />
+      </div>
       {err && <div className="text-error mb-500">{err}</div>}
 
       {/* Cost */}
@@ -180,6 +193,152 @@ export default function Plan() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Export / share toolbar ──────────────────────────────────────────
+const SHARE_SCOPES: { scope: ShareScope; label: string; hint: string }[] = [
+  { scope: 'full', label: 'Full plan', hint: 'Everything below' },
+  { scope: 'logistics', label: 'Nanny', hint: 'Schedule & coverage' },
+  { scope: 'therapy', label: 'Therapist', hint: 'Therapy schedule' },
+];
+
+function PlanToolbar({ onError }: { onError: (msg: string | null) => void }) {
+  const [exporting, setExporting] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+
+  async function onExport() {
+    setExporting(true);
+    onError(null);
+    try {
+      await downloadPlanXlsx();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-300 shrink-0">
+      <button
+        onClick={onExport}
+        disabled={exporting}
+        className="flex items-center gap-200 bg-elevated border border-hairline rounded-xl px-400 py-200 text-sm text-ink-primary hover:bg-accent-tint disabled:opacity-50"
+      >
+        <Download className="w-4 h-4" />
+        {exporting ? 'Exporting…' : 'Export'}
+      </button>
+      <div className="relative">
+        <button
+          onClick={() => setShareOpen((v) => !v)}
+          className="flex items-center gap-200 bg-elevated border border-hairline rounded-xl px-400 py-200 text-sm text-ink-primary hover:bg-accent-tint"
+        >
+          <Share2 className="w-4 h-4" />
+          Share
+        </button>
+        {shareOpen && <SharePanel onClose={() => setShareOpen(false)} onError={onError} />}
+      </div>
+    </div>
+  );
+}
+
+function SharePanel({
+  onClose,
+  onError,
+}: {
+  onClose: () => void;
+  onError: (msg: string | null) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [busy, setBusy] = useState<ShareScope | null>(null);
+  const [link, setLink] = useState<{ scope: ShareScope; url: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // Close on outside click.
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [onClose]);
+
+  async function pick(scope: ShareScope) {
+    setBusy(scope);
+    setCopied(false);
+    onError(null);
+    try {
+      const res = await createShareLink(scope);
+      setLink({ scope, url: res.url });
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Could not create share link');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function copy() {
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link.url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      onError('Could not copy to clipboard');
+    }
+  }
+
+  return (
+    <div
+      ref={ref}
+      className="absolute right-0 mt-200 w-80 bg-elevated border border-hairline rounded-xl shadow-lg p-500 z-10"
+    >
+      <div className="flex items-center justify-between mb-300">
+        <div className="text-ink-primary font-medium text-sm">Share plan</div>
+        <button onClick={onClose} className="text-ink-muted hover:text-ink-primary" aria-label="Close">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="text-ink-muted text-xs mb-400">
+        Creates a read-only public link. Choose what it shows:
+      </div>
+      <div className="flex flex-col gap-200">
+        {SHARE_SCOPES.map((s) => (
+          <button
+            key={s.scope}
+            onClick={() => pick(s.scope)}
+            disabled={busy !== null}
+            className={`flex items-center justify-between text-left border rounded-lg px-400 py-300 hover:bg-accent-tint disabled:opacity-50 ${
+              link?.scope === s.scope ? 'border-accent' : 'border-hairline'
+            }`}
+          >
+            <div>
+              <div className="text-ink-primary text-sm">{s.label}</div>
+              <div className="text-ink-muted text-xs">{s.hint}</div>
+            </div>
+            {busy === s.scope && <span className="text-ink-muted text-xs">…</span>}
+          </button>
+        ))}
+      </div>
+      {link && (
+        <div className="mt-400">
+          <div className="flex items-center gap-200 bg-canvas border border-hairline rounded-lg px-300 py-200">
+            <span className="flex-1 text-ink-secondary text-xs font-mono truncate" title={link.url}>
+              {link.url}
+            </span>
+            <button
+              onClick={copy}
+              className="flex items-center gap-100 text-ink-primary hover:text-accent shrink-0"
+              aria-label="Copy link"
+            >
+              {copied ? <Check className="w-4 h-4 text-accent" /> : <Copy className="w-4 h-4" />}
+            </button>
+          </div>
+          <div className="text-ink-muted text-xs mt-200">Anyone with this link can view (read-only).</div>
         </div>
       )}
     </div>
