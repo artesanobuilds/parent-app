@@ -873,10 +873,12 @@ def _make_update_activity_tool(user_id: str):
         if "status" in fields:
             from app.cos import lifecycle
 
-            if lifecycle.entered_watched(existing.get("status"), fields["status"]):
-                updated = storage.get_tracked_activity(activity_id)
-                if updated:
+            updated = storage.get_tracked_activity(activity_id)
+            if updated:
+                if lifecycle.entered_watched(existing.get("status"), fields["status"]):
                     lifecycle.on_enter_watched(storage, user_id, updated)
+                elif lifecycle.entered_declined(existing.get("status"), fields["status"]):
+                    lifecycle.on_enter_declined(storage, user_id, updated)
         return f"Updated '{existing.get('name')}': {', '.join(fields)} (id={activity_id})."
 
     return UpdateActivity

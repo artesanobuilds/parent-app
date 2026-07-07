@@ -198,6 +198,14 @@ export const getPlanSummary = () => api<PlanSummary>('/cos/plan/summary');
 // to-dos and the ONE computed next_step (see app/cos/lifecycle.py).
 export const getBoard = () => api<PlanBoard>('/cos/plan/board');
 
+// Wipe the plan (activities, to-dos, calendar, coverage, discovery, ingest).
+// Profile, kids, and chats are kept.
+export const resetPlan = () =>
+  api<{ ok: boolean; deleted: Record<string, number> }>('/cos/plan/reset', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: uid() }),
+  });
+
 // ── Plan export / share ─────────────────────────────────────────────
 export type ShareScope = 'full' | 'logistics' | 'therapy';
 

@@ -2600,8 +2600,49 @@ class DuckDBStorage(StorageBackend):
         )
 
     def delete_tracked_activity(self, activity_id: str) -> None:
-        """Remove a tracked activity (e.g. un-pin from the Exploring shortlist)."""
-        self._con.execute("DELETE FROM tracked_activities WHERE id = ?", [activity_id])
+        """Remove a tracked activity permanently. CASCADES to every row that
+        references it (to-dos, its calendar entries + their logistics) — orphans
+        resurrect the "deleted" thing (see CLAUDE.md: deletes cascade)."""
+        with self._con.transaction():
+            self._con.execute("DELETE FROM todo_items WHERE activity_id = ?", [activity_id])
+            self._con.execute(
+                "DELETE FROM logistics_assignments WHERE calendar_entry_id IN "
+                "(SELECT id FROM calendar_entries WHERE activity_id = ?)",
+                [activity_id],
+            )
+            self._con.execute("DELETE FROM calendar_entries WHERE activity_id = ?", [activity_id])
+            self._con.execute("DELETE FROM tracked_activities WHERE id = ?", [activity_id])
+
+    def reset_plan(self, *, user_id: str, actor: str) -> Dict[str, int]:
+        """Wipe the user's PLAN slate — activities, to-dos, calendar, logistics,
+        recurring appointments, caregivers, discovery results/runs, ingested
+        artifacts — so they can start from scratch. KEEPS profile/kids, chats,
+        integrations, and kid-agent data (this is a plan reset, not an account
+        delete; cf. delete_family). One transaction; audit-logged; returns
+        per-table deleted counts."""
+        tables = [
+            "todo_items",
+            "logistics_assignments",
+            "calendar_entries",
+            "recurring_appointments",
+            "caregivers",
+            "tracked_activities",
+            "activity_candidates",
+            "research_runs",
+            "ingest_artifacts",
+        ]
+        deleted: Dict[str, int] = {}
+        with self._con.transaction():
+            for table in tables:
+                deleted[table] = self._con.execute(
+                    f"SELECT count(*) FROM {table} WHERE user_id = ?", [user_id]
+                ).fetchone()[0]
+                self._con.execute(f"DELETE FROM {table} WHERE user_id = ?", [user_id])
+        self.write_audit_event(
+            user_id=user_id, actor=actor, action="plan_reset",
+            details={"counts": deleted},
+        )
+        return deleted
 
     # calendar_entries ------------------------------------------------------
 

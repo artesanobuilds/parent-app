@@ -1,7 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Copy, Download, ExternalLink, Eye, Share2, Undo2, X } from 'lucide-react';
+import {
+  Check,
+  Copy,
+  Download,
+  ExternalLink,
+  Eye,
+  RotateCcw,
+  Share2,
+  Trash2,
+  Undo2,
+  X,
+} from 'lucide-react';
 import {
   createShareLink,
+  deleteActivity,
   downloadPlanXlsx,
   getActivities,
   getBoard,
@@ -9,6 +21,7 @@ import {
   getPlanSummary,
   getTodos,
   patchTodo,
+  resetPlan,
   updateActivity,
 } from '../api';
 import type { ShareScope } from '../api';
@@ -94,7 +107,7 @@ export default function Plan() {
       <div className="text-ink-muted text-xs uppercase tracking-wide">Plan</div>
       <div className="flex items-start justify-between gap-500 mb-600">
         <h1 className="font-display text-3xl text-ink-primary">Your family's plan</h1>
-        <PlanToolbar onError={setErr} />
+        <PlanToolbar onError={setErr} onReload={load} />
       </div>
       {err && <div className="text-error mb-500">{err}</div>}
 
@@ -296,7 +309,12 @@ function BoardCard({
   // Register opens the signup page in a new tab; once opened, offer the
   // follow-through button so the parent can confirm they signed up.
   const [openedSignup, setOpenedSignup] = useState(false);
+  // Two-tap inline confirms (same idiom as the register → "Mark registered"
+  // follow-through): first tap arms, second tap commits.
+  const [confirmPass, setConfirmPass] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const registeredStage = step.stage === 'registered' || step.stage === 'all_set';
+  const declined = step.stage === 'declined';
   // The top to-do is the primary button for complete_todo cards; the rest
   // render as a small list with their own checkmarks.
   const restTodos = step.action === 'complete_todo' ? a.open_todos.slice(1) : a.open_todos;
@@ -308,6 +326,10 @@ function BoardCard({
 
   const patchStatus = (fields: Record<string, unknown>) =>
     onMutate(a.id, () => updateActivity(a.id, fields));
+
+  // Declining also auto-dismisses the activity's open to-dos (server-side).
+  const pass = () =>
+    patchStatus({ status: 'declined', decision_rationale: 'Passed from the board' });
 
   function onPrimary() {
     switch (step.action) {
@@ -334,17 +356,36 @@ function BoardCard({
     <div className={`bg-elevated border border-hairline rounded-xl p-600 ${busy ? 'opacity-60' : ''}`}>
       <div className="flex items-start justify-between gap-400">
         <h4 className="font-medium text-ink-primary">{a.name}</h4>
-        {step.action === 'plan' && (
-          <button
-            onClick={() =>
-              patchStatus({ status: 'declined', decision_rationale: 'Passed from the board' })
-            }
-            disabled={busy}
-            className="text-ink-muted text-sm hover:text-ink-primary disabled:opacity-50 shrink-0"
-          >
-            Pass
-          </button>
-        )}
+        {/* Pass is available from any stage; once registered it clears the
+            activity's open to-dos, so require a second tap to confirm. */}
+        {!declined &&
+          (confirmPass ? (
+            <div className="flex items-center gap-300 shrink-0">
+              <button
+                onClick={pass}
+                disabled={busy}
+                className="text-error text-sm hover:underline disabled:opacity-50"
+              >
+                Really pass? Clears its to-dos
+              </button>
+              <button
+                onClick={() => setConfirmPass(false)}
+                disabled={busy}
+                className="text-ink-muted hover:text-ink-primary disabled:opacity-50"
+                aria-label="Cancel pass"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => (registeredStage ? setConfirmPass(true) : pass())}
+              disabled={busy}
+              className="text-ink-muted text-sm hover:text-ink-primary disabled:opacity-50 shrink-0"
+            >
+              Pass
+            </button>
+          ))}
       </div>
       <div className="flex flex-wrap gap-200 mt-300 text-sm text-ink-secondary">
         {a.kid_name && <span className="bg-accent-tint rounded px-300 py-100">{a.kid_name}</span>}
@@ -376,13 +417,51 @@ function BoardCard({
               )}
             </div>
           ) : (
-            <button onClick={onPrimary} disabled={busy} className={primaryBtn}>
-              {step.action === 'complete_todo' && <Check className="w-4 h-4" />}
-              {step.action === 'restore' && <Undo2 className="w-4 h-4" />}
-              {step.label}
-            </button>
+            <div className="flex flex-wrap items-center gap-300">
+              <button onClick={onPrimary} disabled={busy} className={primaryBtn}>
+                {step.action === 'complete_todo' && <Check className="w-4 h-4" />}
+                {step.action === 'restore' && <Undo2 className="w-4 h-4" />}
+                {step.label}
+              </button>
+              {/* Declined cards can be removed for good (two-tap confirm). */}
+              {declined &&
+                (confirmDelete ? (
+                  <div className="flex items-center gap-300">
+                    <button
+                      onClick={() => onMutate(a.id, () => deleteActivity(a.id))}
+                      disabled={busy}
+                      className="flex items-center gap-200 text-error text-sm hover:underline disabled:opacity-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Really delete?
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      disabled={busy}
+                      className="text-ink-muted hover:text-ink-primary disabled:opacity-50"
+                      aria-label="Cancel delete"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDelete(true)}
+                    disabled={busy}
+                    className="flex items-center gap-200 text-error text-sm hover:underline disabled:opacity-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete forever
+                  </button>
+                ))}
+            </div>
           )}
           {step.hint && <div className="text-ink-muted text-xs mt-200">{step.hint}</div>}
+          {declined && confirmDelete && (
+            <div className="text-ink-muted text-xs mt-200">
+              This permanently removes it and its to-dos/calendar entries
+            </div>
+          )}
         </div>
       )}
 
@@ -436,9 +515,16 @@ const SHARE_SCOPES: { scope: ShareScope; label: string; hint: string }[] = [
   { scope: 'therapy', label: 'Therapist', hint: 'Therapy schedule' },
 ];
 
-function PlanToolbar({ onError }: { onError: (msg: string | null) => void }) {
+function PlanToolbar({
+  onError,
+  onReload,
+}: {
+  onError: (msg: string | null) => void;
+  onReload: () => Promise<void>;
+}) {
   const [exporting, setExporting] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
 
   async function onExport() {
     setExporting(true);
@@ -471,6 +557,94 @@ function PlanToolbar({ onError }: { onError: (msg: string | null) => void }) {
           Share
         </button>
         {shareOpen && <SharePanel onClose={() => setShareOpen(false)} onError={onError} />}
+      </div>
+      <div className="relative">
+        <button
+          onClick={() => setResetOpen((v) => !v)}
+          className="flex items-center gap-200 bg-elevated border border-hairline rounded-xl px-400 py-200 text-sm text-ink-primary hover:bg-accent-tint"
+        >
+          <RotateCcw className="w-4 h-4" />
+          Start over
+        </button>
+        {resetOpen && (
+          <ResetPanel
+            onClose={() => setResetOpen(false)}
+            onError={onError}
+            onReload={onReload}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Confirm panel for "Start over" (same popover idiom as SharePanel).
+function ResetPanel({
+  onClose,
+  onError,
+  onReload,
+}: {
+  onClose: () => void;
+  onError: (msg: string | null) => void;
+  onReload: () => Promise<void>;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Close on outside click.
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [onClose]);
+
+  async function run() {
+    setBusy(true);
+    onError(null);
+    try {
+      await resetPlan();
+      await onReload();
+      onClose();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Could not start over');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      ref={ref}
+      className="absolute right-0 mt-200 w-80 bg-elevated border border-hairline rounded-xl shadow-lg p-500 z-10"
+    >
+      <div className="flex items-center justify-between mb-300">
+        <div className="text-ink-primary font-medium text-sm">Start over?</div>
+        <button onClick={onClose} className="text-ink-muted hover:text-ink-primary" aria-label="Close">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="text-ink-muted text-xs mb-400">
+        Clears your plan — activities, to-dos, calendar, coverage, and discovery results.
+        Your family profile and chats stay. Google-synced calendar events aren&apos;t removed.
+      </div>
+      <div className="flex items-center gap-300">
+        <button
+          onClick={run}
+          disabled={busy}
+          className="flex items-center gap-200 bg-error text-ink-on-photo-light rounded-lg px-400 py-200 text-sm font-medium disabled:opacity-60"
+        >
+          <RotateCcw className="w-4 h-4" />
+          {busy ? 'Starting over…' : 'Yes, start over'}
+        </button>
+        <button
+          onClick={onClose}
+          disabled={busy}
+          className="border border-hairline rounded-lg px-400 py-200 text-sm text-ink-primary hover:bg-accent-tint disabled:opacity-50"
+        >
+          Cancel
+        </button>
       </div>
     </div>
   );

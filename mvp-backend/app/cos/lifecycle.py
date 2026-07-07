@@ -86,6 +86,14 @@ def entered_watched(old_status: Optional[str], new_status: Optional[str]) -> boo
     return new in WATCHED and old not in WATCHED
 
 
+def entered_declined(old_status: Optional[str], new_status: Optional[str]) -> bool:
+    """True when a status change crosses INTO declined (a Pass) — the moment the
+    activity's open to-dos should be dismissed."""
+    old = (old_status or "").strip().lower()
+    new = (new_status or "").strip().lower()
+    return new in DECLINED and old not in DECLINED
+
+
 def next_step(activity: Dict[str, Any], open_todos: List[Dict[str, Any]]) -> Dict[str, Any]:
     """The ONE next action for an activity's card. Labels state their consequence
     (the self-documenting rule) so a first-timer can predict what a tap does.
@@ -264,3 +272,21 @@ def on_enter_watched(storage: Any, user_id: str, activity: Dict[str, Any]) -> Di
         import logging
         logging.getLogger(__name__).exception("[lifecycle] on_enter_watched side effects failed")
     return result
+
+
+def on_enter_declined(storage: Any, user_id: str, activity: Dict[str, Any]) -> Dict[str, Any]:
+    """Run once when an activity is passed (declined): dismiss its open to-dos so
+    an abandoned plan doesn't leave zombie "Pay $X" items in Follow-ups.
+    Deliberately NOT undone by Reconsider — those to-dos belonged to the
+    abandoned plan. Never raises."""
+    dismissed = []
+    aid = activity.get("id")
+    try:
+        for t in storage.list_todos(user_id, status="open"):
+            if t.get("activity_id") == aid:
+                storage.update_todo(t["id"], status="dismissed")
+                dismissed.append(t["id"])
+    except Exception:  # noqa: BLE001 — best-effort side effects
+        import logging
+        logging.getLogger(__name__).exception("[lifecycle] on_enter_declined side effects failed")
+    return {"dismissed_todos": dismissed}

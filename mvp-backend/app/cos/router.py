@@ -171,10 +171,29 @@ def patch_activity(
     fields = body.model_dump(exclude={"user_id"}, exclude_none=True)
     storage.update_tracked_activity(activity_id, **fields)
     updated = storage.get_tracked_activity(activity_id)
-    # Registering flips on email tracking + baseline to-dos (see cos/lifecycle).
-    if "status" in fields and lifecycle.entered_watched(existing.get("status"), fields["status"]):
-        lifecycle.on_enter_watched(storage, user_id, updated)
+    if "status" in fields:
+        # Registering flips on email tracking + baseline to-dos; passing
+        # (declining) dismisses the abandoned plan's open to-dos (cos/lifecycle).
+        if lifecycle.entered_watched(existing.get("status"), fields["status"]):
+            lifecycle.on_enter_watched(storage, user_id, updated)
+        elif lifecycle.entered_declined(existing.get("status"), fields["status"]):
+            lifecycle.on_enter_declined(storage, user_id, updated)
     return {"id": activity_id, "activity": updated}
+
+
+class PlanResetRequest(BaseModel):
+    user_id: str
+
+
+@router.post("/plan/reset")
+def plan_reset(body: PlanResetRequest, user_id: str = Depends(current_user)):
+    """Start over: wipe the caller's plan (activities, to-dos, calendar,
+    coverage, discovery results, uploaded info). Keeps profile/kids, chats,
+    integrations, kid companions. Confirmation lives client-side; note that
+    calendar events already synced to Google are NOT removed (local rows only)."""
+    authorize_user_match(authenticated=user_id, claimed=body.user_id)
+    counts = _storage().reset_plan(user_id=user_id, actor=user_id)
+    return {"ok": True, "deleted": counts}
 
 
 @router.get("/plan/board")

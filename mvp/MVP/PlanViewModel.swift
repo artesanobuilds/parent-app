@@ -458,6 +458,32 @@ final class PlanViewModel: ObservableObject {
         }
     }
 
+    /// Permanently delete an activity (from "Not doing") — cascades server-side
+    /// to its to-dos/calendar/logistics.
+    func deleteForever(_ activity: BoardActivity) async {
+        guard let baseURL = baseURL, !mutatingIds.contains(activity.id) else { return }
+        mutatingIds.insert(activity.id)
+        defer { mutatingIds.remove(activity.id) }
+        do {
+            try await PlanService.deleteActivity(
+                baseURL: baseURL, userID: userId, activityId: activity.id)
+            await loadPlan()
+        } catch {
+            errorMessage = "Couldn't delete \(activity.name). Try again."
+        }
+    }
+
+    /// Start over: wipe the whole plan (confirmation lives in the view).
+    func resetPlan() async {
+        guard let baseURL = baseURL, !isLoadingPlan else { return }
+        do {
+            try await PlanService.resetPlan(baseURL: baseURL, userID: userId)
+            await loadPlan()
+        } catch {
+            errorMessage = "Couldn't reset the plan. Check your connection and try again."
+        }
+    }
+
     /// Complete a to-do from the board (or the Follow-ups list) and refresh.
     func completeTodo(_ todoId: String) async {
         guard let baseURL = baseURL, !mutatingIds.contains(todoId) else { return }

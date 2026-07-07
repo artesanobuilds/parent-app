@@ -163,6 +163,67 @@ def test_on_enter_watched_no_price_no_payment_todo(store):
     assert "payment" not in kinds
 
 
+def test_on_enter_declined_dismisses_only_that_activitys_open_todos(store):
+    uid = "decline-user"
+    aid = store.track_activity(uid, name="Art Camp", status="signed_up", price_amount=450.0)
+    other = store.track_activity(uid, name="Swim", status="signed_up")
+    store.add_todo(uid, title="Pay $450", activity_id=aid, kind="payment")
+    done_id = store.add_todo(uid, title="Old form", activity_id=aid, kind="form")
+    store.update_todo(done_id, status="done")
+    store.add_todo(uid, title="Other camp todo", activity_id=other, kind="action")
+
+    lifecycle.on_enter_declined(store, uid, store.get_tracked_activity(aid))
+
+    by_title = {t["title"]: t["status"] for t in store.list_todos(uid)}
+    assert by_title["Pay $450"] == "dismissed"      # open → dismissed
+    assert by_title["Old form"] == "done"           # done untouched
+    assert by_title["Other camp todo"] == "open"    # other activity untouched
+
+
+def test_entered_declined_transitions():
+    assert lifecycle.entered_declined("signed_up", "declined")
+    assert lifecycle.entered_declined("exploring", "declined")
+    assert not lifecycle.entered_declined("declined", "declined")
+    assert not lifecycle.entered_declined("declined", "exploring")  # Reconsider
+
+
+def test_delete_tracked_activity_cascades(store):
+    uid = "cascade-user"
+    aid = store.track_activity(uid, name="Art Camp", status="signed_up")
+    store.add_todo(uid, title="Pay", activity_id=aid, kind="payment")
+    cal_id = store.add_calendar_entry(
+        uid, title="Art Camp", activity_id=aid, kind="camp", week_start="2026-06-15")
+    store.add_logistics_assignment(
+        uid, week_start="2026-06-15", kid_name="Ceiba", task="pickup",
+        calendar_entry_id=cal_id, status="gap")
+
+    store.delete_tracked_activity(aid)
+
+    assert store.get_tracked_activity(aid) is None
+    assert [t for t in store.list_todos(uid) if t.get("activity_id") == aid] == []
+    assert [e for e in store.list_calendar_entries(uid) if e.get("activity_id") == aid] == []
+    assert [l for l in store.list_logistics_assignments(uid)
+            if l.get("calendar_entry_id") == cal_id] == []
+
+
+def test_reset_plan_wipes_plan_but_keeps_profile(store):
+    uid = "reset-user"
+    store.track_activity(uid, name="Art Camp", status="signed_up")
+    store.add_todo(uid, title="Pay", kind="payment")
+    store.add_calendar_entry(uid, title="Camp", kind="camp", week_start="2026-06-15")
+    counts = store.reset_plan(user_id=uid, actor=uid)
+    assert counts["tracked_activities"] == 1
+    assert counts["todo_items"] == 1
+    assert counts["calendar_entries"] == 1
+    assert store.list_tracked_activities(uid) == []
+    assert store.list_todos(uid) == []
+    assert store.list_calendar_entries(uid) == []
+    # Another user's plan is untouched.
+    other_aid = store.track_activity("other-user", name="Theirs", status="exploring")
+    store.reset_plan(user_id=uid, actor=uid)
+    assert store.get_tracked_activity(other_aid) is not None
+
+
 # ── HTTP: PATCH transition + board endpoint ──────────────────────────
 
 def test_patch_register_hook_and_board_endpoint(tmp_path):

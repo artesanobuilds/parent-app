@@ -611,6 +611,21 @@ enum PlanService {
         try validate(response)
     }
 
+    /// Start over: wipe the plan (activities, to-dos, calendar, coverage,
+    /// discovery results, uploaded info). Keeps profile/kids/chats/integrations.
+    static func resetPlan(baseURL: URL, userID: String) async throws {
+        let url = baseURL.appendingPathComponent("cos/plan/reset")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (k, v) in await authHeader(userID: userID, baseURL: baseURL) {
+            request.setValue(v, forHTTPHeaderField: k)
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["user_id": userID])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+    }
+
     /// Complete (or reopen) a to-do — PATCH /cos/todos/{id}.
     static func updateTodo(
         baseURL: URL, userID: String, todoId: String, status: String

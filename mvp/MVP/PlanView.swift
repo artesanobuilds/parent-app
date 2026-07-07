@@ -17,6 +17,10 @@ struct PlanView: View {
     @State private var showSortFilter = false
     // One-time board explainer (self-documenting first run) — persists dismissal.
     @AppStorage("plan_board_explainer_seen") private var boardExplainerSeen = false
+    // Confirm-gated destructive actions on the board.
+    @State private var passTarget: BoardActivity?
+    @State private var deleteTarget: BoardActivity?
+    @State private var showResetConfirm = false
     // Phase 3b export/share: a prepared file or link URL handed to the share sheet.
     @State private var shareItem: ShareItem?
     @State private var isPreparingShare = false
@@ -61,6 +65,51 @@ struct PlanView: View {
             }
             .sheet(item: $shareItem) { item in
                 ShareSheet(items: [item.url])
+            }
+            .confirmationDialog(
+                passTarget.map { "Pass on \($0.name)?" } ?? "",
+                isPresented: Binding(get: { passTarget != nil },
+                                     set: { if !$0 { passTarget = nil } }),
+                titleVisibility: .visible
+            ) {
+                if let target = passTarget {
+                    Button("Pass — clear its to-dos", role: .destructive) {
+                        passTarget = nil
+                        Task { await viewModel.advance(target, to: "declined",
+                                                       rationale: "Passed from the board") }
+                    }
+                    Button("Cancel", role: .cancel) { passTarget = nil }
+                }
+            } message: {
+                Text("It moves to Not doing and its open to-dos are cleared. You can reconsider later, but the to-dos won't come back.")
+            }
+            .confirmationDialog(
+                deleteTarget.map { "Delete \($0.name) forever?" } ?? "",
+                isPresented: Binding(get: { deleteTarget != nil },
+                                     set: { if !$0 { deleteTarget = nil } }),
+                titleVisibility: .visible
+            ) {
+                if let target = deleteTarget {
+                    Button("Delete forever", role: .destructive) {
+                        deleteTarget = nil
+                        Task { await viewModel.deleteForever(target) }
+                    }
+                    Button("Cancel", role: .cancel) { deleteTarget = nil }
+                }
+            } message: {
+                Text("Permanently removes it along with its to-dos and calendar entries.")
+            }
+            .confirmationDialog(
+                "Start over?",
+                isPresented: $showResetConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Yes, clear my plan", role: .destructive) {
+                    Task { await viewModel.resetPlan() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Clears your plan — activities, to-dos, calendar, coverage, and discovery results. Your family profile and chats stay. Calendar events already synced to Google aren't removed.")
             }
             .navigationDestination(for: CandidateRoute.self) { route in
                 CandidateDetailView(candidate: route.candidate)
@@ -137,6 +186,10 @@ struct PlanView: View {
                 }
             } label: {
                 Label("Share a link", systemImage: "link")
+            }
+            Divider()
+            Button(role: .destructive) { showResetConfirm = true } label: {
+                Label("Start over…", systemImage: "arrow.counterclockwise")
             }
         } label: {
             Image(systemName: "square.and.arrow.up")
@@ -880,18 +933,7 @@ struct PlanView: View {
                     .foregroundColor(.inkPrimary)
                     .multilineTextAlignment(.leading)
                 Spacer()
-                if activity.nextStep.stage == "considering" {
-                    Button {
-                        Task { await viewModel.advance(activity, to: "declined",
-                                                       rationale: "Passed from the board") }
-                    } label: {
-                        Text("Pass")
-                            .font(.hearthBodySM)
-                            .foregroundColor(.inkMuted)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Pass on \(activity.name)")
-                }
+                cardOverflowMenu(activity)
             }
             HStack(spacing: .hearth300) {
                 if let kid = activity.kidName {
@@ -930,6 +972,53 @@ struct PlanView: View {
         .background(cardBackground)
         .opacity(busy ? 0.55 : 1)
         .disabled(busy)
+    }
+
+    /// Per-card secondary actions: Pass works from ANY stage (plans change even
+    /// after registering — a registered pass confirms first since it clears the
+    /// item's to-dos); declined cards gain a permanent, confirm-gated delete.
+    @ViewBuilder
+    private func cardOverflowMenu(_ activity: BoardActivity) -> some View {
+        let stage = activity.nextStep.stage
+        if stage == "considering" {
+            // Low-stakes: keep the direct inline Pass, no menu needed.
+            Button {
+                Task { await viewModel.advance(activity, to: "declined",
+                                               rationale: "Passed from the board") }
+            } label: {
+                Text("Pass")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Pass on \(activity.name)")
+        } else {
+            Menu {
+                if stage == "declined" {
+                    Button(role: .destructive) { deleteTarget = activity } label: {
+                        Label("Delete forever", systemImage: "trash")
+                    }
+                } else if stage == "to_register" {
+                    Button {
+                        Task { await viewModel.advance(activity, to: "declined",
+                                                       rationale: "Passed from the board") }
+                    } label: {
+                        Label("Pass on this", systemImage: "xmark.circle")
+                    }
+                } else {
+                    // Registered / all-set: confirm first — passing clears its to-dos.
+                    Button { passTarget = activity } label: {
+                        Label("Pass on this", systemImage: "xmark.circle")
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.inkMuted)
+                    .frame(width: 32, height: 32)
+            }
+            .accessibilityLabel("More actions for \(activity.name)")
+        }
     }
 
     /// The visible "this is what the system is doing" line — automated behavior
