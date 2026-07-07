@@ -200,6 +200,54 @@ export interface TrackedActivity {
   updated_at: string | null;
 }
 
+// ── Activity lifecycle board (GET /cos/plan/board) ───────────────────
+// Mirrors app/cos/lifecycle.py build_board / next_step.
+
+// Open to-do joined onto a board card (subset of Todo, most urgent first).
+export interface BoardTodo {
+  id: string;
+  title: string;
+  kind: string; // payment | form | action | task
+  due_date: string | null;
+  status: string;
+}
+
+// The ONE next action for a card. Labels state their consequence.
+export interface NextStep {
+  stage: string; // considering | to_register | registered | all_set | blocked | declined
+  action:
+    | 'plan'
+    | 'register'
+    | 'mark_registered'
+    | 'complete_todo'
+    | 'resolve'
+    | 'restore'
+    | 'none';
+  label: string;
+  hint: string;
+  url?: string | null; // action=register
+  todo_id?: string | null; // action=complete_todo
+}
+
+export interface BoardActivity extends TrackedActivity {
+  open_todos: BoardTodo[];
+  next_step: NextStep;
+  watchable: boolean; // has a contact email
+  watching: boolean; // gmail connected + watchable + registered
+}
+
+export interface BoardStage {
+  key: string;
+  title: string;
+  blurb: string;
+  activities: BoardActivity[];
+}
+
+export interface PlanBoard {
+  gmail_connected: boolean;
+  stages: BoardStage[];
+}
+
 export interface CostSummary {
   confirmed_total: number;
   tbd_count: number;

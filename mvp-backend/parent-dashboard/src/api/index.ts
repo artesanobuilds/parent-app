@@ -6,6 +6,7 @@ import type {
   Candidate,
   CalendarEntry,
   FamilyProfile,
+  PlanBoard,
   PlanSummary,
   ResearchProgress,
   ResearchRun,
@@ -158,6 +159,13 @@ export const trackActivity = (body: {
     body: JSON.stringify({ user_id: uid(), status: 'exploring', ...body }),
   });
 
+// Partial-update a tracked activity (status transitions on the board, etc.).
+export const updateActivity = (id: string, fields: Record<string, unknown>) =>
+  api<TrackedActivity>(`/cos/activities/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ user_id: uid(), ...fields }),
+  });
+
 // Un-track an activity (un-pin from the Exploring shortlist).
 export const deleteActivity = (id: string) =>
   api<{ id: string; deleted: boolean }>(`/cos/activities/${id}`, { method: 'DELETE' });
@@ -185,6 +193,10 @@ export const getCalendar = (weekStart?: string) =>
   ).then((r) => r.entries ?? []);
 
 export const getPlanSummary = () => api<PlanSummary>('/cos/plan/summary');
+
+// Activity lifecycle board: activities grouped by stage, each with its open
+// to-dos and the ONE computed next_step (see app/cos/lifecycle.py).
+export const getBoard = () => api<PlanBoard>('/cos/plan/board');
 
 // ── Plan export / share ─────────────────────────────────────────────
 export type ShareScope = 'full' | 'logistics' | 'therapy';

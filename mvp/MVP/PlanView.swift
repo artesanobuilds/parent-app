@@ -15,6 +15,8 @@ struct PlanView: View {
     @State private var segment: PlanSegment = .chat
     @State private var showIngest = false
     @State private var showSortFilter = false
+    // One-time board explainer (self-documenting first run) — persists dismissal.
+    @AppStorage("plan_board_explainer_seen") private var boardExplainerSeen = false
     // Phase 3b export/share: a prepared file or link URL handed to the share sheet.
     @State private var shareItem: ShareItem?
     @State private var isPreparingShare = false
@@ -35,7 +37,7 @@ struct PlanView: View {
             switch self {
             case .chat: return "Chat"
             case .discover: return "Discover"
-            case .shortlist: return "Shortlist"
+            case .shortlist: return "Activities"
             case .calendar: return "Calendar"
             }
         }
@@ -206,7 +208,7 @@ struct PlanView: View {
         case .shortlist:
             ScrollView {
                 VStack(alignment: .leading, spacing: .hearth900) {
-                    exploringSection
+                    boardSection
                     if let summary = viewModel.summary {
                         planSummarySection(summary)
                     }
@@ -214,8 +216,8 @@ struct PlanView: View {
                     if shortlistIsEmpty {
                         emptyState(
                             icon: "bookmark",
-                            title: "Nothing on your shortlist yet",
-                            message: "Pin camps from Discover, then ask the Chief of Staff to help you decide."
+                            title: "No activities yet",
+                            message: "Save ideas from Discover, decide with “We'll do it”, register — then I watch the camp's emails and track payments & forms for you."
                         )
                     }
                 }
@@ -246,7 +248,7 @@ struct PlanView: View {
     }
 
     private var shortlistIsEmpty: Bool {
-        viewModel.exploringActivities.isEmpty
+        (viewModel.board?.stages.allSatisfy { $0.activities.isEmpty } ?? viewModel.exploringActivities.isEmpty)
             && viewModel.todos.isEmpty
             && viewModel.summary == nil
     }
@@ -782,66 +784,114 @@ struct PlanView: View {
         .accessibilityLabel(saved ? "Saved — tap to remove" : "Save to shortlist")
     }
 
-    // MARK: - Exploring shortlist (R1)
+    // MARK: - Lifecycle board (Considering → To register → Registered → All set)
 
     @ViewBuilder
-    private var exploringSection: some View {
-        let items = viewModel.exploringActivities
-        if !items.isEmpty {
-            VStack(alignment: .leading, spacing: .hearth400) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Exploring")
-                        .font(.hearthDisplayMD)
-                        .foregroundColor(.inkPrimary)
-                    Spacer()
-                    Text("\(items.count)")
-                        .font(.hearthCaptionMono)
-                        .foregroundColor(.inkMuted)
+    private var boardSection: some View {
+        if let board = viewModel.board {
+            let nonEmpty = board.stages.filter { !$0.activities.isEmpty }
+            VStack(alignment: .leading, spacing: .hearth700) {
+                if !nonEmpty.isEmpty && !boardExplainerSeen {
+                    boardExplainer
                 }
-                Text("Camps you're considering. Ask your chief of staff to weigh the tradeoffs and help you decide.")
-                    .font(.hearthBodySM)
-                    .foregroundColor(.inkSecondary)
-                ForEach(items) { activity in
-                    exploringRow(activity)
+                ForEach(nonEmpty) { stage in
+                    stageGroup(stage, gmailConnected: board.gmailConnected)
                 }
-                Button {
-                    // Flip to the chat segment and seed a triage request into the
-                    // same (hoisted) conversation.
-                    withAnimation(.hearthFast) { segment = .chat }
-                    cosVM.send("Help me decide between the camps on my shortlist. Walk me through the tradeoffs (cost, eligibility, schedule conflicts, coverage) and recommend picks per kid.")
-                } label: {
-                    Label("Help me decide", systemImage: "arrow.left.arrow.right")
-                        .font(.hearthBodyMD.weight(.semibold))
-                        .foregroundColor(.inkOnPhotoLight)
-                        .padding(.horizontal, .hearth500)
-                        .padding(.vertical, .hearth400)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.accentDefault)
-                        .clipShape(Capsule())
+                if let considering = nonEmpty.first(where: { $0.key == "considering" }),
+                   considering.activities.count >= 2 {
+                    Button {
+                        // Flip to the chat segment and seed a triage request into
+                        // the same (hoisted) conversation.
+                        withAnimation(.hearthFast) { segment = .chat }
+                        cosVM.send("Help me decide between the camps on my shortlist. Walk me through the tradeoffs (cost, eligibility, schedule conflicts, coverage) and recommend picks per kid.")
+                    } label: {
+                        Label("Help me decide", systemImage: "arrow.left.arrow.right")
+                            .font(.hearthBodyMD.weight(.semibold))
+                            .foregroundColor(.inkOnPhotoLight)
+                            .padding(.horizontal, .hearth500)
+                            .padding(.vertical, .hearth400)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.accentDefault)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
     }
 
-    private func exploringRow(_ activity: TrackedActivity) -> some View {
+    /// One-time first-run explainer: teaches the whole arc before the first tap
+    /// (the self-documenting rule — nothing to memorize, nothing surprising).
+    private var boardExplainer: some View {
         VStack(alignment: .leading, spacing: .hearth300) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("How this works")
+                    .font(.hearthBodyMD.weight(.semibold))
+                    .foregroundColor(.inkPrimary)
+                Spacer()
+                Button { withAnimation(.hearthFast) { boardExplainerSeen = true } } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.inkMuted)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
+            }
+            Text("Save ideas → tap “We'll do it” → register → I watch the camp's emails and track payments & forms for you. Each card always shows its one next step.")
+                .font(.hearthBodySM)
+                .foregroundColor(.inkSecondary)
+        }
+        .padding(.hearth500)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: .hearthRadiusLg)
+                .fill(Color.accentTint)
+        )
+    }
+
+    private func stageGroup(_ stage: BoardStage, gmailConnected: Bool) -> some View {
+        VStack(alignment: .leading, spacing: .hearth400) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(stage.title)
+                    .font(.hearthDisplayMD)
+                    .foregroundColor(.inkPrimary)
+                Spacer()
+                Text("\(stage.activities.count)")
+                    .font(.hearthCaptionMono)
+                    .foregroundColor(.inkMuted)
+            }
+            // The group blurb IS the instruction — the pipeline explains itself.
+            Text(stage.blurb)
+                .font(.hearthBodySM)
+                .foregroundColor(.inkSecondary)
+            ForEach(stage.activities) { activity in
+                boardCard(activity, gmailConnected: gmailConnected)
+            }
+        }
+    }
+
+    private func boardCard(_ activity: BoardActivity, gmailConnected: Bool) -> some View {
+        let busy = viewModel.mutatingIds.contains(activity.id)
+        return VStack(alignment: .leading, spacing: .hearth400) {
             HStack(alignment: .firstTextBaseline) {
                 Text(activity.name)
                     .font(.hearthBodyLG.weight(.semibold))
                     .foregroundColor(.inkPrimary)
                     .multilineTextAlignment(.leading)
                 Spacer()
-                Button {
-                    Task { await viewModel.removeActivity(activity.id) }
-                } label: {
-                    Image(systemName: "bookmark.fill")
-                        .font(.system(size: 15))
-                        .foregroundColor(.accentDefault)
-                        .frame(width: 32, height: 32)
+                if activity.nextStep.stage == "considering" {
+                    Button {
+                        Task { await viewModel.advance(activity, to: "declined",
+                                                       rationale: "Passed from the board") }
+                    } label: {
+                        Text("Pass")
+                            .font(.hearthBodySM)
+                            .foregroundColor(.inkMuted)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Pass on \(activity.name)")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Remove from shortlist")
             }
             HStack(spacing: .hearth300) {
                 if let kid = activity.kidName {
@@ -864,10 +914,154 @@ struct PlanView: View {
                         .foregroundColor(.inkSecondary)
                 }
             }
+            trackingLine(activity, gmailConnected: gmailConnected)
+            nextStepControls(activity)
+            // Any remaining open to-dos beyond the headline one, each completable.
+            if activity.openTodos.count > 1 {
+                VStack(alignment: .leading, spacing: .hearth300) {
+                    ForEach(activity.openTodos.dropFirst()) { todo in
+                        todoRow(todo)
+                    }
+                }
+            }
         }
         .padding(.hearth500)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(cardBackground)
+        .opacity(busy ? 0.55 : 1)
+        .disabled(busy)
+    }
+
+    /// The visible "this is what the system is doing" line — automated behavior
+    /// is never invisible (the lesson from the crisis-lock UX).
+    @ViewBuilder
+    private func trackingLine(_ activity: BoardActivity, gmailConnected: Bool) -> some View {
+        let stage = activity.nextStep.stage
+        if stage == "registered" || stage == "all_set" {
+            if activity.watching {
+                Label("Watching \(activity.provider ?? activity.name)'s emails for confirmations & payment reminders",
+                      systemImage: "eye")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+            } else if !activity.watchable {
+                Label("Add the camp's contact email so I can watch for confirmations",
+                      systemImage: "envelope.badge")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.statusWarning)
+            } else if !gmailConnected {
+                Label("Connect Gmail to auto-track camp emails — or paste a confirmation into Add info",
+                      systemImage: "envelope")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+            }
+        }
+    }
+
+    /// The ONE primary next action; its hint (the consequence) renders right
+    /// under the button so a first-timer can predict the tap.
+    @ViewBuilder
+    private func nextStepControls(_ activity: BoardActivity) -> some View {
+        let step = activity.nextStep
+        VStack(alignment: .leading, spacing: .hearth300) {
+            switch step.action {
+            case "plan":
+                boardPrimaryButton(step.label, icon: "checkmark") {
+                    Task { await viewModel.advance(activity, to: "planned",
+                                                   rationale: "Chosen from the board") }
+                }
+            case "register":
+                HStack(spacing: .hearth400) {
+                    if let urlString = step.url, let url = URL(string: urlString) {
+                        Link(destination: url) {
+                            boardButtonLabel(step.label, icon: "arrow.up.right.square")
+                        }
+                    }
+                    Button {
+                        Task { await viewModel.advance(activity, to: "signed_up") }
+                    } label: {
+                        Text("Mark registered")
+                            .font(.hearthBodyMD.weight(.semibold))
+                            .foregroundColor(.accentDefault)
+                            .padding(.horizontal, .hearth500)
+                            .padding(.vertical, .hearth400)
+                            .background(Capsule().fill(Color.accentTint))
+                    }
+                    .buttonStyle(.plain)
+                }
+            case "mark_registered":
+                boardPrimaryButton(step.label, icon: "checkmark.seal") {
+                    Task { await viewModel.advance(activity, to: "signed_up") }
+                }
+            case "complete_todo":
+                boardPrimaryButton(step.label, icon: "checkmark.circle") {
+                    if let todoId = step.todoId {
+                        Task { await viewModel.completeTodo(todoId) }
+                    }
+                }
+            case "resolve":
+                boardPrimaryButton(step.label, icon: "questionmark.circle") {
+                    withAnimation(.hearthFast) { segment = .chat }
+                    cosVM.send("Help me resolve this for \(activity.name): \(step.label)")
+                }
+            case "restore":
+                boardPrimaryButton(step.label, icon: "arrow.uturn.backward") {
+                    Task { await viewModel.advance(activity, to: "exploring") }
+                }
+            default:
+                EmptyView()
+            }
+            if !step.hint.isEmpty {
+                Text(step.hint)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+            }
+        }
+    }
+
+    private func boardPrimaryButton(_ title: String, icon: String,
+                                    action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            boardButtonLabel(title, icon: icon)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func boardButtonLabel(_ title: String, icon: String) -> some View {
+        Label(title, systemImage: icon)
+            .font(.hearthBodyMD.weight(.semibold))
+            .foregroundColor(.inkOnPhotoLight)
+            .lineLimit(2)
+            .multilineTextAlignment(.leading)
+            .padding(.horizontal, .hearth500)
+            .padding(.vertical, .hearth400)
+            .background(Capsule().fill(Color.accentDefault))
+    }
+
+    private func todoRow(_ todo: PlanTodo) -> some View {
+        let busy = viewModel.mutatingIds.contains(todo.id)
+        return HStack(spacing: .hearth300) {
+            Button {
+                Task { await viewModel.completeTodo(todo.id) }
+            } label: {
+                Image(systemName: "circle")
+                    .font(.system(size: 15))
+                    .foregroundColor(.accentDefault)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Mark done: \(todo.title)")
+            Text(todo.title)
+                .font(.hearthBodySM)
+                .foregroundColor(.inkSecondary)
+            Spacer(minLength: 0)
+            if let due = todo.dueDate {
+                Text(due)
+                    .font(.hearthCaptionMono)
+                    .foregroundColor(.inkMuted)
+            }
+        }
+        .opacity(busy ? 0.55 : 1)
+        .disabled(busy)
     }
 
     // MARK: - Calendar (R4 — compact week×kid view)
@@ -1029,9 +1223,17 @@ struct PlanView: View {
                     .foregroundColor(.inkPrimary)
                 ForEach(viewModel.todos) { todo in
                     HStack(alignment: .top, spacing: .hearth400) {
-                        Image(systemName: "circle")
-                            .font(.system(size: 16))
-                            .foregroundColor(.inkMuted)
+                        // Tappable — completing here mirrors the web dashboard.
+                        Button {
+                            Task { await viewModel.completeTodo(todo.id) }
+                        } label: {
+                            Image(systemName: "circle")
+                                .font(.system(size: 16))
+                                .foregroundColor(.accentDefault)
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Mark done: \(todo.title)")
                         VStack(alignment: .leading, spacing: 2) {
                             Text(todo.title)
                                 .font(.hearthBodyMD)
@@ -1047,6 +1249,7 @@ struct PlanView: View {
                     .padding(.hearth500)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(cardBackground)
+                    .opacity(viewModel.mutatingIds.contains(todo.id) ? 0.55 : 1)
                 }
             }
         }

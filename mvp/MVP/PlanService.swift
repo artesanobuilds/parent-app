@@ -170,6 +170,72 @@ struct TrackedActivity: Codable, Identifiable, Hashable {
     var isExploring: Bool { status == "exploring" }
 }
 
+// MARK: - Lifecycle board (GET /cos/plan/board)
+
+/// The ONE next action for an activity's card. `hint` states the consequence
+/// (self-documenting UI) — render it, don't hide it.
+/// action ∈ plan | register | mark_registered | complete_todo | resolve | restore | none
+struct BoardNextStep: Codable, Hashable {
+    let stage: String
+    let action: String
+    let label: String
+    let hint: String
+    let url: String?
+    let todoId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case stage, action, label, hint, url
+        case todoId = "todo_id"
+    }
+}
+
+/// An activity on the lifecycle board: the tracked activity joined with its
+/// open to-dos + computed next step + email-watching flags.
+struct BoardActivity: Codable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let kidName: String?
+    let status: String
+    let provider: String?
+    let priceAmount: Double?
+    let signupURL: String?
+    let pendingReason: String?
+    let openTodos: [PlanTodo]
+    let nextStep: BoardNextStep
+    let watchable: Bool
+    let watching: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, status, provider, watchable, watching
+        case kidName = "kid_name"
+        case priceAmount = "price_amount"
+        case signupURL = "signup_url"
+        case pendingReason = "pending_reason"
+        case openTodos = "open_todos"
+        case nextStep = "next_step"
+    }
+}
+
+/// One board section (Considering / To register / Registered / All set / …),
+/// with the parent-facing blurb both surfaces render under the header.
+struct BoardStage: Codable, Identifiable, Hashable {
+    let key: String
+    let title: String
+    let blurb: String
+    let activities: [BoardActivity]
+    var id: String { key }
+}
+
+struct PlanBoard: Codable, Hashable {
+    let stages: [BoardStage]
+    let gmailConnected: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case stages
+        case gmailConnected = "gmail_connected"
+    }
+}
+
 /// A calendar entry (GET /cos/calendar). Week-keyed so a compact week×kid view
 /// is a query over these.
 struct CalendarEntry: Codable, Identifiable, Hashable {
@@ -516,6 +582,50 @@ enum PlanService {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let resp: TrackActivityResponse = try await sendDecoded(request)
         return resp.id
+    }
+
+    /// The lifecycle board: activities grouped by stage, each with open to-dos
+    /// + a computed next step. One payload drives both clients.
+    static func board(baseURL: URL, userID: String) async throws -> PlanBoard {
+        let url = baseURL.appendingPathComponent("cos/plan/board")
+        return try await sendDecoded(await authedGET(url, userID: userID, baseURL: baseURL))
+    }
+
+    /// Advance/edit a tracked activity (PATCH /cos/activities/{id}) — e.g.
+    /// status "planned" (we'll do it) or "signed_up" (registered → the backend
+    /// starts watching that camp's emails + seeds payment/form to-dos).
+    static func updateActivity(
+        baseURL: URL, userID: String, activityId: String, fields: [String: Any]
+    ) async throws {
+        let url = baseURL.appendingPathComponent("cos/activities/\(activityId)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (k, v) in await authHeader(userID: userID, baseURL: baseURL) {
+            request.setValue(v, forHTTPHeaderField: k)
+        }
+        var body: [String: Any] = ["user_id": userID]
+        body.merge(fields) { _, new in new }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+    }
+
+    /// Complete (or reopen) a to-do — PATCH /cos/todos/{id}.
+    static func updateTodo(
+        baseURL: URL, userID: String, todoId: String, status: String
+    ) async throws {
+        let url = baseURL.appendingPathComponent("cos/todos/\(todoId)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (k, v) in await authHeader(userID: userID, baseURL: baseURL) {
+            request.setValue(v, forHTTPHeaderField: k)
+        }
+        request.httpBody = try JSONSerialization.data(
+            withJSONObject: ["user_id": userID, "status": status])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
     }
 
     /// Un-track an activity (un-pin from the Exploring shortlist). Ownership is

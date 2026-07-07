@@ -1,36 +1,49 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Copy, Download, Share2, X } from 'lucide-react';
+import { Check, Copy, Download, ExternalLink, Eye, Share2, Undo2, X } from 'lucide-react';
 import {
   createShareLink,
   downloadPlanXlsx,
   getActivities,
+  getBoard,
   getCalendar,
   getPlanSummary,
   getTodos,
   patchTodo,
+  updateActivity,
 } from '../api';
 import type { ShareScope } from '../api';
-import type { CalendarEntry, PlanSummary, Todo, TrackedActivity } from '../types';
+import type {
+  BoardActivity,
+  CalendarEntry,
+  PlanBoard,
+  PlanSummary,
+  Todo,
+  TrackedActivity,
+} from '../types';
 
 export default function Plan() {
   const [summary, setSummary] = useState<PlanSummary | null>(null);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [entries, setEntries] = useState<CalendarEntry[]>([]);
   const [activities, setActivities] = useState<TrackedActivity[]>([]);
+  const [board, setBoard] = useState<PlanBoard | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   async function load() {
     try {
-      const [s, t, c, a] = await Promise.all([
+      const [s, t, c, a, b] = await Promise.all([
         getPlanSummary(),
         getTodos('open'),
         getCalendar(),
         getActivities(),
+        getBoard(),
       ]);
       setSummary(s);
       setTodos(t);
       setEntries(c);
       setActivities(a);
+      setBoard(b);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to load plan');
     }
@@ -43,6 +56,21 @@ export default function Plan() {
   async function complete(id: string) {
     await patchTodo(id, 'done');
     setTodos((prev) => prev.filter((t) => t.id !== id));
+  }
+
+  // Run one board mutation with a per-card busy state, then re-fetch
+  // everything (board + summary + todos + calendar) so the page stays fresh.
+  async function mutate(activityId: string, fn: () => Promise<unknown>) {
+    setBusyId(activityId);
+    setErr(null);
+    try {
+      await fn();
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Update failed');
+    } finally {
+      setBusyId(null);
+    }
   }
 
   // Week × kid grid derived from calendar entries. Week is taken from
@@ -101,6 +129,9 @@ export default function Plan() {
           items={(summary?.conflicts ?? []).map((c) => c.detail)}
         />
       </div>
+
+      {/* Activity lifecycle board */}
+      {board && <ActivityBoard board={board} busyId={busyId} onMutate={mutate} />}
 
       {/* Week × kid calendar */}
       {weeks.length > 0 && (
@@ -195,6 +226,205 @@ export default function Plan() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Activity lifecycle board ────────────────────────────────────────
+// Stage groups (Considering → To register → Registered → All set) teach the
+// flow: each non-empty stage renders its title, count, and blurb; each card
+// gets ONE primary action (the backend-computed next_step).
+function ActivityBoard({
+  board,
+  busyId,
+  onMutate,
+}: {
+  board: PlanBoard;
+  busyId: string | null;
+  onMutate: (activityId: string, fn: () => Promise<unknown>) => void;
+}) {
+  const stages = board.stages.filter((s) => s.activities.length > 0);
+  const total = board.stages.reduce((n, s) => n + s.activities.length, 0);
+
+  return (
+    <div className="mb-700">
+      <h2 className="font-display text-xl text-ink-primary mb-400">Activities</h2>
+      {total === 0 ? (
+        <p className="text-ink-muted">
+          Nothing tracked yet. Save ideas from Discover → decide → register → we track the rest.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-600">
+          {stages.map((s) => (
+            <div key={s.key}>
+              <div className="flex items-baseline gap-300">
+                <h3 className="text-ink-primary font-medium">{s.title}</h3>
+                <span className="text-ink-muted text-sm font-mono">{s.activities.length}</span>
+              </div>
+              <div className="text-ink-muted text-xs mb-300">{s.blurb}</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-500">
+                {s.activities.map((a) => (
+                  <BoardCard
+                    key={a.id}
+                    a={a}
+                    gmailConnected={board.gmail_connected}
+                    busy={busyId === a.id}
+                    onMutate={onMutate}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BoardCard({
+  a,
+  gmailConnected,
+  busy,
+  onMutate,
+}: {
+  a: BoardActivity;
+  gmailConnected: boolean;
+  busy: boolean;
+  onMutate: (activityId: string, fn: () => Promise<unknown>) => void;
+}) {
+  const step = a.next_step;
+  // Register opens the signup page in a new tab; once opened, offer the
+  // follow-through button so the parent can confirm they signed up.
+  const [openedSignup, setOpenedSignup] = useState(false);
+  const registeredStage = step.stage === 'registered' || step.stage === 'all_set';
+  // The top to-do is the primary button for complete_todo cards; the rest
+  // render as a small list with their own checkmarks.
+  const restTodos = step.action === 'complete_todo' ? a.open_todos.slice(1) : a.open_todos;
+
+  const primaryBtn =
+    'flex items-center gap-200 bg-accent text-ink-on-photo-light rounded-lg px-400 py-200 text-sm font-medium disabled:opacity-60';
+  const secondaryBtn =
+    'border border-hairline rounded-lg px-400 py-200 text-sm text-ink-primary hover:bg-accent-tint disabled:opacity-50';
+
+  const patchStatus = (fields: Record<string, unknown>) =>
+    onMutate(a.id, () => updateActivity(a.id, fields));
+
+  function onPrimary() {
+    switch (step.action) {
+      case 'plan':
+        patchStatus({ status: 'planned' });
+        break;
+      case 'register':
+        window.open(step.url ?? undefined, '_blank', 'noopener');
+        setOpenedSignup(true);
+        break;
+      case 'mark_registered':
+        patchStatus({ status: 'signed_up' });
+        break;
+      case 'complete_todo':
+        if (step.todo_id) onMutate(a.id, () => patchTodo(step.todo_id!, 'done'));
+        break;
+      case 'restore':
+        patchStatus({ status: 'exploring' });
+        break;
+    }
+  }
+
+  return (
+    <div className={`bg-elevated border border-hairline rounded-xl p-600 ${busy ? 'opacity-60' : ''}`}>
+      <div className="flex items-start justify-between gap-400">
+        <h4 className="font-medium text-ink-primary">{a.name}</h4>
+        {step.action === 'plan' && (
+          <button
+            onClick={() =>
+              patchStatus({ status: 'declined', decision_rationale: 'Passed from the board' })
+            }
+            disabled={busy}
+            className="text-ink-muted text-sm hover:text-ink-primary disabled:opacity-50 shrink-0"
+          >
+            Pass
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-200 mt-300 text-sm text-ink-secondary">
+        {a.kid_name && <span className="bg-accent-tint rounded px-300 py-100">{a.kid_name}</span>}
+        {a.provider && <span className="bg-canvas rounded px-300 py-100">{a.provider}</span>}
+        {a.price_amount != null && (
+          <span className="bg-canvas rounded px-300 py-100 font-mono">${a.price_amount}</span>
+        )}
+      </div>
+
+      {/* The ONE primary action, hint (its consequence) directly underneath */}
+      {step.action !== 'none' && (
+        <div className="mt-400">
+          {step.action === 'resolve' ? (
+            <div className="text-warning text-sm">{step.label}</div>
+          ) : step.action === 'register' ? (
+            <div className="flex flex-wrap items-center gap-300">
+              <button onClick={onPrimary} disabled={busy} className={primaryBtn}>
+                <ExternalLink className="w-4 h-4" />
+                {step.label}
+              </button>
+              {openedSignup && (
+                <button
+                  onClick={() => patchStatus({ status: 'signed_up' })}
+                  disabled={busy}
+                  className={secondaryBtn}
+                >
+                  Mark registered
+                </button>
+              )}
+            </div>
+          ) : (
+            <button onClick={onPrimary} disabled={busy} className={primaryBtn}>
+              {step.action === 'complete_todo' && <Check className="w-4 h-4" />}
+              {step.action === 'restore' && <Undo2 className="w-4 h-4" />}
+              {step.label}
+            </button>
+          )}
+          {step.hint && <div className="text-ink-muted text-xs mt-200">{step.hint}</div>}
+        </div>
+      )}
+
+      {/* Remaining open to-dos, each completable in place */}
+      {restTodos.length > 0 && (
+        <div className="mt-300 flex flex-col gap-200">
+          {restTodos.map((t) => (
+            <div key={t.id} className="flex items-center gap-300 text-sm">
+              <button
+                onClick={() => onMutate(a.id, () => patchTodo(t.id, 'done'))}
+                disabled={busy}
+                className="w-4 h-4 rounded-full border border-strong hover:bg-accent-tint shrink-0 disabled:opacity-50"
+                aria-label={`Complete ${t.title}`}
+              />
+              <span className="text-ink-secondary">{t.title}</span>
+              {t.due_date && (
+                <span className="text-ink-muted text-xs font-mono">Due {t.due_date}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Tracking line: is the system watching this camp's emails? */}
+      {registeredStage &&
+        (a.watching ? (
+          <div className="flex items-center gap-200 text-ink-muted text-xs mt-300">
+            <Eye className="w-4 h-4 shrink-0" />
+            <span>
+              Watching {a.provider ?? a.name}&apos;s emails for confirmations &amp; payment
+              reminders
+            </span>
+          </div>
+        ) : !a.watchable ? (
+          <div className="text-warning text-xs mt-300">
+            Add the camp&apos;s contact email so I can watch for confirmations
+          </div>
+        ) : !gmailConnected ? (
+          <div className="text-ink-muted text-xs mt-300">
+            Connect Gmail to auto-track camp emails
+          </div>
+        ) : null)}
     </div>
   );
 }

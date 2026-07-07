@@ -45,6 +45,11 @@ final class PlanViewModel: ObservableObject {
     @Published private(set) var calendarEntries: [CalendarEntry] = []
     @Published private(set) var isLoadingPlan = false
 
+    // Lifecycle board: activities grouped by stage with next steps + to-dos.
+    @Published private(set) var board: PlanBoard?
+    /// Activity/to-do ids with a mutation in flight (disables just that card).
+    @Published private(set) var mutatingIds: Set<String> = []
+
     /// Calendar entries bucketed by week-start (week_start, else the entry's
     /// start date), oldest week first — the compact week×kid view's data.
     var calendarWeeks: [(week: String, entries: [CalendarEntry])] {
@@ -425,6 +430,45 @@ final class PlanViewModel: ObservableObject {
             calendarEntries = try await PlanService.calendar(baseURL: baseURL, userID: userId)
         } catch {
             print("[PlanViewModel] calendar failed: \(error)")
+        }
+        do {
+            board = try await PlanService.board(baseURL: baseURL, userID: userId)
+        } catch {
+            print("[PlanViewModel] board failed: \(error)")
+        }
+    }
+
+    // MARK: - Lifecycle board actions
+
+    /// Advance an activity along the lifecycle (We'll do it → planned,
+    /// Mark registered → signed_up, Pass → declined, Reconsider → exploring).
+    /// Registering flips on email watching + baseline to-dos server-side.
+    func advance(_ activity: BoardActivity, to status: String, rationale: String? = nil) async {
+        guard let baseURL = baseURL, !mutatingIds.contains(activity.id) else { return }
+        mutatingIds.insert(activity.id)
+        defer { mutatingIds.remove(activity.id) }
+        do {
+            var fields: [String: Any] = ["status": status]
+            if let rationale = rationale { fields["decision_rationale"] = rationale }
+            try await PlanService.updateActivity(
+                baseURL: baseURL, userID: userId, activityId: activity.id, fields: fields)
+            await loadPlan()
+        } catch {
+            errorMessage = "Couldn't update \(activity.name). Check your connection and try again."
+        }
+    }
+
+    /// Complete a to-do from the board (or the Follow-ups list) and refresh.
+    func completeTodo(_ todoId: String) async {
+        guard let baseURL = baseURL, !mutatingIds.contains(todoId) else { return }
+        mutatingIds.insert(todoId)
+        defer { mutatingIds.remove(todoId) }
+        do {
+            try await PlanService.updateTodo(
+                baseURL: baseURL, userID: userId, todoId: todoId, status: "done")
+            await loadPlan()
+        } catch {
+            errorMessage = "Couldn't complete that to-do. Try again."
         }
     }
 
