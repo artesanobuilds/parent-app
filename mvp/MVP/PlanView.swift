@@ -956,6 +956,12 @@ struct PlanView: View {
                         .foregroundColor(.inkSecondary)
                 }
             }
+            // Server-rendered date line — shown verbatim (never re-formatted here).
+            if let when = activity.when {
+                Text(when)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkSecondary)
+            }
             trackingLine(activity, gmailConnected: gmailConnected)
             nextStepControls(activity)
             // Any remaining open to-dos beyond the headline one, each completable.

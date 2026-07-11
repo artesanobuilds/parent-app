@@ -40,6 +40,13 @@ bugs**. Each rule earns its place. Follow them.
 - iOS Codable is strict: one type mismatch empties a whole list. DuckDB `DOUBLE` → Swift
   `Double?` (not `Int?`). See memory `debugging_ios_codable_backend_contract`.
 
+### Public docs stay current
+- The dashboard ships public product docs (`mvp-backend/parent-dashboard/docs/*.md`,
+  served at `/dashboard/docs` outside the auth guard). **A phase/PR that adds or changes
+  a user-facing vertical or door updates its doc page in the SAME PR** (page slug = the
+  vertical's registry key). Existence is locked by `tests/test_public_docs.py`; currency
+  is this rule.
+
 ## Verify before you commit
 - Backend: `cd mvp-backend && source .venv/bin/activate && pytest -q`
 - iOS: `xcodebuild -project mvp/MVP.xcodeproj -scheme MVP -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build`

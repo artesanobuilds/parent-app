@@ -113,6 +113,11 @@ Just tell me what you need in plain language — e.g. "what's left to do this we
 # --------------------------------------------------------------------------- #
 
 
+# Phase-2 date model: weekly-only RRULE validation lives in cos_verticals
+# (enforced at the edges — tool + router — never in the storage format).
+_weekly_rrule_error = cos_verticals.weekly_rrule_error
+
+
 def _make_track_activity_tool(user_id: str):
     @tool
     def TrackActivity(
@@ -121,6 +126,11 @@ def _make_track_activity_tool(user_id: str):
         status: str = "exploring",
         activity_type: Optional[str] = None,
         week_start: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        rrule: Optional[str] = None,
+        recur_time: Optional[str] = None,
+        recur_duration_min: Optional[int] = None,
         price_amount: Optional[float] = None,
         price_status: str = "tbd",
         signup_url: Optional[str] = None,
@@ -140,9 +150,18 @@ def _make_track_activity_tool(user_id: str):
         hasn't registered; use "signed_up" only once they actually registered.
         ``activity_type`` is one of camp|extracurricular|outing|school_event|trip
         — omit it when tracking a discovered candidate (the candidate's category
-        decides). ``price_status`` is "tbd" or "confirmed". Returns a short
+        decides). ``price_status`` is "tbd" or "confirmed".
+
+        Dates: for a specific week pass ``start_date`` (ISO date; optional
+        ``end_date``). For a WEEKLY class/practice pass ``rrule`` (RFC-5545,
+        FREQ=WEEKLY with ONE BYDAY, e.g. "FREQ=WEEKLY;BYDAY=TU") plus
+        ``recur_time`` "HH:MM" (optional ``recur_duration_min``, and
+        ``start_date``/``end_date`` as the active period). Returns a short
         confirmation including the new id.
         """
+        rrule_error = _weekly_rrule_error(rrule)
+        if rrule_error:
+            return rrule_error
         try:
             activity_id = _storage().track_activity(
                 user_id,
@@ -152,6 +171,11 @@ def _make_track_activity_tool(user_id: str):
                 provider=provider,
                 activity_type=activity_type,
                 week_start=week_start,
+                start_date=start_date,
+                end_date=end_date,
+                rrule=rrule,
+                recur_time=recur_time,
+                recur_duration_min=recur_duration_min,
                 status=status,
                 price_amount=price_amount,
                 price_status=price_status,
@@ -840,6 +864,11 @@ def _make_update_activity_tool(user_id: str):
         price_status: Optional[str] = None,
         signup_url: Optional[str] = None,
         week_start: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        rrule: Optional[str] = None,
+        recur_time: Optional[str] = None,
+        recur_duration_min: Optional[int] = None,
         notes: Optional[str] = None,
         decision_rationale: Optional[str] = None,
     ) -> str:
@@ -850,13 +879,18 @@ def _make_update_activity_tool(user_id: str):
         "declined" to pass. Use "planned" for decided-but-not-registered; only
         use "signed_up"/"confirmed" once they actually registered. Send only the
         fields to change. ALWAYS include ``decision_rationale`` when you change
-        ``status`` (decision log)."""
+        ``status`` (decision log). Date fields follow the same rules as
+        TrackActivity ("practice moved to Thursdays" = send the new rrule; the
+        calendar reconciles itself)."""
         storage = _storage()
         existing = storage.get_tracked_activity(activity_id)
         if not existing:
             return f"No tracked activity with id {activity_id}."
         if existing.get("user_id") != user_id:
             return "That activity doesn't belong to this account."
+        rrule_error = _weekly_rrule_error(rrule)
+        if rrule_error:
+            return rrule_error
         fields = {
             k: v
             for k, v in {
@@ -864,13 +898,23 @@ def _make_update_activity_tool(user_id: str):
                 "price_amount": price_amount,
                 "price_status": price_status,
                 "signup_url": signup_url,
-                "week_start": week_start,
                 "notes": notes,
                 "decision_rationale": decision_rationale,
             }.items()
             if v is not None
         }
-        if not fields:
+        dates = {
+            k: v
+            for k, v in {
+                "start_date": start_date or week_start,
+                "end_date": end_date,
+                "rrule": rrule,
+                "recur_time": recur_time,
+                "recur_duration_min": recur_duration_min,
+            }.items()
+            if v is not None
+        }
+        if not fields and not dates:
             return "Nothing to update — provide at least one field."
         try:
             if "status" in fields:
@@ -882,8 +926,13 @@ def _make_update_activity_tool(user_id: str):
                     extra_fields=fields,
                 )
                 fields["status"] = new_status  # for the confirmation string
-            else:
+            elif fields:
                 storage.update_tracked_activity(activity_id, **fields)
+            if dates:
+                # THE date write path (derives week_start, regenerates the
+                # recurring row) — never a raw column update.
+                storage.set_activity_dates(activity_id, **dates)
+                fields.update(dates)
         except Exception as exc:
             return _tool_error("UpdateActivity", exc, user_id)
         return f"Updated '{existing.get('name')}': {', '.join(fields)} (id={activity_id})."

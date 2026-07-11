@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 
 // Phase 2 sign-in: Sign in with Google (web redirect) or a pairing code minted
@@ -107,6 +107,10 @@ export default function Login() {
         </form>
 
         {err && <div className="text-error text-sm">{err}</div>}
+
+        <Link to="/docs" className="text-ink-secondary text-sm underline self-start">
+          New here? Read how MVP works
+        </Link>
 
         <button
           type="button"

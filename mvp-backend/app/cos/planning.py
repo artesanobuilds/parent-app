@@ -247,22 +247,38 @@ def coverage_gaps(logistics: list[dict]) -> list[dict]:
 
 
 def uncovered_weeks(
-    calendar_entries: list[dict], weeks: list[str], kids: list[dict]
+    calendar_entries: list[dict], weeks: list[str], kids: list[dict],
+    tracked: Optional[list[dict]] = None,
 ) -> list[dict]:
     """Find kid/week combos with no camp/class/program coverage.
 
     ``weeks`` is a list of ISO week-start date strings the parent cares about;
     ``kids`` is ``[{"name", ...}]``. ``calendar_entries`` carry ``week_start``
-    (ISO date str), ``kind``, ``kid_name``. Entries with ``kind`` in
-    {"camp", "class", "program"} count as covering.
+    (ISO date str), ``kind``, ``kid_name``.
+
+    Coverage rule (vertical expansion Phase 2): when an entry's ``activity_id``
+    resolves into ``tracked``, the activity's vertical decides
+    (``profile.provides_coverage`` — an outing week is NOT coverage). Unlinked
+    entries and external/gcal ones keep the ORIGINAL kind-set fallback
+    ({"camp", "class", "program"} covers) so existing parents' gap lists don't
+    change under their feet.
 
     Returns ``[{"kid_name", "week_start"}]`` for every kid/week pair that has no
     covering entry.
     """
+    from app.cos.verticals import get_profile
+
+    by_id = {t.get("id"): t for t in (tracked or []) if t.get("id")}
+
     # Build a set of (kid_name, week_start) that are covered.
     covered: set[tuple[Optional[str], Optional[str]]] = set()
     for entry in calendar_entries or []:
-        if (entry.get("kind") or "") in _COVERING_KINDS:
+        activity = by_id.get(entry.get("activity_id"))
+        if activity is not None:
+            covers = get_profile(activity.get("activity_type")).provides_coverage
+        else:
+            covers = (entry.get("kind") or "") in _COVERING_KINDS
+        if covers:
             covered.add((entry.get("kid_name"), entry.get("week_start")))
 
     result: list[dict] = []
@@ -393,7 +409,7 @@ def build_plan_summary(
         "cost": cost_summary(tracked),
         "conflicts": detect_time_conflicts(calendar_entries, recurring),
         "coverage_gaps": coverage_gaps(logistics),
-        "uncovered_weeks": uncovered_weeks(calendar_entries, weeks or [], kids),
+        "uncovered_weeks": uncovered_weeks(calendar_entries, weeks or [], kids, tracked),
         "pending_eligibility": [
             t for t in (tracked or []) if t.get("status") == "pending_eligibility"
         ],

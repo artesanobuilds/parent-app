@@ -207,9 +207,12 @@ struct BoardActivity: Codable, Identifiable, Hashable {
     /// Vertical chip: camp | extracurricular | outing | school_event | trip.
     /// Optional so pre-Phase-0 backends still decode; server always sends it.
     let activityType: String?
+    /// Server-rendered date line ("Week of Jul 13" / "Tuesdays 4:00 PM") —
+    /// rendered VERBATIM; date-display logic never forks per client.
+    let when: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, provider, watchable, watching
+        case id, name, status, provider, watchable, watching, when
         case kidName = "kid_name"
         case priceAmount = "price_amount"
         case signupURL = "signup_url"

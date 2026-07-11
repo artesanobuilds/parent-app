@@ -187,7 +187,12 @@ export interface TrackedActivity {
   provider: string | null;
   // camp | extracurricular | outing | school_event | trip (null on pre-Phase-0 rows)
   activity_type: string | null;
-  week_start: string | null;
+  week_start: string | null; // derived anchor for week_block items (= start_date)
+  start_date: string | null;
+  end_date: string | null;
+  rrule: string | null; // RFC-5545; weekly-only for now
+  recur_time: string | null;
+  recur_duration_min: number | null;
   status: string;
   pending_reason: string | null;
   price_amount: number | null;
@@ -236,6 +241,9 @@ export interface BoardActivity extends TrackedActivity {
   next_step: NextStep;
   watchable: boolean; // has a contact email
   watching: boolean; // gmail connected + watchable + registered
+  // Server-rendered date line ("Week of Jul 13" / "Tuesdays 4:00 PM") —
+  // rendered VERBATIM; date-display logic never forks per client.
+  when: string | null;
 }
 
 export interface BoardStage {

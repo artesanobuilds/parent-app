@@ -130,7 +130,13 @@
 
 - id: recurring-practice
   message: "Add swim practice for Mar every Tuesday at 4pm starting September."
-  expect_any: [AddRecurringAppointment, AddToCalendar]
+  # Since the Phase-2 date model, TrackActivity(rrule=...) is the RICHER path
+  # for a weekly practice (board card + derived conflict-detection row); the
+  # bare AddRecurringAppointment/AddToCalendar remain acceptable. When
+  # TrackActivity is chosen, the rrule must actually carry the weekly rule.
+  expect_any: [TrackActivity, AddRecurringAppointment, AddToCalendar]
+  expect_args:
+    TrackActivity: {rrule: "WEEKLY"}
 
 - id: draft-email
   message: "Draft an email to the Camp Galileo director asking whether week 3 still has openings."

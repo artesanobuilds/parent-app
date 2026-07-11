@@ -181,6 +181,33 @@ REGISTRY: Dict[str, VerticalProfile] = {
 }
 
 
+# ── Date-model validation (Phase 2) ──────────────────────────────────
+# The storage format is a full RFC-5545 RRULE string (GCal speaks it natively),
+# but the PRODUCT supports WEEKLY with exactly one BYDAY for now. Enforced at
+# the edges (agent tool + HTTP router) — never in storage — so widening later
+# is a validation change, not a migration.
+
+_RRULE_DAYS = frozenset({"MO", "TU", "WE", "TH", "FR", "SA", "SU"})
+
+
+def weekly_rrule_error(rrule: Optional[str]) -> Optional[str]:
+    """Human-readable rejection reason for an unsupported RRULE, or None."""
+    if not rrule:
+        return None
+    parts = {
+        kv.split("=", 1)[0].strip(): kv.split("=", 1)[1].strip()
+        for kv in rrule.upper().split(";") if "=" in kv
+    }
+    if parts.get("FREQ") != "WEEKLY":
+        return ("Only weekly recurrence is supported right now — use an RRULE "
+                "like FREQ=WEEKLY;BYDAY=TU;UNTIL=20261215.")
+    if (parts.get("BYDAY") or "") not in _RRULE_DAYS:
+        return ("The RRULE needs exactly ONE BYDAY (MO..SU), e.g. "
+                "FREQ=WEEKLY;BYDAY=TU. For two days a week, track it as two "
+                "entries for now.")
+    return None
+
+
 def get_profile(activity_type: Optional[str]) -> VerticalProfile:
     """The profile for an activity_type; canonical-but-unregistered types
     (e.g. `extracurricular` before Phase 3) and NULL/unknown degrade to camp."""

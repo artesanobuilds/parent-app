@@ -127,7 +127,12 @@ class TrackActivityBody(BaseModel):
     candidate_id: Optional[str] = None
     provider: Optional[str] = None
     activity_type: Optional[str] = None
-    week_start: Optional[str] = None
+    week_start: Optional[str] = None  # legacy synonym for start_date (week_block)
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    rrule: Optional[str] = None  # RFC-5545; weekly-only enforced at the edges
+    recur_time: Optional[str] = None
+    recur_duration_min: Optional[int] = None
     status: str = "exploring"
     pending_reason: Optional[str] = None
     price_amount: Optional[float] = None
@@ -135,6 +140,13 @@ class TrackActivityBody(BaseModel):
     signup_url: Optional[str] = None
     notes: Optional[str] = None
     decision_rationale: Optional[str] = None
+
+
+# Date fields route through storage.set_activity_dates (the ONE date write
+# path — derives week_start, regenerates derived recurring rows), never
+# through update_tracked_activity.
+_DATE_FIELDS = ("week_start", "start_date", "end_date", "rrule", "recur_time",
+                "recur_duration_min")
 
 
 class TrackActivityPatch(BaseModel):
@@ -145,7 +157,12 @@ class TrackActivityPatch(BaseModel):
     price_amount: Optional[float] = None
     price_status: Optional[str] = None
     signup_url: Optional[str] = None
-    week_start: Optional[str] = None
+    week_start: Optional[str] = None  # legacy synonym for start_date
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    rrule: Optional[str] = None
+    recur_time: Optional[str] = None
+    recur_duration_min: Optional[int] = None
     notes: Optional[str] = None
     decision_rationale: Optional[str] = None
 
@@ -153,6 +170,11 @@ class TrackActivityPatch(BaseModel):
 @router.post("/activities/track")
 def track_activity(body: TrackActivityBody, user_id: str = Depends(current_user)):
     authorize_user_match(authenticated=user_id, claimed=body.user_id)
+    from app.cos.verticals import weekly_rrule_error
+
+    rrule_error = weekly_rrule_error(body.rrule)
+    if rrule_error:
+        raise HTTPException(status_code=422, detail=rrule_error)
     storage = _storage()
     payload = body.model_dump(exclude={"user_id"})
     activity_id = storage.track_activity(user_id, **payload)
@@ -178,7 +200,15 @@ def patch_activity(
     if not existing:
         raise HTTPException(status_code=404, detail="tracked activity not found")
     authorize_user_match(authenticated=user_id, claimed=existing["user_id"], resource=True)
+    from app.cos.verticals import weekly_rrule_error
+
+    rrule_error = weekly_rrule_error(body.rrule)
+    if rrule_error:
+        raise HTTPException(status_code=422, detail=rrule_error)
     fields = body.model_dump(exclude={"user_id"}, exclude_none=True)
+    dates = {k: fields.pop(k) for k in _DATE_FIELDS if k in fields}
+    if "week_start" in dates:
+        dates.setdefault("start_date", dates.pop("week_start"))
     if "status" in fields:
         # Registering flips on email tracking + baseline to-dos; passing
         # (declining) dismisses the abandoned plan's open to-dos. One write
@@ -187,8 +217,13 @@ def patch_activity(
         updated = lifecycle.transition(
             storage, user_id, activity_id, new_status, extra_fields=fields
         )
-    else:
+    elif fields:
         storage.update_tracked_activity(activity_id, **fields)
+        updated = storage.get_tracked_activity(activity_id)
+    else:
+        updated = existing
+    if dates:
+        storage.set_activity_dates(activity_id, **dates)
         updated = storage.get_tracked_activity(activity_id)
     return {"id": activity_id, "activity": updated}
 

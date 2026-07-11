@@ -224,6 +224,17 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
     # before migrations on legacy DBs, where the column doesn't exist yet.
     (16, "tracked_activities.add_activity_type",
      lambda con: _add_tracked_activity_type(con)),
+    # Vertical expansion Phase 2: the generalized date model, scoped to the two
+    # live shapes — week_block (start/end dates; week_start stays the derived
+    # anchor) and recurring_weekly (an RFC-5545 RRULE string is the SINGLE
+    # SOURCE OF TRUTH; derived recurring_appointments rows get an activity_id
+    # back-reference and are regenerated on change, never hand-edited).
+    # Backfill start_date = week_start, end_date = week_start + 4 days —
+    # end_date is FABRICATED (Mon–Fri assumption), not observed: Saturday
+    # sessions and two-week camps exist, so treat backfilled end_dates as
+    # display hints only. Idempotent (WHERE start_date IS NULL).
+    (17, "tracked_activities.date_model",
+     lambda con: _add_tracked_activity_dates(con)),
 ]
 
 
@@ -246,6 +257,34 @@ def _backfill_user_accounts(con) -> None:
             "VALUES (?, ?, now())",
             [uid, uuid.uuid4().hex],
         )
+
+def _add_tracked_activity_dates(con) -> None:
+    def _cols(table: str) -> set:
+        return {
+            r[0] for r in con.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = ?", [table]
+            ).fetchall()
+        }
+
+    tracked = _cols("tracked_activities")
+    for col, ddl_type in (
+        ("start_date", "DATE"),
+        ("end_date", "DATE"),
+        ("rrule", "TEXT"),
+        ("recur_time", "TEXT"),
+        ("recur_duration_min", "INTEGER"),
+    ):
+        if col not in tracked:
+            con.execute(f"ALTER TABLE tracked_activities ADD COLUMN {col} {ddl_type}")
+    con.execute(
+        "UPDATE tracked_activities "
+        "SET start_date = week_start, end_date = week_start + INTERVAL 4 DAY "
+        "WHERE start_date IS NULL AND week_start IS NOT NULL"
+    )
+    if "activity_id" not in _cols("recurring_appointments"):
+        con.execute("ALTER TABLE recurring_appointments ADD COLUMN activity_id TEXT")
+
 
 def _add_tracked_activity_type(con) -> None:
     cols = {

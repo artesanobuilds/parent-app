@@ -4,6 +4,7 @@ import { useAuth } from './auth/AuthContext';
 import { pageview } from './analytics';
 import Layout from './components/Layout';
 import Login from './pages/Login';
+import Docs from './pages/Docs';
 import Discovery from './pages/Discovery';
 import Plan from './pages/Plan';
 import Chat from './pages/Chat';
@@ -28,6 +29,11 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      {/* PUBLIC product docs — deliberately OUTSIDE ProtectedRoute (the GTM
+          funnel links straight here). tests/test_public_docs.py asserts the
+          guard keeps excluding these. */}
+      <Route path="/docs" element={<Docs />} />
+      <Route path="/docs/:slug" element={<Docs />} />
       <Route
         element={
           <ProtectedRoute>

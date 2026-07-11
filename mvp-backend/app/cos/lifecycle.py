@@ -148,6 +148,67 @@ def next_step(activity: Dict[str, Any], open_todos: List[Dict[str, Any]]) -> Dic
     return {"stage": stage, "action": "none", "label": "", "hint": ""}
 
 
+# ── format_when: the ONE date renderer ───────────────────────────────
+# Both clients render this string VERBATIM (the plan's rule) so date display
+# logic never forks per surface. Two shapes in Phase 2: week_block and
+# recurring_weekly; later phases extend this function, not the clients.
+
+_RRULE_DAY_LABELS = {
+    "MO": "Mondays", "TU": "Tuesdays", "WE": "Wednesdays", "TH": "Thursdays",
+    "FR": "Fridays", "SA": "Saturdays", "SU": "Sundays",
+}
+
+_MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _short_date(iso: Optional[str]) -> Optional[str]:
+    if not iso:
+        return None
+    try:
+        from datetime import date
+        d = date.fromisoformat(str(iso)[:10])
+        return f"{_MONTH_ABBR[d.month]} {d.day}"
+    except Exception:
+        return None
+
+
+def _friendly_time(hhmm: Optional[str]) -> Optional[str]:
+    if not hhmm:
+        return None
+    try:
+        from datetime import datetime
+        t = datetime.strptime(hhmm, "%H:%M")
+        out = t.strftime("%I:%M %p").lstrip("0")
+        return out
+    except Exception:
+        return None
+
+
+def format_when(activity: Dict[str, Any]) -> Optional[str]:
+    """One human 'when' string for an activity card, decided by the DATA shape
+    (an rrule row renders recurring even while its vertical profile is still
+    degrading to camp). Returns None when the activity has no dates yet."""
+    rrule = (activity.get("rrule") or "").strip().upper()
+    if rrule:
+        parts = {
+            kv.split("=", 1)[0]: kv.split("=", 1)[1]
+            for kv in rrule.split(";") if "=" in kv
+        }
+        day = _RRULE_DAY_LABELS.get((parts.get("BYDAY") or "").split(",")[0])
+        bits = [day or "Weekly"]
+        t = _friendly_time(activity.get("recur_time"))
+        if t:
+            bits.append(t)
+        until = _short_date(activity.get("end_date"))
+        if until:
+            bits.append(f"through {until}")
+        return " ".join(bits)
+    anchor = activity.get("week_start") or activity.get("start_date")
+    short = _short_date(anchor)
+    return f"Week of {short}" if short else None
+
+
 def _sort_todos(todos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Open to-dos, most urgent first: dated before undated, then payment/form
     before generic tasks."""
@@ -189,6 +250,8 @@ def build_board(
         # Canonical vertical for the card chip; NULL/unknown degrades to camp
         # (pre-v16 rows, surprising LLM arguments) — same posture as stage_for.
         entry["activity_type"] = normalize_activity_type(a.get("activity_type"))
+        # One server-rendered date string; clients show it verbatim.
+        entry["when"] = format_when(a)
         # A registered camp with no contact email can't be watched — surface it
         # so the client can ask for the email instead of silently not tracking.
         status = (a.get("status") or "").strip().lower()

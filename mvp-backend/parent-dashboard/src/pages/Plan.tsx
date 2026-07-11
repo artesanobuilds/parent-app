@@ -394,6 +394,8 @@ function BoardCard({
           <span className="bg-canvas rounded px-300 py-100 font-mono">${a.price_amount}</span>
         )}
       </div>
+      {/* Server-rendered date line — shown verbatim (never re-formatted here) */}
+      {a.when && <div className="mt-200 text-sm text-ink-secondary">{a.when}</div>}
 
       {/* The ONE primary action, hint (its consequence) directly underneath */}
       {step.action !== 'none' && (

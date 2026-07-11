@@ -86,14 +86,21 @@ def _seed(store, user_id: str, seed: dict) -> None:
         )
 
 
-def _called_tools(result) -> list[str]:
-    names: list[str] = []
+def _tool_calls(result) -> list[tuple[str, dict]]:
+    calls: list[tuple[str, dict]] = []
     for msg in result.get("messages", []):
         for tc in getattr(msg, "tool_calls", None) or []:
-            name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
+            if isinstance(tc, dict):
+                name, args = tc.get("name"), tc.get("args") or {}
+            else:
+                name, args = getattr(tc, "name", None), getattr(tc, "args", {}) or {}
             if name:
-                names.append(name)
-    return names
+                calls.append((name, args))
+    return calls
+
+
+def _called_tools(result) -> list[str]:
+    return [name for name, _ in _tool_calls(result)]
 
 
 @pytest.mark.parametrize("case", CASES, ids=_case_ids())
@@ -122,3 +129,22 @@ def test_golden(case, golden_env):
         assert any(t in called for t in expect_any), (
             f"{case['id']}: expected one of {expect_any}, agent called {called}"
         )
+
+    # expect_args: {tool: {arg: substring-or-value}} spot checks, applied only
+    # when that tool WAS called (a case may accept several tools and pin the
+    # args of just one of them).
+    for tool_name, arg_checks in (case.get("expect_args") or {}).items():
+        arg_sets = [args for name, args in _tool_calls(result) if name == tool_name]
+        if not arg_sets:
+            continue
+        for arg, expected in (arg_checks or {}).items():
+            ok = any(
+                str(expected).lower() in str(args.get(arg, "")).lower()
+                if isinstance(expected, str)
+                else args.get(arg) == expected
+                for args in arg_sets
+            )
+            assert ok, (
+                f"{case['id']}: {tool_name} called without {arg}~='{expected}' "
+                f"(calls: {arg_sets})"
+            )
