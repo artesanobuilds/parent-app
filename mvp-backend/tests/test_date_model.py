@@ -300,3 +300,42 @@ def test_uncovered_weeks_linked_trip_covers():
     assert planning.uncovered_weeks(entries, ["2026-06-14"], _KIDS, tracked) == []
     # ...while the bare kind="trip" is NOT in the legacy fallback kind-set.
     assert planning.uncovered_weeks(entries, ["2026-06-14"], _KIDS) != []
+
+
+# ── migrations on a POPULATED legacy DB (the 2026-07-11 prod outage) ─
+
+
+def test_migrations_v16_plus_run_on_a_populated_legacy_db(store):
+    # Reproduces the prod crash: v16's backfill UPDATE and its CREATE INDEX
+    # shared one transaction, and DuckDB refuses ("Cannot create index with
+    # outstanding updates") on any DB with actual rows — which empty dev/test
+    # DBs never exercised. The index now lives in v19 (its own transaction).
+    from app.migrations import run_migrations
+
+    con = store._con
+    store.track_activity("legacy-user", name="Existing Camp",
+                         week_start="2026-07-13")
+    # Rewind the schema to the pre-v16 world, keeping the row. ALL indexes on
+    # the table must go first — DuckDB refuses DROP COLUMN while any index
+    # depends on a column positioned after the dropped one.
+    for idx in ("idx_tracked_activities_user_type",
+                "idx_tracked_activities_user_status",
+                "idx_tracked_activities_user_week"):
+        con.execute(f"DROP INDEX IF EXISTS {idx}")
+    for col in ("activity_type", "start_date", "end_date", "rrule",
+                "recur_time", "recur_duration_min"):
+        con.execute(f"ALTER TABLE tracked_activities DROP COLUMN IF EXISTS {col}")
+    con.execute("DROP INDEX IF EXISTS idx_recurring_appointments_user")
+    con.execute("ALTER TABLE recurring_appointments DROP COLUMN IF EXISTS activity_id")
+    con.execute("DELETE FROM schema_migrations WHERE version >= 16")
+
+    run_migrations(con)  # raised TransactionException before the v19 split
+
+    atype, start = con.execute(
+        "SELECT activity_type, start_date FROM tracked_activities").fetchone()
+    assert atype == "camp"
+    assert str(start)[:10] == "2026-07-13"
+    n = con.execute(
+        "SELECT count(*) FROM duckdb_indexes() "
+        "WHERE index_name = 'idx_tracked_activities_user_type'").fetchone()[0]
+    assert n == 1

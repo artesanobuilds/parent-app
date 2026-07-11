@@ -242,6 +242,17 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
     # .dockerignore exclusions (a volume rebuild must never silently delete
     # the watchlist — it IS the product promise).
     (18, "watchlist.registration_windows", None),
+    # The v16 index, in its OWN transaction: DuckDB can't CREATE INDEX on a
+    # table updated earlier in the same transaction, and v16's backfill UPDATE
+    # is exactly that on any DB with rows (crashed the 2026-07-11 prod deploy;
+    # rolled back cleanly). By v19 the v16 transaction has committed, so the
+    # index builds. Idempotent for DBs (local dev) that got the index back
+    # when v16 still carried it.
+    (19, "tracked_activities.type_index",
+     lambda con: con.execute(
+         "CREATE INDEX IF NOT EXISTS idx_tracked_activities_user_type "
+         "ON tracked_activities (user_id, activity_type)"
+     )),
 ]
 
 
@@ -306,10 +317,13 @@ def _add_tracked_activity_type(con) -> None:
         "UPDATE tracked_activities SET activity_type = 'camp' "
         "WHERE activity_type IS NULL"
     )
-    con.execute(
-        "CREATE INDEX IF NOT EXISTS idx_tracked_activities_user_type "
-        "ON tracked_activities (user_id, activity_type)"
-    )
+    # NOTE: the (user_id, activity_type) index deliberately does NOT live here.
+    # run_migrations wraps each body in ONE transaction, and DuckDB cannot
+    # CREATE INDEX on a table with outstanding (same-transaction) updates —
+    # the backfill UPDATE above trips "TransactionContext Error: Cannot create
+    # index with outstanding updates" on any DB with real rows. (Took prod
+    # down on the 2026-07-11 deploy; empty dev/test DBs never hit it.) The
+    # index is v19, a separate migration = a separate committed transaction.
 
 
 _MIGRATIONS_DDL = """
