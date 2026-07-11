@@ -47,4 +47,6 @@ data/integration_accounts.parquet
 data/email_sync_runs.parquet
 data/calendar_sync_runs.parquet
 data/agent_config.parquet
+data/registration_windows.parquet
+data/window_notifications.parquet
 data/eval_reports/
