@@ -1,0 +1,171 @@
+# COS golden set — tool-selection accuracy on real(istic) parent turns.
+#
+# WHY: the two riskiest refactors of the vertical expansion (de-camping the
+# system prompt, renaming tools) change agent behavior in ways unit tests
+# can't see. These cases pin the loss curve: message + seeded state ->
+# WHICH TOOL the agent reaches for (never response text — text is flaky
+# theater; tool calls are the signal).
+#
+# Sources: turns marked `source: prod-local` are verbatim from Miguel's real
+# local usage (cos_messages, 2026-07); the rest are hand-authored to cover
+# every tool the agent owns. Single-turn only in v1.
+#
+# Semantics per case:
+#   message:        the user turn
+#   seed:           optional board state inserted before the turn
+#     activities:   [{name, status, kid_name?, price_amount?, week_start?, signup_url?}]
+#     todos:        [{title, kind, activity: <seeded activity name>}]
+#   expect_any:     PASS if >=1 of these tools is called
+#   expect_args:    optional {tool: {arg: substring-or-value}} spot checks
+#   forbid:         FAIL if any of these tools is called
+#
+# Rule (binding, from the plan): any prompt/tool-docstring diff reruns this
+# set; accuracy must not drop below the recorded baseline (see BASELINE.md).
+
+- id: snapshot-what-did-we-find
+  source: prod-local
+  message: "What camps did we find for my kids?"
+  expect_any: [SearchActivities, GetPlanSnapshot]
+
+- id: coverage-gaps
+  source: prod-local
+  message: "Where are my coverage gaps this summer?"
+  expect_any: [GetPlanSnapshot]
+
+- id: decide-between-two
+  source: prod-local
+  message: "Help me decide between two camps"
+  seed:
+    activities:
+      - {name: "Camp Galileo", status: exploring, kid_name: Ceiba, price_amount: 450}
+      - {name: "Art Barn Camp", status: exploring, kid_name: Ceiba, price_amount: 300}
+  expect_any: [GetPlanSnapshot, CompareActivities, SearchActivities]
+
+- id: decide-shortlist-tradeoffs
+  source: prod-local
+  message: "Help me decide between the camps on my shortlist. Walk me through the tradeoffs (cost, eligibility, dates)."
+  seed:
+    activities:
+      - {name: "Camp Galileo", status: exploring, kid_name: Ceiba, price_amount: 450}
+      - {name: "Coding Camp", status: exploring, kid_name: Mar, price_amount: 500}
+  expect_any: [GetPlanSnapshot, CompareActivities]
+
+- id: whats-pending
+  source: prod-local
+  message: "What's still pending or needs confirming?"
+  seed:
+    activities:
+      - {name: "River Camp", status: pending_eligibility, kid_name: Mar}
+  expect_any: [GetPlanSnapshot]
+
+- id: what-am-i-exploring
+  source: prod-local
+  message: "What are the camps I'm exploring?"
+  expect_any: [GetPlanSnapshot, SearchActivities]
+
+- id: greeting-no-tools
+  source: prod-local
+  message: "hi"
+  forbid: [TrackActivity, UpdateActivity, UntrackActivity, AddTodo, AddToCalendar,
+           StartDiscovery, LookupAndSaveActivity, DraftEmail]
+
+- id: add-todo-dentist
+  source: prod-local
+  message: "Add a to-do to call the dentist."
+  expect_any: [AddTodo]
+
+- id: save-already-registered
+  message: "Save Camp Wildwood for Ceiba — I already signed her up last night on their site."
+  expect_any: [LookupAndSaveActivity, TrackActivity]
+
+- id: promote-to-planned
+  message: "We talked it over — we'll do the Spanish immersion camp."
+  seed:
+    activities:
+      - {name: "Spanish Immersion Camp", status: exploring, kid_name: Ceiba, price_amount: 380}
+  expect_any: [UpdateActivity]
+
+- id: decline-activity
+  message: "Actually, cancel the art camp — we're not doing it this year."
+  seed:
+    activities:
+      - {name: "Art Barn Camp", status: planned, kid_name: Ceiba, price_amount: 300}
+  expect_any: [UpdateActivity]
+  forbid: [UntrackActivity]
+
+- id: delete-forever
+  message: "Delete that test activity completely, it was added by mistake."
+  seed:
+    activities:
+      - {name: "Test Activity", status: exploring}
+  expect_any: [UntrackActivity]
+
+- id: complete-payment-todo
+  message: "I just paid the $120 for Robotics — check it off."
+  seed:
+    activities:
+      - {name: "Robotics Camp", status: signed_up, kid_name: Mar, price_amount: 120}
+    todos:
+      - {title: "Pay $120 for Robotics Camp", kind: payment, activity: "Robotics Camp"}
+  expect_any: [CompleteTodo, GetPlanSnapshot]
+
+- id: kick-discovery
+  message: "Find soccer camps near 95448 for this summer."
+  expect_any: [StartDiscovery]
+
+- id: help
+  message: "What can you actually do for me?"
+  expect_any: [Help]
+
+- id: kids-info
+  message: "How old are my kids again, and what are they into?"
+  expect_any: [GetKidsInfo]
+
+- id: weekend-outing
+  # Includes an explicit count: the quick-outings mode is DESIGNED to ask
+  # "how many ideas?" first (count-ask), so a countless ask legitimately
+  # yields a clarifying question with no tool call.
+  message: "Give me 3 ideas for this Saturday — something outdoors."
+  expect_any: [SuggestOutings]
+
+- id: recurring-practice
+  message: "Add swim practice for Mar every Tuesday at 4pm starting September."
+  expect_any: [AddRecurringAppointment, AddToCalendar]
+
+- id: draft-email
+  message: "Draft an email to the Camp Galileo director asking whether week 3 still has openings."
+  seed:
+    activities:
+      - {name: "Camp Galileo", status: signed_up, kid_name: Ceiba}
+  expect_any: [DraftEmail]
+
+- id: eligibility-check
+  message: "Is Ceiba even old enough for River Camp?"
+  seed:
+    activities:
+      - {name: "River Camp", status: exploring, kid_name: Ceiba}
+  # Any info-gathering hop is legitimate here — GetKidsInfo (her age),
+  # SearchActivities (the camp's age range), CheckEligibility, or the
+  # snapshot. The real failure mode this case guards is answering an age
+  # question from thin air with NO tool call. (Baseline + Phase-1 reruns
+  # each sampled a different legit path.)
+  expect_any: [CheckEligibility, GetPlanSnapshot, GetKidsInfo, SearchActivities]
+
+- id: blackout-week
+  message: "Block out the week of July 20 — we'll be at grandma's."
+  expect_any: [AddToCalendar]
+
+- id: caregiver-fridays
+  message: "Grandma can do pickups on Fridays."
+  expect_any: [AddCaregiver, AssignLogistics]
+
+- id: logistics-who-drives
+  message: "Who's driving to camp the week of July 13?"
+  expect_any: [GetPlanSnapshot]
+
+- id: mark-registered
+  message: "Done — I registered Mar for the coding camp this morning."
+  seed:
+    activities:
+      - {name: "Coding Camp", status: planned, kid_name: Mar, price_amount: 500}
+  expect_any: [UpdateActivity]

@@ -18,6 +18,7 @@ from typing import Optional
 from langchain.tools import tool
 
 from app.cos import planning
+from app.cos import verticals as cos_verticals
 from app.cost_logging import cost_config, new_workflow_id
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,7 @@ def _make_track_activity_tool(user_id: str):
         name: str,
         kid_name: Optional[str] = None,
         status: str = "exploring",
+        activity_type: Optional[str] = None,
         week_start: Optional[str] = None,
         price_amount: Optional[float] = None,
         price_status: str = "tbd",
@@ -136,8 +138,10 @@ def _make_track_activity_tool(user_id: str):
         and tracking payment/form to-dos) → "done". Also: "pending_eligibility",
         "waitlisted", "declined". Use "planned" when the parent decides but
         hasn't registered; use "signed_up" only once they actually registered.
-        ``price_status`` is "tbd" or "confirmed". Returns a short confirmation
-        including the new id.
+        ``activity_type`` is one of camp|extracurricular|outing|school_event|trip
+        — omit it when tracking a discovered candidate (the candidate's category
+        decides). ``price_status`` is "tbd" or "confirmed". Returns a short
+        confirmation including the new id.
         """
         try:
             activity_id = _storage().track_activity(
@@ -146,6 +150,7 @@ def _make_track_activity_tool(user_id: str):
                 kid_name=kid_name,
                 candidate_id=candidate_id,
                 provider=provider,
+                activity_type=activity_type,
                 week_start=week_start,
                 status=status,
                 price_amount=price_amount,
@@ -165,20 +170,11 @@ def _make_track_activity_tool(user_id: str):
 
 
 def _maybe_enter_watched(user_id: str, activity_id: str, status: Optional[str]) -> None:
-    """Creating an activity directly in a watched status (e.g. LookupAndSaveCamp
-    defaults to signed_up) is also a registration — fire the same side effects
-    as a status transition: seed to-dos + start watching. Never raises."""
+    """Thin shim over lifecycle.on_created — the single owner of the
+    created-straight-into-registered side effects."""
     from app.cos import lifecycle
 
-    if (status or "").strip().lower() not in lifecycle.WATCHED:
-        return
-    try:
-        storage = _storage()
-        activity = storage.get_tracked_activity(activity_id)
-        if activity:
-            lifecycle.on_enter_watched(storage, user_id, activity)
-    except Exception:  # noqa: BLE001 — best-effort nicety
-        logger.warning("[cos_tool] enter-watched side effects failed for %s", activity_id)
+    lifecycle.on_created(_storage(), user_id, activity_id, status)
 
 
 # --------------------------------------------------------------------------- #
@@ -694,39 +690,45 @@ def _make_draft_email_tool(user_id: str):
 
 
 # --------------------------------------------------------------------------- #
-# Camp lookup-and-save (do what the UI does: research a named camp + track it)
+# Activity lookup-and-save (do what the UI does: research a named activity +
+# track it). Renamed from LookupAndSaveCamp in the vertical expansion — grows
+# by parameter (activity_type), never by per-vertical tool.
 # --------------------------------------------------------------------------- #
 
 
-def _make_lookup_and_save_camp_tool(user_id: str):
+def _make_lookup_and_save_activity_tool(user_id: str):
     @tool
-    def LookupAndSaveCamp(
-        camp_name: str,
+    def LookupAndSaveActivity(
+        activity_name: str,
         kid_name: Optional[str] = None,
+        activity_type: Optional[str] = None,
         url: Optional[str] = None,
         status: str = "signed_up",
         note: Optional[str] = None,
     ) -> str:
-        """Look up a specific camp/class — typically one the parent ALREADY signed
-        up for — fetch its details from the web, and SAVE it to the plan as if it
-        had been tracked through the app UI.
+        """Look up a specific activity (camp, class, program) — typically one the
+        parent ALREADY signed up for — fetch its details from the web, and SAVE it
+        to the plan as if it had been tracked through the app UI.
 
-        Use this when the parent gives you camps they've registered for ("I signed
-        up for Camp Galileo and Steve & Kate's"). Call it ONCE per camp. Default
-        ``status`` is "signed_up" (already registered) — use "confirmed" if they
-        say it's locked in, or "exploring" if they're only considering it. Pass
-        ``url`` when the parent gives a link. First reuses an already-discovered
-        candidate if one matches (no web spend); otherwise it searches the web,
-        extracts the details, and tracks it.
+        Use this when the parent gives you activities they've registered for ("I
+        signed up for Camp Galileo and Steve & Kate's"). Call it ONCE per
+        activity. Default ``status`` is "signed_up" (already registered) — use
+        "confirmed" if they say it's locked in, or "exploring" if they're only
+        considering it. ``activity_type`` is one of
+        camp|extracurricular|outing|school_event|trip — pass it when the kind is
+        clear, omit to default sensibly. Pass ``url`` when the parent gives a
+        link. First reuses an already-discovered candidate if one matches (no web
+        spend); otherwise it searches the web, extracts the details, and tracks it.
         """
         storage = _storage()
+        profile = cos_verticals.get_profile(activity_type)
 
         # 1) Reuse an already-discovered candidate by name (free — no web call).
         try:
             candidates = storage.list_candidates(user_id=user_id)
         except Exception:  # noqa: BLE001 — fall through to web lookup
             candidates = []
-        low = (camp_name or "").lower().strip()
+        low = (activity_name or "").lower().strip()
         match = None
         for c in candidates:
             nm = (c.get("name") or "").lower()
@@ -737,21 +739,22 @@ def _make_lookup_and_save_camp_tool(user_id: str):
             try:
                 activity_id = storage.track_activity(
                     user_id,
-                    name=match.get("name") or camp_name,
+                    name=match.get("name") or activity_name,
                     kid_name=kid_name or match.get("kid_name"),
                     candidate_id=match.get("id"),
                     provider=match.get("provider"),
                     status=status,
+                    activity_type=activity_type,
                     price_amount=match.get("price_amount"),
                     price_status="confirmed" if match.get("price_amount") is not None else "tbd",
                     signup_url=match.get("signup_url"),
                     notes=note,
                 )
             except Exception as exc:
-                return _tool_error("LookupAndSaveCamp", exc, user_id)
+                return _tool_error("LookupAndSaveActivity", exc, user_id)
             _maybe_enter_watched(user_id, activity_id, status)
             return (
-                f"Saved '{match.get('name') or camp_name}' as {status} "
+                f"Saved '{match.get('name') or activity_name}' as {status} "
                 f"(matched one of your discovered options, id={activity_id})."
             )
 
@@ -761,7 +764,9 @@ def _make_lookup_and_save_camp_tool(user_id: str):
             from langchain_tavily import TavilySearch
             from app.ingest.extract import extract_from_text
 
-            query = url or f"{camp_name} kids camp registration details schedule price location"
+            # Query shape comes from the vertical registry ("kids camp
+            # registration details…" vs "family outing details…").
+            query = url or f"{activity_name} {profile.research_focus}"
             search = TavilySearch(max_results=5, search_depth="advanced")
             results = search.invoke(
                 {"query": query},
@@ -771,11 +776,11 @@ def _make_lookup_and_save_camp_tool(user_id: str):
             )
             extracted = extract_from_text(
                 _results_to_text(results),
-                source_hint=f"web lookup for {camp_name}",
+                source_hint=f"web lookup for {activity_name}",
                 cost_user=user_id,
             )
         except Exception as exc:
-            return _tool_error("LookupAndSaveCamp", exc, user_id)
+            return _tool_error("LookupAndSaveActivity", exc, user_id)
 
         signup = url or next((l.url for l in extracted.links if l.url), None)
         details = {
@@ -789,10 +794,11 @@ def _make_lookup_and_save_camp_tool(user_id: str):
         try:
             activity_id = storage.track_activity(
                 user_id,
-                name=extracted.activity_name or camp_name,
+                name=extracted.activity_name or activity_name,
                 kid_name=kid_name or extracted.kid_fit,
                 provider=extracted.provider,
                 status=status,
+                activity_type=activity_type,
                 price_amount=extracted.amount_due,
                 price_status="confirmed" if extracted.amount_due is not None else "tbd",
                 signup_url=signup,
@@ -801,7 +807,7 @@ def _make_lookup_and_save_camp_tool(user_id: str):
                 notes=note,
             )
         except Exception as exc:
-            return _tool_error("LookupAndSaveCamp", exc, user_id)
+            return _tool_error("LookupAndSaveActivity", exc, user_id)
         _maybe_enter_watched(user_id, activity_id, status)
 
         bits = []
@@ -813,11 +819,11 @@ def _make_lookup_and_save_camp_tool(user_id: str):
             bits.append(f"${extracted.amount_due:g}")
         extra = f" ({'; '.join(bits)})" if bits else ""
         return (
-            f"Looked up and saved '{extracted.activity_name or camp_name}' as "
+            f"Looked up and saved '{extracted.activity_name or activity_name}' as "
             f"{status}{extra} (id={activity_id})."
         )
 
-    return LookupAndSaveCamp
+    return LookupAndSaveActivity
 
 
 # --------------------------------------------------------------------------- #
@@ -867,18 +873,19 @@ def _make_update_activity_tool(user_id: str):
         if not fields:
             return "Nothing to update — provide at least one field."
         try:
-            storage.update_tracked_activity(activity_id, **fields)
+            if "status" in fields:
+                from app.cos import lifecycle
+
+                new_status = fields.pop("status")
+                lifecycle.transition(
+                    storage, user_id, activity_id, new_status,
+                    extra_fields=fields,
+                )
+                fields["status"] = new_status  # for the confirmation string
+            else:
+                storage.update_tracked_activity(activity_id, **fields)
         except Exception as exc:
             return _tool_error("UpdateActivity", exc, user_id)
-        if "status" in fields:
-            from app.cos import lifecycle
-
-            updated = storage.get_tracked_activity(activity_id)
-            if updated:
-                if lifecycle.entered_watched(existing.get("status"), fields["status"]):
-                    lifecycle.on_enter_watched(storage, user_id, updated)
-                elif lifecycle.entered_declined(existing.get("status"), fields["status"]):
-                    lifecycle.on_enter_declined(storage, user_id, updated)
         return f"Updated '{existing.get('name')}': {', '.join(fields)} (id={activity_id})."
 
     return UpdateActivity
@@ -1039,6 +1046,86 @@ def _make_help_tool(user_id: str):
 
 
 # --------------------------------------------------------------------------- #
+# Quick outings (ephemeral — no board, no tracking). Thin wrapper: all the
+# search + synthesis lives in app/cos/outings.py.
+# --------------------------------------------------------------------------- #
+
+
+def _make_suggest_outings_tool(user_id: str):
+    @tool
+    def SuggestOutings(
+        location: Optional[str] = None,
+        when: str = "this weekend",
+        focus: Optional[str] = None,
+        count: int = 3,
+    ) -> str:
+        """Suggest a few age-appropriate things to DO on a specific near-term day or
+        weekend — an OUTING, not enrolling in a camp/class. Use this for asks like
+        "what can we do this weekend?", "ideas for a rainy Saturday", "a day trip
+        with the kids". Do NOT use StartDiscovery for these (that's the heavy
+        camp-finder that writes to the board).
+
+        ``location`` is a city/area or ZIP ("San Francisco, CA"); defaults to the
+        family's saved ZIP. ``when`` is a fuzzy timeframe ("this weekend", "today",
+        "next weekend", "a rainy Tuesday"). ``focus`` is an optional vibe ("free",
+        "indoor", "outdoors", "museums"). ``count`` is how many ideas to return —
+        ASK the parent how many they'd like first (a quick few, or a longer list),
+        then pass their number (clamped 1–8).
+
+        These suggestions are EPHEMERAL: nothing is saved to the plan or board. If
+        the parent then wants to pin one, use AddToCalendar."""
+        from app.cos import outings
+
+        try:
+            result = outings.suggest_outings(
+                user_id, location=location, when=when, focus=focus, count=count
+            )
+        except Exception as exc:
+            return _tool_error("SuggestOutings", exc, user_id)
+
+        if result.get("needs_location"):
+            return result.get("message", "Which city or area should I look in?")
+
+        ideas = result.get("outings") or []
+        if not ideas:
+            return (
+                f"I couldn't find solid options for {result.get('when')} in "
+                f"{result.get('location')} right now — want me to try a different "
+                "day or a wider area?"
+            )
+
+        lines = [
+            f"Outing ideas for {result.get('when')} in {result.get('location')} "
+            f"(for {_kids_summary(result.get('kids'))}) — not saved to the plan:"
+        ]
+        for i, o in enumerate(ideas, 1):
+            head = o.get("title", "Idea")
+            where = f" — {o['where']}" if o.get("where") else ""
+            lines.append(f"{i}. {head}{where}")
+            if o.get("why_it_fits"):
+                lines.append(f"   Why: {o['why_it_fits']}")
+            if o.get("good_to_know"):
+                lines.append(f"   Good to know: {o['good_to_know']}")
+            if o.get("url"):
+                lines.append(f"   Link: {o['url']}")
+        return "\n".join(lines)
+
+    return SuggestOutings
+
+
+def _kids_summary(kids: Optional[list]) -> str:
+    """'Ceiba (2.5) and baby (5 months)' style summary for the tool's reply."""
+    if not kids:
+        return "the kids"
+    bits = []
+    for k in kids:
+        name = (k or {}).get("name") or "child"
+        age = (k or {}).get("age")
+        bits.append(f"{name} ({age})" if age not in (None, "") else name)
+    return ", ".join(bits)
+
+
+# --------------------------------------------------------------------------- #
 # Assembly
 # --------------------------------------------------------------------------- #
 
@@ -1060,10 +1147,11 @@ def build_cos_tools(user_id: str) -> list:
         _make_check_eligibility_tool(user_id),
         _make_draft_email_tool(user_id),
         # Power-tools: do what the UI does (2026-06-28)
-        _make_lookup_and_save_camp_tool(user_id),
+        _make_lookup_and_save_activity_tool(user_id),
         _make_update_activity_tool(user_id),
         _make_untrack_activity_tool(user_id),
         _make_start_discovery_tool(user_id),
+        _make_suggest_outings_tool(user_id),
         _make_get_kids_info_tool(user_id),
         _make_help_tool(user_id),
     ]

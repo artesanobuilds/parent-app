@@ -6,7 +6,7 @@ spec:
     Happy-path coverage for the Chief-of-Staff chat agent and its "do what the UI
     does" power-tools — the whole /cos/chat surface had zero flow coverage. An
     existing parent asks "what can you do?" (the Help tool enumerates capabilities),
-    tells the agent they signed up for a camp (LookupAndSaveCamp saves it as a
+    tells the agent they signed up for a camp (LookupAndSaveActivity saves it as a
     tracked, signed_up activity — as if done via the UI), and asks the agent to go
     find activities (StartDiscovery enqueues a background research run). Verifies the
     agent both answers AND takes the side-effecting actions its tools promise.
@@ -22,7 +22,7 @@ spec:
 
   invariants:
     - "POST /cos/chat 'what can you do?' streams a non-empty assistant reply that names several capabilities (Help tool ran)"
-    - "POST /cos/chat 'I signed up for Camp Galileo' completes with a non-empty reply (LookupAndSaveCamp ran)"
+    - "POST /cos/chat 'I signed up for Camp Galileo' completes with a non-empty reply (LookupAndSaveActivity ran)"
     - "After the save turn, GET /cos/activities?status=signed_up contains an activity whose name references the camp"
     - "POST /cos/chat 'go find art camps near us' completes and enqueues a run — GET /research/runs shows a run created during the flow"
     - "Any research run created by StartDiscovery is cancelled in cleanup so no orphan work is left"

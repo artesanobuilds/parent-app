@@ -204,6 +204,9 @@ struct BoardActivity: Codable, Identifiable, Hashable {
     let nextStep: BoardNextStep
     let watchable: Bool
     let watching: Bool
+    /// Vertical chip: camp | extracurricular | outing | school_event | trip.
+    /// Optional so pre-Phase-0 backends still decode; server always sends it.
+    let activityType: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name, status, provider, watchable, watching
@@ -213,6 +216,7 @@ struct BoardActivity: Codable, Identifiable, Hashable {
         case pendingReason = "pending_reason"
         case openTodos = "open_todos"
         case nextStep = "next_step"
+        case activityType = "activity_type"
     }
 }
 

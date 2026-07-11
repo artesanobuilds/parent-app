@@ -23,6 +23,8 @@ from typing import Any, Dict, List, Optional
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
+from app.cos import verticals
+
 logger = logging.getLogger(__name__)
 
 # Cheap model for extraction (a single structured-output call). Falls back to
@@ -249,6 +251,9 @@ def materialize(
                 name=extracted.activity_name or extracted.provider,
                 kid_name=extracted.kid_fit,
                 provider=extracted.provider,
+                # Ingest is camp-scoped until Phase 5 teaches the extractor the
+                # school-event taxonomy (event_kind -> typed task chains).
+                activity_type=verticals.CAMP,
                 status=status,
                 pending_reason=pending_reason,
                 price_amount=extracted.amount_due,
@@ -270,7 +275,7 @@ def materialize(
                     start_ts=d,
                     all_day=True,
                     location_text=extracted.location,
-                    kind="camp",
+                    kind=verticals.KIND_FOR_TYPE[verticals.CAMP],
                     status="pending",
                     source="email" if extracted.is_welcome_letter else "manual",
                 )

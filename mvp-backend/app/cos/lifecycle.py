@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from app.cos.verticals import get_profile, normalize_activity_type
+
 # ── The status groups ────────────────────────────────────────────────
 
 CONSIDERING = frozenset({"exploring", "interested", "reference"})
@@ -184,6 +186,9 @@ def build_board(
         entry = dict(a)
         entry["open_todos"] = open_todos
         entry["next_step"] = step
+        # Canonical vertical for the card chip; NULL/unknown degrades to camp
+        # (pre-v16 rows, surprising LLM arguments) — same posture as stage_for.
+        entry["activity_type"] = normalize_activity_type(a.get("activity_type"))
         # A registered camp with no contact email can't be watched — surface it
         # so the client can ask for the email instead of silently not tracking.
         status = (a.get("status") or "").strip().lower()
@@ -201,6 +206,60 @@ def build_board(
     }
 
 
+# ── The one status write path ────────────────────────────────────────
+# Before these two functions, the "fire on_enter_watched/on_enter_declined
+# when a status crosses" obligation was re-implemented at ~7 call sites
+# (tools, router, ingest) and only stayed correct by review. Every status
+# write now routes through transition() / on_created() so a new side effect
+# (registry to-do seeds, watchlist auto-create) lands in exactly one place.
+
+
+def transition(
+    storage: Any,
+    user_id: str,
+    activity_id: str,
+    new_status: str,
+    *,
+    extra_fields: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Update an activity's status (plus any other patch fields in the same
+    write) and fire the crossing side effects. Returns the updated activity,
+    or None when the id doesn't exist. The status write itself is NOT
+    best-effort — storage errors propagate; only the side-effect hooks are
+    swallow-safe (they never raise by design)."""
+    existing = storage.get_tracked_activity(activity_id)
+    if not existing:
+        return None
+    patch = dict(extra_fields or {})
+    patch["status"] = new_status
+    storage.update_tracked_activity(activity_id, **patch)
+    updated = storage.get_tracked_activity(activity_id)
+    if updated:
+        old_status = existing.get("status")
+        if entered_watched(old_status, new_status):
+            on_enter_watched(storage, user_id, updated)
+        elif entered_declined(old_status, new_status):
+            on_enter_declined(storage, user_id, updated)
+    return updated
+
+
+def on_created(storage: Any, user_id: str, activity_id: str, status: Optional[str]) -> None:
+    """Creating an activity directly in a watched status (e.g. "save the camp
+    I already registered for") is also a registration — fire the same side
+    effects as a transition into WATCHED. Never raises."""
+    if (status or "").strip().lower() not in WATCHED:
+        return
+    try:
+        activity = storage.get_tracked_activity(activity_id)
+        if activity:
+            on_enter_watched(storage, user_id, activity)
+    except Exception:  # noqa: BLE001 — best-effort side effects
+        import logging
+        logging.getLogger(__name__).exception(
+            "[lifecycle] on_created side effects failed"
+        )
+
+
 # ── Transition side effects ──────────────────────────────────────────
 
 def gmail_connected(storage: Any, user_id: str) -> bool:
@@ -215,18 +274,23 @@ def on_enter_watched(storage: Any, user_id: str, activity: Dict[str, Any]) -> Di
     """Run once when an activity crosses into WATCHED (registered):
 
     - enqueue an email-sync run NOW (not at the daily tick) when Gmail is
-      connected, so watching starts the moment the parent registers;
+      connected AND the vertical has the `email_sync` capability, so watching
+      starts the moment the parent registers;
     - seed baseline to-dos aimed at the right actor: a typed `payment` to-do
       when the price is known, and — only when Gmail is NOT connected — a
       "forward the confirmation" to-do (when it IS connected the system does
       the watching; the user shouldn't get a to-do for the machine's job).
 
-    Idempotent: re-entering WATCHED doesn't double-seed. Never raises — a
-    failed nicety must not break the status change itself.
+    The seeding CONDITIONALS live here (code); the vertical registry supplies
+    only the to-do WORDING + the capability booleans — the plan's binding
+    split. Idempotent: re-entering WATCHED doesn't double-seed. Never raises —
+    a failed nicety must not break the status change itself.
     """
     result = {"seeded": [], "sync_enqueued": False}
     aid = activity.get("id")
     name = activity.get("name") or "this activity"
+    profile = get_profile(activity.get("activity_type"))
+    wording = profile.todo_wording
     try:
         existing = [t for t in storage.list_todos(user_id) if t.get("activity_id") == aid]
         kinds = {(t.get("kind") or "task") for t in existing}
@@ -236,11 +300,11 @@ def on_enter_watched(storage: Any, user_id: str, activity: Dict[str, Any]) -> Di
         if price is not None and "payment" not in kinds:
             storage.add_todo(
                 user_id,
-                title=f"Pay ${price:g} for {name}",
+                title=wording.payment_title.format(name=name, price=f"{price:g}"),
                 kid_name=activity.get("kid_name"),
                 activity_id=aid,
                 kind="payment",
-                detail="Added when you marked this registered — check it off once paid.",
+                detail=wording.payment_detail,
                 source="cos_agent",
             )
             result["seeded"].append("payment")
@@ -249,17 +313,16 @@ def on_enter_watched(storage: Any, user_id: str, activity: Dict[str, Any]) -> Di
         if not connected and not has_confirm_todo:
             storage.add_todo(
                 user_id,
-                title=f"Forward or paste {name}'s confirmation email",
+                title=wording.confirm_title.format(name=name),
                 kid_name=activity.get("kid_name"),
                 activity_id=aid,
                 kind="action",
-                detail="Gmail isn't connected, so I can't watch for it automatically — "
-                       "paste it in and I'll pull out dates, payments, and forms.",
+                detail=wording.confirm_detail,
                 source="cos_agent",
             )
             result["seeded"].append("action")
 
-        if connected:
+        if connected and profile.email_sync:
             storage.create_email_sync_run(user_id=user_id, trigger="activity_registered")
             result["sync_enqueued"] = True
             try:

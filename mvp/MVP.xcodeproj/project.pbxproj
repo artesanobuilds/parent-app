@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		6CB2857C3000483B00E1DAA5 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = DD4444442F0DDD0000000002 /* PostHog */; };
 		AA1111112F0AAA0000000001 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = AA1111112F0AAA0000000002 /* MarkdownUI */; };
 		BB2222222F0BBB0000000001 /* ElevenLabs in Frameworks */ = {isa = PBXBuildFile; productRef = BB2222222F0BBB0000000002 /* ElevenLabs */; };
 		CC3333332F0CCC0000000001 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = CC3333332F0CCC0000000002 /* LiveKit */; };
@@ -71,6 +72,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6CB2857C3000483B00E1DAA5 /* PostHog in Frameworks */,
 				AA1111112F0AAA0000000001 /* MarkdownUI in Frameworks */,
 				BB2222222F0BBB0000000001 /* ElevenLabs in Frameworks */,
 				CC3333332F0CCC0000000001 /* LiveKit in Frameworks */,
@@ -137,6 +139,7 @@
 				AA1111112F0AAA0000000002 /* MarkdownUI */,
 				BB2222222F0BBB0000000002 /* ElevenLabs */,
 				CC3333332F0CCC0000000002 /* LiveKit */,
+				DD4444442F0DDD0000000002 /* PostHog */,
 			);
 			productName = MVP;
 			productReference = 6CC5B3852F01E1C100833FBC /* MVParent.app */;
@@ -224,6 +227,7 @@
 				AA1111112F0AAA0000000003 /* XCRemoteSwiftPackageReference "MarkdownUI" */,
 				BB2222222F0BBB0000000003 /* XCRemoteSwiftPackageReference "elevenlabs-swift-sdk" */,
 				CC3333332F0CCC0000000003 /* XCRemoteSwiftPackageReference "client-sdk-swift" */,
+				DD4444442F0DDD0000000003 /* XCRemoteSwiftPackageReference "posthog-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6CC5B3862F01E1C100833FBC /* Products */;
@@ -430,8 +434,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CODE_SIGN_ENTITLEMENTS = MVP/MVP.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 67;
+				CURRENT_PROJECT_VERSION = 76;
 				DEVELOPMENT_TEAM = 5K4ZDG6NFD;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -448,8 +453,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.53;
-				CODE_SIGN_ENTITLEMENTS = MVP/MVP.entitlements;
+				MARKETING_VERSION = 1.62;
 				PRODUCT_BUNDLE_IDENTIFIER = MVP.MVParent;
 				PRODUCT_NAME = MVParent;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -464,8 +468,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CODE_SIGN_ENTITLEMENTS = MVP/MVP.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 67;
+				CURRENT_PROJECT_VERSION = 76;
 				DEVELOPMENT_TEAM = 5K4ZDG6NFD;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -482,8 +487,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.53;
-				CODE_SIGN_ENTITLEMENTS = MVP/MVP.entitlements;
+				MARKETING_VERSION = 1.62;
 				PRODUCT_BUNDLE_IDENTIFIER = MVP.MVParent;
 				PRODUCT_NAME = MVParent;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -630,6 +634,14 @@
 				minimumVersion = 2.14.1;
 			};
 		};
+		DD4444442F0DDD0000000003 /* XCRemoteSwiftPackageReference "posthog-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/PostHog/posthog-ios.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -647,6 +659,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CC3333332F0CCC0000000003 /* XCRemoteSwiftPackageReference "client-sdk-swift" */;
 			productName = LiveKit;
+		};
+		DD4444442F0DDD0000000002 /* PostHog */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DD4444442F0DDD0000000003 /* XCRemoteSwiftPackageReference "posthog-ios" */;
+			productName = PostHog;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

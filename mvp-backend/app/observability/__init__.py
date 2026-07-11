@@ -69,7 +69,7 @@ def init_sentry() -> bool:
 
 def capture_exception(exc: BaseException, **tags: Any) -> None:
     """Send an explicit exception to Sentry with string tags (e.g. feature=cos,
-    tool=LookupAndSaveCamp, user=...). No-op when Sentry is off, so it's safe to
+    tool=LookupAndSaveActivity, user=...). No-op when Sentry is off, so it's safe to
     call from anywhere (local/tests). Used by code paths that swallow an
     exception into a user-facing string but still want it tracked."""
     if not _sentry_on:

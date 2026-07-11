@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
@@ -30,6 +30,15 @@ from app.cos.agent import get_cos_agent
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/cos", tags=["chief-of-staff"])
+
+
+def _track(event: str, user_id: str, props: dict | None = None) -> None:
+    """Fire-and-forget product analytics (no-op without PostHog; never raises)."""
+    try:
+        from app.analytics import capture
+        capture(event, user_id, props or {})
+    except Exception:
+        pass
 
 
 def _storage():
@@ -94,6 +103,7 @@ async def _cos_chat_stream(user_id: str, thread_id: str, message: str):
 async def cos_chat(req: CosChatRequest, user_id: str = Depends(current_user)):
     authorize_user_match(authenticated=user_id, claimed=req.user_id)
     rate_limit_enforce(user_id, "chat")
+    _track("parent_chat_message_sent", user_id, {"thread_kind": "cos"})
     return StreamingResponse(
         _cos_chat_stream(user_id, req.thread_id, req.message),
         media_type="text/event-stream",
@@ -116,6 +126,7 @@ class TrackActivityBody(BaseModel):
     kid_name: Optional[str] = None
     candidate_id: Optional[str] = None
     provider: Optional[str] = None
+    activity_type: Optional[str] = None
     week_start: Optional[str] = None
     status: str = "exploring"
     pending_reason: Optional[str] = None
@@ -129,6 +140,7 @@ class TrackActivityBody(BaseModel):
 class TrackActivityPatch(BaseModel):
     user_id: str
     status: Optional[str] = None
+    activity_type: Optional[str] = None
     pending_reason: Optional[str] = None
     price_amount: Optional[float] = None
     price_status: Optional[str] = None
@@ -144,12 +156,10 @@ def track_activity(body: TrackActivityBody, user_id: str = Depends(current_user)
     storage = _storage()
     payload = body.model_dump(exclude={"user_id"})
     activity_id = storage.track_activity(user_id, **payload)
+    _track("activity_tracked", user_id, {"status": (payload.get("status") or "considering")})
     # Created straight into a watched status (= already registered) — fire the
     # same registration side effects as a transition (see cos/lifecycle).
-    if (payload.get("status") or "").strip().lower() in lifecycle.WATCHED:
-        created = storage.get_tracked_activity(activity_id)
-        if created:
-            lifecycle.on_enter_watched(storage, user_id, created)
+    lifecycle.on_created(storage, user_id, activity_id, payload.get("status"))
     return {"id": activity_id}
 
 
@@ -167,17 +177,19 @@ def patch_activity(
     existing = storage.get_tracked_activity(activity_id)
     if not existing:
         raise HTTPException(status_code=404, detail="tracked activity not found")
-    authorize_user_match(authenticated=user_id, claimed=existing["user_id"])
+    authorize_user_match(authenticated=user_id, claimed=existing["user_id"], resource=True)
     fields = body.model_dump(exclude={"user_id"}, exclude_none=True)
-    storage.update_tracked_activity(activity_id, **fields)
-    updated = storage.get_tracked_activity(activity_id)
     if "status" in fields:
         # Registering flips on email tracking + baseline to-dos; passing
-        # (declining) dismisses the abandoned plan's open to-dos (cos/lifecycle).
-        if lifecycle.entered_watched(existing.get("status"), fields["status"]):
-            lifecycle.on_enter_watched(storage, user_id, updated)
-        elif lifecycle.entered_declined(existing.get("status"), fields["status"]):
-            lifecycle.on_enter_declined(storage, user_id, updated)
+        # (declining) dismisses the abandoned plan's open to-dos. One write
+        # path owns those crossings: lifecycle.transition.
+        new_status = fields.pop("status")
+        updated = lifecycle.transition(
+            storage, user_id, activity_id, new_status, extra_fields=fields
+        )
+    else:
+        storage.update_tracked_activity(activity_id, **fields)
+        updated = storage.get_tracked_activity(activity_id)
     return {"id": activity_id, "activity": updated}
 
 
@@ -210,6 +222,42 @@ def plan_board(user_id: str = Depends(current_user)):
     )
 
 
+def _door_payload(profile) -> Dict[str, Any]:
+    return {
+        "key": profile.key,
+        "label": profile.label,
+        "chip_label": profile.chip_label,
+        "title": profile.door.title,
+        "subtitle": profile.door.subtitle,
+        "starter_prompt": profile.door.starter_prompt,
+    }
+
+
+@router.get("/verticals")
+def list_verticals(response: Response, user_id: str = Depends(current_user)):
+    """The entry doors for the "Plan something" disclosure — the ONE place
+    feature flags touch verticals (the lifecycle/planning/agent engine never
+    branches on a flag; a binding plan rule). Fails OPEN to the registry's
+    default-enabled doors (no gating flag) so a flag-eval outage can't blank
+    the sheet; clients cache last-good and never block board render on this."""
+    from app.analytics import flags
+    from app.cos import verticals as cos_verticals
+
+    try:
+        doors = []
+        for profile in cos_verticals.REGISTRY.values():
+            if profile.flag and not flags.is_enabled(
+                profile.flag, user_id, default=False
+            ):
+                continue
+            doors.append(_door_payload(profile))
+    except Exception:  # noqa: BLE001 — fail open, never 500 the doors
+        logger.exception("[cos] vertical door eval failed; failing open to defaults")
+        doors = [_door_payload(p) for p in cos_verticals.default_doors()]
+    response.headers["Cache-Control"] = "private, max-age=300"
+    return {"verticals": doors}
+
+
 @router.delete("/activities/{activity_id}")
 def delete_activity(activity_id: str, user_id: str = Depends(current_user)):
     """Un-track an activity (e.g. un-pin from the Exploring shortlist). Ownership is
@@ -218,7 +266,7 @@ def delete_activity(activity_id: str, user_id: str = Depends(current_user)):
     existing = storage.get_tracked_activity(activity_id)
     if not existing:
         raise HTTPException(status_code=404, detail="tracked activity not found")
-    authorize_user_match(authenticated=user_id, claimed=existing["user_id"])
+    authorize_user_match(authenticated=user_id, claimed=existing["user_id"], resource=True)
     storage.delete_tracked_activity(activity_id)
     return {"id": activity_id, "deleted": True}
 
@@ -284,7 +332,7 @@ def _require_owned_calendar(storage, entry_id: str, user_id: str) -> Dict[str, A
     entry = storage.get_calendar_entry(entry_id)
     if not entry:
         raise HTTPException(status_code=404, detail="calendar entry not found")
-    authorize_user_match(authenticated=user_id, claimed=entry["user_id"])
+    authorize_user_match(authenticated=user_id, claimed=entry["user_id"], resource=True)
     return entry
 
 
@@ -589,6 +637,7 @@ def plan_export_xlsx(user_id: str = Depends(current_user)):
     from app.profiling import profiling_service
     from app.cos import export as plan_export
 
+    _track("plan_exported", user_id, {"format": "xlsx"})
     storage = _storage()
     fam = profiling_service.get_family_profile(user_id) or {}
     kids = [

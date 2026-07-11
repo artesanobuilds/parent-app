@@ -185,6 +185,8 @@ export interface TrackedActivity {
   candidate_id: string | null;
   name: string;
   provider: string | null;
+  // camp | extracurricular | outing | school_event | trip (null on pre-Phase-0 rows)
+  activity_type: string | null;
   week_start: string | null;
   status: string;
   pending_reason: string | null;

@@ -1,5 +1,5 @@
 """Unit tests for the Chief-of-Staff power-tools added 2026-06-28
-(LookupAndSaveCamp, UpdateActivity, UntrackActivity, StartDiscovery,
+(LookupAndSaveActivity, UpdateActivity, UntrackActivity, StartDiscovery,
 GetKidsInfo, Help). Storage + the web lookup (Tavily + extractor) are faked, so
 these run with NO network/LLM cost and assert the tool's logic + ownership
 guards directly. The tools call ``_storage()`` and ``profiling_service`` — both
@@ -72,7 +72,7 @@ def _seed_kids():
 
 
 # --------------------------------------------------------------------------- #
-# LookupAndSaveCamp
+# LookupAndSaveActivity
 # --------------------------------------------------------------------------- #
 
 
@@ -91,8 +91,8 @@ def test_lookup_matches_existing_candidate_no_web(monkeypatch):
 
     monkeypatch.setattr("langchain_tavily.TavilySearch", _boom)
 
-    out = _tool("LookupAndSaveCamp").invoke(
-        {"camp_name": "galileo", "status": "signed_up"}
+    out = _tool("LookupAndSaveActivity").invoke(
+        {"activity_name": "galileo", "status": "signed_up"}
     )
     assert "Saved" in out and "signed_up" in out
     saved = list(storage._tracked.values())[-1]
@@ -128,8 +128,8 @@ def test_lookup_falls_back_to_web_extract(monkeypatch):
 
     monkeypatch.setattr("app.ingest.extract.extract_from_text", fake_extract)
 
-    out = _tool("LookupAndSaveCamp").invoke(
-        {"camp_name": "Steve & Kate's", "kid_name": "Ceiba", "status": "signed_up"}
+    out = _tool("LookupAndSaveActivity").invoke(
+        {"activity_name": "Steve & Kate's", "kid_name": "Ceiba", "status": "signed_up"}
     )
     assert "Looked up and saved" in out
     saved = list(storage._tracked.values())[-1]
