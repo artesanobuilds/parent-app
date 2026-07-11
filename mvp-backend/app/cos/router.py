@@ -218,6 +218,16 @@ def patch_activity(
     _reject_bad_rrule(body.rrule)
     fields = body.model_dump(exclude={"user_id"}, exclude_none=True)
     dates = {k: fields.pop(k) for k in _DATE_FIELDS if k in fields}
+    # Ingest correction flywheel (Phase 5): an edit to an EXTRACTED item is a
+    # labeled example — a status advance confirms the extraction, any other
+    # field change corrects it. Joined via details.source_artifact_id.
+    details = existing.get("details") or {}
+    if details.get("source_artifact_id"):
+        event_kind = details.get("event_kind") or "none"
+        if "status" in fields and len(fields) == 1:
+            _track("ingest_item_confirmed", user_id, {"event_kind": event_kind})
+        elif fields or dates:
+            _track("ingest_item_corrected", user_id, {"event_kind": event_kind})
     if "week_start" in dates:
         dates.setdefault("start_date", dates.pop("week_start"))
     if "status" in fields:

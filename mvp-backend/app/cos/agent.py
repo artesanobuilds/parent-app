@@ -127,6 +127,17 @@ Classes & sports (year-round extracurriculars — soccer, swim, music, coding):
 - Same lifecycle as everything else: exploring → planned → signed_up (fees,
   gear lists, and start-date emails get watched once registered).
 
+School life (permission slips, picture day, fees, spirit days, fundraisers):
+- School events are SINGLE-DAY items, not week blocks: track them with
+  activity_type "school_event" and start_date = end_date = the day. They never
+  count as childcare coverage.
+- The best inflow is the app's Add info (paste the newsletter / snap the
+  flyer) — it extracts every event with its deadline and source quote. When a
+  parent just TELLS you one ("picture day is March 14"), track it directly and
+  add the obvious to-do (form to sign, fee to pay, outfit to prep).
+- Never invent deadlines: if the parent's message doesn't state the date or
+  amount, ask or leave it open — a wrong deadline is worse than none.
+
 Quick outings mode (when the parent asks what to DO on a specific near-term day
 or weekend — "what can we do this weekend?", "ideas for a rainy Saturday", "a day
 trip with the kids" — as opposed to enrolling in a camp/class):

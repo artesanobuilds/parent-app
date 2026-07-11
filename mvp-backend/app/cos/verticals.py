@@ -182,6 +182,34 @@ REGISTRY: Dict[str, VerticalProfile] = {
         flag="vertical-v2-extracurriculars",
         harness_spec="tier-1/extracurricular-fall-signup.flow.yml",
     ),
+    SCHOOL_EVENT: VerticalProfile(
+        key=SCHOOL_EVENT,
+        label="School stuff",
+        chip_label="School",
+        date_model="single_date",
+        provides_coverage=False,  # picture day is a date, not childcare
+        todo_wording=TodoWording(
+            payment_title="Pay the ${price} fee for {name}",
+            payment_detail="Added from a school notice — check it off once paid.",
+            confirm_title="Forward or paste {name}'s confirmation",
+            confirm_detail=(
+                "Gmail isn't connected, so I can't watch for it automatically — "
+                "paste it in and I'll pull out dates, fees, and forms."
+            ),
+        ),
+        research_focus="school event details date location",
+        door=Door(
+            title="School stuff",
+            subtitle="Flyers, forms, fees, picture day — snap it and it's handled.",
+            starter_prompt="I have a school flyer/notice to deal with.",
+        ),
+        email_sync=True,
+        registration_watch=False,
+        ingest_taxonomy=True,
+        # Door visibility only; organic school_event items always render.
+        flag="vertical-v4-school",
+        harness_spec="tier-1/school-flyer-chain.flow.yml",
+    ),
     OUTING: VerticalProfile(
         key=OUTING,
         label="Outings",

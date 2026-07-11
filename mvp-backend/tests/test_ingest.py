@@ -183,11 +183,13 @@ _FAKE_EXTRACT = ExtractedActivity(
 
 
 def test_ingest_http_text_image_and_draft(monkeypatch):
+    # Phase 5: the router consumes the multi-item API (a list per artifact);
+    # the legacy single-item keys in the response are the first item.
     monkeypatch.setattr(
-        ingest_extract, "extract_from_text", lambda *a, **k: _FAKE_EXTRACT
+        ingest_extract, "extract_items_from_text", lambda *a, **k: [_FAKE_EXTRACT]
     )
     monkeypatch.setattr(
-        ingest_extract, "extract_from_image", lambda *a, **k: _FAKE_EXTRACT
+        ingest_extract, "extract_items_from_image", lambda *a, **k: [_FAKE_EXTRACT]
     )
 
     # Fake the draft-email LLM so it never hits the network.
@@ -237,8 +239,11 @@ def test_ingest_http_text_image_and_draft(monkeypatch):
             assert r.status_code == 200, r.text
             body = r.json()
             assert body["extract_status"] == "extracted"
+            # Multi-item shape + legacy first-item keys (old-build back-compat).
+            assert len(body["items"]) == 1 and body["parked"] == 0
             assert body["extracted"]["provider"] == "Camp HBG"
             assert body["created"]["activity_id"]
+            assert body["items"][0]["created"]["activity_id"] == body["created"]["activity_id"]
             artifact_id = body["artifact_id"]
 
             # empty text rejected

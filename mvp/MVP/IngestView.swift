@@ -176,63 +176,83 @@ struct IngestView: View {
 
     @ViewBuilder
     private func resultCard(_ result: IngestResponse) -> some View {
-        let ext = result.extracted
-        let created = result.created
+        let items = result.allItems
         VStack(alignment: .leading, spacing: .hearth500) {
             HStack(spacing: .hearth400) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 22))
                     .foregroundColor(.accentDefault)
-                Text(created.madeActivity ? "Added to your plan" : "Captured")
+                Text(items.count > 1
+                     ? "\(items.count) things found"
+                     : (items.first?.created.madeActivity == true ? "Added to your plan" : "Captured"))
                     .font(.hearthBodyLG.weight(.semibold))
                     .foregroundColor(.inkPrimary)
             }
 
-            VStack(alignment: .leading, spacing: .hearth400) {
-                resultRow("Activity", ext.displayName)
-                resultRow("For", ext.kidFit)
-                resultRow("When", ext.dates?.joined(separator: ", "))
-                resultRow("Hours", ext.hours)
-                resultRow("Where", ext.location)
-                resultRow("Cost", ext.amountDue.map { "$\(Int($0))" })
+            // One card per extracted item — a PTA newsletter yields several.
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                itemCard(item)
             }
-            .padding(.hearth500)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(cardBackground)
 
-            if created.madeActivity {
-                Text("Tracked as pending — confirm it from the Plan tab.")
+            if let parked = result.parked, parked > 0 {
+                Text("\(parked) more item\(parked == 1 ? "" : "s") found — kept aside for review so this doesn't flood your plan.")
                     .font(.hearthBodySM)
                     .foregroundColor(.inkSecondary)
             }
 
-            if let items = ext.actionItems, !items.isEmpty {
-                VStack(alignment: .leading, spacing: .hearth300) {
-                    Text("\(created.todoCount > 0 ? created.todoCount : items.count) FOLLOW-UP\(items.count == 1 ? "" : "S") ADDED")
-                        .font(.hearthLabel)
-                        .tracking(0.66)
-                        .foregroundColor(.inkMuted)
-                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                        HStack(alignment: .top, spacing: .hearth300) {
-                            Image(systemName: "circle")
-                                .font(.system(size: 14))
-                                .foregroundColor(.inkMuted)
-                                .padding(.top, 2)
-                            Text(item)
-                                .font(.hearthBodyMD)
-                                .foregroundColor(.inkPrimary)
-                        }
-                    }
-                }
-                .padding(.hearth500)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(cardBackground)
+            if items.contains(where: { $0.created.madeActivity }) {
+                Text("Tracked as pending — confirm from the Plan tab.")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkSecondary)
             }
 
             primaryButton(title: "Add another", icon: "plus", disabled: false) {
                 resetForNext()
             }
         }
+    }
+
+    @ViewBuilder
+    private func itemCard(_ item: IngestItem) -> some View {
+        let ext = item.extracted
+        VStack(alignment: .leading, spacing: .hearth400) {
+            resultRow("Activity", ext.displayName)
+            resultRow("For", ext.kidFit)
+            resultRow("When", ext.dates?.joined(separator: ", "))
+            resultRow("Hours", ext.hours)
+            resultRow("Where", ext.location)
+            resultRow("Cost", ext.amountDue.map { "$\(Int($0))" })
+            // Provenance rule: an extracted deadline is never shown naked —
+            // the verbatim source sentence renders beside it.
+            if let snippet = ext.sourceSnippet, !snippet.isEmpty {
+                Text("From: \u{201C}\(snippet)\u{201D}")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+                    .italic()
+            }
+            if let actions = ext.actionItems, !actions.isEmpty {
+                VStack(alignment: .leading, spacing: .hearth300) {
+                    Text("\(item.created.todoCount > 0 ? item.created.todoCount : actions.count) FOLLOW-UP\(actions.count == 1 ? "" : "S") ADDED")
+                        .font(.hearthLabel)
+                        .tracking(0.66)
+                        .foregroundColor(.inkMuted)
+                    ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
+                        HStack(alignment: .top, spacing: .hearth300) {
+                            Image(systemName: "circle")
+                                .font(.system(size: 14))
+                                .foregroundColor(.inkMuted)
+                                .padding(.top, 2)
+                            Text(action)
+                                .font(.hearthBodyMD)
+                                .foregroundColor(.inkPrimary)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.hearth500)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground)
     }
 
     @ViewBuilder

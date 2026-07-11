@@ -41,6 +41,11 @@ EVENTS: dict[str, set[str]] = {
     # Content + navigation engagement (client)
     "content_opened": {"type"},                      # library article / community post
     "screen_viewed": {"screen"},                     # every screen (tabs + pushed/presented)
+    # Ingest flywheel (Phase 5): every confirm/correct on an extracted item is
+    # a labeled example — the corrected/confirmed ratio IS the corpus metric.
+    "ingest_uploaded": {"kind"},                     # text | image
+    "ingest_item_confirmed": {"event_kind"},
+    "ingest_item_corrected": {"event_kind"},
     # Registration-window watchlist (Phase 4) — the retention pillar. Enums
     # only: source manual|email|agent_research, confidence confirmed|estimated,
     # kind t_minus_7|day_of.

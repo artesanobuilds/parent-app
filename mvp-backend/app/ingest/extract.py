@@ -47,13 +47,25 @@ _SECURITY = (
 
 _EXTRACT_INSTRUCTIONS = (
     "You extract structured kids'-activity info from a message or photo a parent "
-    "received (a camp email, a forwarded iMessage, a paper-flyer photo, a signed "
-    "enrollment form, or a web-schedule screenshot). Fill the schema from what is "
-    "actually present. Leave a field null/empty when the content does not state it "
-    "— never invent dates, prices, ages, or contacts. Dates as ISO YYYY-MM-DD when "
-    "you can resolve them; otherwise leave the human phrasing in `schedule_text`. "
-    "Capture every concrete next step the parent must take (register, pay, sign a "
-    "form, confirm a spot, reply by a date) as a separate `action_items` entry."
+    "received (a camp email, a school newsletter, a forwarded iMessage, a paper-"
+    "flyer photo, a signed enrollment form, or a web-schedule screenshot). School "
+    "content is a MANY-OBJECTS medium: one PTA newsletter can hold picture day, a "
+    "fundraiser, a permission slip, AND spirit week — return one `items` entry per "
+    "distinct activity/event, in the order they appear. Fill each schema from what "
+    "is actually present. Leave a field null/empty when the content does not state "
+    "it — never invent dates, prices, ages, or contacts. Dates as ISO YYYY-MM-DD "
+    "when you can resolve them; otherwise leave the human phrasing in "
+    "`schedule_text`. Capture every concrete next step the parent must take "
+    "(register, pay, sign a form, confirm a spot, reply by a date) as a separate "
+    "`action_items` entry. `activity_type` is camp|extracurricular|outing|"
+    "school_event|trip when the content makes it clear; school announcements "
+    "(picture day, slips, fees, spirit days, fundraisers) are `school_event` with "
+    "the matching `event_kind` — a CLASS FIELD TRIP or any notice requiring a "
+    "signed slip is `school_event` with event_kind `permission_slip` (NEVER "
+    "`trip` — `trip` is only a family's own vacation/travel); any school "
+    "fee/rental notice is `fee`. `source_snippet` is a SHORT verbatim quote (max "
+    "~140 chars) of the sentence stating the key deadline/date/amount — copy it "
+    "exactly, it is shown to the parent as provenance."
 )
 
 
@@ -104,6 +116,31 @@ class ExtractedActivity(BaseModel):
     confidence: float = Field(
         0.5, ge=0.0, le=1.0, description="How confident extraction is overall (0–1)"
     )
+    # Vertical expansion Phase 5 (V4 school-life):
+    activity_type: Optional[str] = Field(
+        None,
+        description="camp|extracurricular|outing|school_event|trip when the "
+                    "content makes it clear; else null",
+    )
+    event_kind: Optional[str] = Field(
+        None,
+        description="For school events only: permission_slip|fee|spirit_day|"
+                    "picture_day|fundraiser|general",
+    )
+    source_snippet: Optional[str] = Field(
+        None,
+        description="SHORT verbatim quote (<=140 chars) stating the key "
+                    "deadline/date/amount — provenance shown to the parent",
+    )
+
+
+class ExtractionResult(BaseModel):
+    """Everything found in ONE artifact. School content is a many-objects
+    medium (one PTA newsletter = picture day + fundraiser + permission slip),
+    so extraction always returns a LIST — single-subject sources just return
+    one item."""
+
+    items: List[ExtractedActivity] = Field(default_factory=list)
 
 
 def _wrap(text: str) -> str:
@@ -112,13 +149,13 @@ def _wrap(text: str) -> str:
 
 
 def _llm():
-    return ChatOpenAI(model=EXTRACT_MODEL).with_structured_output(ExtractedActivity)
+    return ChatOpenAI(model=EXTRACT_MODEL).with_structured_output(ExtractionResult)
 
 
-def extract_from_text(
+def extract_items_from_text(
     text: str, *, source_hint: Optional[str] = None, cost_user: Optional[str] = None
-) -> ExtractedActivity:
-    """Stage 1 (text path): pasted email / forwarded iMessage → ExtractedActivity."""
+) -> List[ExtractedActivity]:
+    """Stage 1 (text path): pasted email / newsletter → EVERY item found."""
     from app.cost_logging import cost_config
 
     parts = [_EXTRACT_INSTRUCTIONS, "", _SECURITY, ""]
@@ -128,20 +165,21 @@ def extract_from_text(
     parts.append(_wrap(text))
     user_msg = "\n".join(parts)
 
-    return _llm().invoke(
+    result: ExtractionResult = _llm().invoke(
         user_msg, config=cost_config("ingest_text", user=cost_user)
     )
+    return result.items
 
 
-def extract_from_image(
+def extract_items_from_image(
     image_b64: str,
     *,
     mime_type: str = "image/jpeg",
     caption: Optional[str] = None,
     cost_user: Optional[str] = None,
-) -> ExtractedActivity:
-    """Stage 1 (vision path): a flyer / signed-form / screenshot photo →
-    ExtractedActivity. `image_b64` is the raw base64 (no data: prefix)."""
+) -> List[ExtractedActivity]:
+    """Stage 1 (vision path): a flyer / form / screenshot photo → EVERY item
+    found. `image_b64` is the raw base64 (no data: prefix)."""
     from app.cost_logging import cost_config
     from langchain_core.messages import HumanMessage
 
@@ -166,9 +204,38 @@ def extract_from_image(
             },
         ]
     )
-    return _llm().invoke(
+    result: ExtractionResult = _llm().invoke(
         [message], config=cost_config("ingest_image", user=cost_user)
     )
+    return result.items
+
+
+def _primary(items: List[ExtractedActivity]) -> ExtractedActivity:
+    return items[0] if items else ExtractedActivity()
+
+
+def extract_from_text(
+    text: str, *, source_hint: Optional[str] = None, cost_user: Optional[str] = None
+) -> ExtractedActivity:
+    """Single-item convenience for single-subject sources (a registered camp's
+    email in email_sync, the LookupAndSaveActivity web lookup). Newsletter-ish
+    inflows (the ingest router) use extract_items_from_text instead."""
+    return _primary(extract_items_from_text(
+        text, source_hint=source_hint, cost_user=cost_user
+    ))
+
+
+def extract_from_image(
+    image_b64: str,
+    *,
+    mime_type: str = "image/jpeg",
+    caption: Optional[str] = None,
+    cost_user: Optional[str] = None,
+) -> ExtractedActivity:
+    """Single-item convenience twin of extract_from_text (see there)."""
+    return _primary(extract_items_from_image(
+        image_b64, mime_type=mime_type, caption=caption, cost_user=cost_user
+    ))
 
 
 # ── Stage 2: deterministic materialization ───────────────────────────────────
@@ -225,14 +292,25 @@ def materialize(
     )
 
     # Attach to an existing registered activity (R3), or spawn one when we
-    # actually identified a new camp (paste/photo).
+    # actually identified a new activity/event (paste/photo).
     if link_activity_id or extracted.activity_name or extracted.provider:
+        # Vertical: trust the extractor's canonical claim, else derive from the
+        # free-text category, else camp. An event_kind implies school_event.
+        atype = (extracted.activity_type or "").strip().lower()
+        if atype not in verticals.ACTIVITY_TYPES:
+            atype = (verticals.SCHOOL_EVENT if extracted.event_kind
+                     else verticals.derive_from_category(extracted.category))
+        from app import observability as obs
+        obs.count("ingest.extracted.items",
+                  event_kind=extracted.event_kind or "none")
+
         pending_reason = _eligibility_check(extracted, kids)
         if link_activity_id is not None:
             activity_id = link_activity_id  # email from a tracked camp — reuse it
         else:
-            # R1: ingested items land in the "exploring" shortlist (considering,
-            # not decided) unless an eligibility issue forces pending.
+            # BLAST-RADIUS LAW (plan Phase 5): ingested items land
+            # exploring/pending ONLY — never auto-WATCHED, so registration side
+            # effects can't fire off an extraction.
             status = "pending_eligibility" if pending_reason else "exploring"
             contact = extracted.contact.model_dump() if extracted.contact else None
             signup_url = next((l.url for l in extracted.links if l.url), None)
@@ -245,15 +323,19 @@ def materialize(
                 "age_max": extracted.age_max,
                 "forms_required": extracted.forms_required,
                 "is_welcome_letter": extracted.is_welcome_letter,
+                "event_kind": extracted.event_kind,
+                # Provenance (plan rule): a wrong deadline shown naked is worse
+                # than none; beside its verbatim source it's self-correcting.
+                "source_snippet": extracted.source_snippet,
+                # Correction telemetry joins edits back to the extraction.
+                "source_artifact_id": artifact_id,
             }
             activity_id = storage.track_activity(
                 user_id,
                 name=extracted.activity_name or extracted.provider,
                 kid_name=extracted.kid_fit,
                 provider=extracted.provider,
-                # Ingest is camp-scoped until Phase 5 teaches the extractor the
-                # school-event taxonomy (event_kind -> typed task chains).
-                activity_type=verticals.CAMP,
+                activity_type=atype,
                 status=status,
                 pending_reason=pending_reason,
                 price_amount=extracted.amount_due,
@@ -262,6 +344,15 @@ def materialize(
                 contact=contact,
                 details=details,
             )
+            # single_date model: a school event with ONE resolved date is that
+            # day, not a week block (format_when renders "Mar 14").
+            if atype == verticals.SCHOOL_EVENT and len(extracted.dates) == 1:
+                try:
+                    d = extracted.dates[0][:10]
+                    storage.set_activity_dates(activity_id, start_date=d, end_date=d)
+                except Exception as exc:  # noqa: BLE001 — a bad date string
+                    logger.warning("[ingest] single-date skipped for %r: %s",
+                                   extracted.dates, exc)
         created["activity_id"] = activity_id
 
         # Calendar entries for resolvable dates.
@@ -275,7 +366,7 @@ def materialize(
                     start_ts=d,
                     all_day=True,
                     location_text=extracted.location,
-                    kind=verticals.KIND_FOR_TYPE[verticals.CAMP],
+                    kind=verticals.KIND_FOR_TYPE.get(atype, "event"),
                     status="pending",
                     source="email" if extracted.is_welcome_letter else "manual",
                 )
@@ -299,6 +390,20 @@ def materialize(
             ))
         for form in extracted.forms_required:
             todos.append((f"Submit form: {form}", "form", None))
+        # School-event task chain (app/ingest/taxonomy.py): add each chain item
+        # only when no todo of that KIND exists yet — the extractor's own
+        # action_items/forms usually cover the obvious one already.
+        from app.ingest.taxonomy import chain_for
+        have_kinds = {kind for _, kind, _ in todos}
+        for title, kind, due in chain_for(extracted):
+            if kind not in have_kinds:
+                todos.append((title, kind, due))
+        # Provenance rides every extracted to-do: the deadline is shown beside
+        # the verbatim sentence that produced it.
+        snippet = (extracted.source_snippet or "").strip()
+        detail = (f'From: "{snippet[:140]}" — auto-created from an ingested '
+                  "message/photo, review." if snippet else
+                  "Auto-created from an ingested message/photo — review.")
         for title, kind, due in todos:
             try:
                 todo_id = storage.add_todo(
@@ -307,7 +412,7 @@ def materialize(
                     kid_name=extracted.kid_fit,
                     activity_id=activity_id,
                     kind=kind,
-                    detail="Auto-created from an ingested message/photo — review.",
+                    detail=detail,
                     due_date=due,
                     source="email" if extracted.is_welcome_letter else "manual",
                     source_artifact_id=artifact_id,
@@ -317,3 +422,50 @@ def materialize(
                 logger.warning("[ingest] todo skipped for %r: %s", title, exc)
 
     return created
+
+
+# Per-artifact materialization cap (blast radius): a runaway extraction (or a
+# prompt-injected one) can name dozens of "activities" — everything past the
+# cap is PARKED in the artifact's extraction json for review, never silently
+# dropped-as-if-covered (the no-silent-caps telemetry rule).
+MAX_ITEMS_PER_ARTIFACT = int(os.getenv("INGEST_MAX_ITEMS_PER_ARTIFACT", "5"))
+
+
+def materialize_all(
+    storage: Any,
+    user_id: str,
+    artifact_id: str,
+    items: List[ExtractedActivity],
+    *,
+    kids: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Loop materialize() over every extracted item, capped. Returns
+    {"items": [{extracted, created}...], "parked": N}."""
+    from app import observability as obs
+
+    to_make = items[:MAX_ITEMS_PER_ARTIFACT]
+    parked = items[MAX_ITEMS_PER_ARTIFACT:]
+    if parked:
+        obs.count("ingest.caps.hit", cap="per_artifact")
+        logger.warning(
+            "[ingest] artifact %s: %d item(s) past the cap parked for review",
+            artifact_id, len(parked),
+        )
+    out: List[Dict[str, Any]] = []
+    for item in to_make:
+        try:
+            created = materialize(storage, user_id, artifact_id, item, kids=kids)
+        except Exception:  # noqa: BLE001 — one bad item must not eat the rest
+            logger.exception("[ingest] materialize failed for one item")
+            obs.count("ingest.extraction.failed", stage="materialize")
+            created = {"activity_id": None, "todo_ids": [], "calendar_ids": []}
+        out.append({"extracted": item.model_dump(), "created": created})
+    # The artifact keeps the FULL extraction (incl. parked items) — written
+    # last so it reflects every item, not just the first materialized one.
+    storage.update_ingest_extraction(
+        artifact_id,
+        extracted_json={"items": [i.model_dump() for i in items],
+                        "parked": len(parked)},
+        extract_status="extracted",
+    )
+    return {"items": out, "parked": len(parked)}

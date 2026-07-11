@@ -130,6 +130,11 @@ def test_type_degradation_counting(counted):
     verticals.get_profile("  OUTING ")
     assert counted == []  # NULLs + registered types never count
 
-    verticals.get_profile("school_event")  # canonical, unregistered (Phase 5)
+    expected = ["cos.type.degraded"]
     verticals.get_profile("garbage")
-    assert [c[0] for c in counted] == ["cos.type.degraded", "cos.type.degraded"]
+    # Canonical-but-unregistered types also count (set shrinks phase by phase).
+    pending = sorted(verticals.ACTIVITY_TYPES - set(verticals.REGISTRY))
+    for key in pending:
+        verticals.get_profile(key)
+        expected.append("cos.type.degraded")
+    assert [c[0] for c in counted] == expected

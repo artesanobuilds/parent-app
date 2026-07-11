@@ -213,7 +213,12 @@ def format_when(activity: Dict[str, Any]) -> Optional[str]:
         if until:
             bits.append(f"through {until}")
         return " ".join(bits)
-    anchor = activity.get("week_start") or activity.get("start_date")
+    start = activity.get("start_date")
+    end = activity.get("end_date")
+    # single_date (school events): one day is that DAY, not a week block.
+    if start and end and str(start)[:10] == str(end)[:10]:
+        return _short_date(start)
+    anchor = activity.get("week_start") or start
     short = _short_date(anchor)
     return f"Week of {short}" if short else None
 

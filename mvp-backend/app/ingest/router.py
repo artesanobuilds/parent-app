@@ -50,14 +50,28 @@ class IngestTextRequest(BaseModel):
     sender: Optional[str] = None
 
 
-def _materialize_response(
-    storage: Any, user_id: str, artifact_id: str, extracted: Any, created: Dict[str, Any]
-) -> Dict[str, Any]:
+def _capture(event: str, user_id: str, props: Dict[str, Any]) -> None:
+    try:
+        from app.analytics import capture
+        capture(event, user_id, props)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _multi_response(artifact_id: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Multi-item response (Phase 5). The legacy single-item `extracted` +
+    `created` keys stay populated with the FIRST item so older installed iOS
+    builds keep decoding against the new backend (cross-surface rule)."""
+    items = result.get("items") or []
+    first = items[0] if items else {"extracted": {}, "created": {
+        "activity_id": None, "todo_ids": [], "calendar_ids": []}}
     return {
         "artifact_id": artifact_id,
         "extract_status": "extracted",
-        "extracted": extracted.model_dump(),
-        "created": created,
+        "items": items,
+        "parked": result.get("parked", 0),
+        "extracted": first["extracted"],
+        "created": first["created"],
     }
 
 
@@ -81,19 +95,22 @@ def ingest_text(req: IngestTextRequest, user_id: str = Depends(current_user)):
         sender=req.sender,
         raw_text=req.text,
     )
+    _capture("ingest_uploaded", user_id, {"kind": "text"})
     try:
-        extracted = ingest_extract.extract_from_text(
+        items = ingest_extract.extract_items_from_text(
             req.text, source_hint=req.source, cost_user=user_id
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("[ingest/text] extraction failed: %s", exc)
         storage.update_ingest_extraction(artifact_id, extract_status="failed")
+        from app import observability as obs
+        obs.count("ingest.extraction.failed", stage="text")
         raise HTTPException(status_code=502, detail="extraction failed")
 
-    created = ingest_extract.materialize(
-        storage, user_id, artifact_id, extracted, kids=_kids_from_profile(user_id)
+    result = ingest_extract.materialize_all(
+        storage, user_id, artifact_id, items, kids=_kids_from_profile(user_id)
     )
-    return _materialize_response(storage, user_id, artifact_id, extracted, created)
+    return _multi_response(artifact_id, result)
 
 
 @router.post("/image")
@@ -134,19 +151,22 @@ async def ingest_image(
         media_type="image",
         subject=file.filename,
     )
+    _capture("ingest_uploaded", user_id, {"kind": "image"})
     try:
-        extracted = ingest_extract.extract_from_image(
+        items = ingest_extract.extract_items_from_image(
             image_b64, mime_type=mime, caption=caption, cost_user=user_id
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("[ingest/image] vision extraction failed: %s", exc)
         storage.update_ingest_extraction(artifact_id, extract_status="failed")
+        from app import observability as obs
+        obs.count("ingest.extraction.failed", stage="image")
         raise HTTPException(status_code=502, detail="extraction failed")
 
-    created = ingest_extract.materialize(
-        storage, user_id, artifact_id, extracted, kids=_kids_from_profile(user_id)
+    result = ingest_extract.materialize_all(
+        storage, user_id, artifact_id, items, kids=_kids_from_profile(user_id)
     )
-    return _materialize_response(storage, user_id, artifact_id, extracted, created)
+    return _multi_response(artifact_id, result)
 
 
 @router.get("/artifacts")

@@ -176,6 +176,12 @@
       - {name: "Coding Camp", status: planned, kid_name: Mar, price_amount: 500}
   expect_any: [UpdateActivity]
 
+- id: school-picture-day
+  # Phase 5: a stated school event must get CAPTURED (tracked / calendared /
+  # to-do'd — any concrete capture action is correct; ignoring it is not).
+  message: "Picture day at Ceiba's school is March 14 — put it on my radar."
+  expect_any: [TrackActivity, AddToCalendar, AddTodo]
+
 - id: watch-registration
   # Phase 4: a stated registration-open date must become a watched window,
   # with the date actually passed through.

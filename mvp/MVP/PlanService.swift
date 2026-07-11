@@ -401,6 +401,11 @@ struct IngestExtraction: Codable, Hashable {
     let amountDue: Double?
     let actionItems: [String]?
     let confidence: Double?
+    /// Phase 5 (school life): the vertical + school-event kind, and the
+    /// verbatim quote the deadline came from (provenance — always shown).
+    let activityType: String?
+    let eventKind: String?
+    let sourceSnippet: String?
 
     enum CodingKeys: String, CodingKey {
         case provider, location, hours, dates, confidence
@@ -408,6 +413,9 @@ struct IngestExtraction: Codable, Hashable {
         case kidFit = "kid_fit"
         case amountDue = "amount_due"
         case actionItems = "action_items"
+        case activityType = "activity_type"
+        case eventKind = "event_kind"
+        case sourceSnippet = "source_snippet"
     }
 
     /// Best display label: the activity name, else the provider.
@@ -432,16 +440,33 @@ struct IngestCreated: Codable, Hashable {
 }
 
 /// POST /ingest/{text,image} response.
+/// One extracted item + what it spawned (Phase 5: a newsletter yields many).
+struct IngestItem: Codable, Hashable {
+    let extracted: IngestExtraction
+    let created: IngestCreated
+}
+
 struct IngestResponse: Codable, Hashable {
     let artifactId: String
     let extractStatus: String
+    // Legacy single-item keys (first item) — kept for old builds' decoding.
     let extracted: IngestExtraction
     let created: IngestCreated
+    /// Phase 5: EVERY item found (a PTA newsletter = several). Optional so
+    /// this build also decodes pre-Phase-5 backend responses.
+    let items: [IngestItem]?
+    /// Items past the per-artifact cap, parked in the artifact for review.
+    let parked: Int?
 
     enum CodingKeys: String, CodingKey {
-        case extracted, created
+        case extracted, created, items, parked
         case artifactId = "artifact_id"
         case extractStatus = "extract_status"
+    }
+
+    var allItems: [IngestItem] {
+        if let items, !items.isEmpty { return items }
+        return [IngestItem(extracted: extracted, created: created)]
     }
 }
 

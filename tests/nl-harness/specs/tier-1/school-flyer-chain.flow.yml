@@ -1,0 +1,43 @@
+spec:
+  name: school-flyer-chain
+  tier: 1
+  modules: [ingest, cos]
+  intent: >
+    V4 school-life (vertical expansion Phase 5): a parent pastes a multi-item
+    PTA newsletter (picture day + fundraiser + permission slip + spirit week)
+    into /ingest/text. Extraction must return MULTIPLE items (the
+    List[ExtractedActivity] refactor), materialize them as pending/exploring
+    school events with TYPED task-chain to-dos (form/payment/action), and the
+    board must render them as typed cards. Nothing is auto-confirmed (the
+    pending-never-auto-confirmed law) and nothing lands beyond the
+    per-artifact cap silently (parked count is reported).
+
+  personas:
+    parent:
+      preset: existing-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "RUN_OPENAI_FLOWS=true (extraction is a live LLM call; skipped otherwise)"
+
+  invariants:
+    - "POST /ingest/text with the newsletter returns 200 with >=2 items"
+    - "At least one created activity is typed school_event on the board"
+    - "The created to-dos include at least one form or payment kind (the task chain)"
+    - "No created activity lands in a WATCHED status (exploring/pending only)"
+
+  boundary_contracts:
+    - endpoint: POST /ingest/text
+      as: parent
+      status: 200
+      response_includes: [artifact_id, items, parked]
+
+    - endpoint: GET /cos/plan/board
+      as: parent
+      status: 200
+      response_includes: [stages]
+
+    - endpoint: GET /cos/todos
+      as: parent
+      status: 200
+      response_includes: [todos]
