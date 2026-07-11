@@ -182,6 +182,26 @@ verify post-deploy with `list_prometheus_metric_names(regex="cos_.*")`):
 Both: no-data must be OK, not Alerting — these series don't exist until the
 first occurrence (that's the point).
 
+**Watchlist SLO alerts (Phase 4 — add these too; the dashboard's "Watchlist
+SLO" row visualizes the same signals).** Metric names: gauges keep their name
+(no `_total`): `watchlist_seconds_since_last_tick`, `watchlist_windows_watching`,
+`watchlist_windows_missed`; counters get `_total`:
+`watchlist_notifications_sent_total{kind, outcome}`,
+`watchlist_windows_created_total{source, confidence}`; histogram:
+`watchlist_notification_delay_seconds_bucket`.
+
+3. **Watchlist missed a window** — the product promise broken (a window opened
+   with no day-of notification): `max(watchlist_windows_missed) > 0`,
+   pending 0m. **No-data → OK** (gauge registers only when OTel is on and the
+   backend is up — a separate liveness concern).
+4. **Watchlist worker stalled** — sweep heartbeat dead; notifications stop
+   silently: `max(watchlist_seconds_since_last_tick) > 900` (3× the 300s
+   poll), pending 5m, no-data → OK.
+
+The GA gate from the plan is judged from this row + rules: watchlist beyond
+pilot metros only after the miss-detector alert runs clean through one real
+registration season.
+
 **Post-deploy smoke (binding, from the plan's telemetry verification):** fire one
 real action per instrument — track an activity with an rrule, open the doors
 endpoint, run a `pytest tests/test_date_model.py` locally is NOT enough (OTel is
