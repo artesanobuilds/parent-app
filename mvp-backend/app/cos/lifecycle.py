@@ -218,6 +218,11 @@ def format_when(activity: Dict[str, Any]) -> Optional[str]:
     # single_date (school events): one day is that DAY, not a week block.
     if start and end and str(start)[:10] == str(end)[:10]:
         return _short_date(start)
+    # date_range (trips): the profile decides — the same start/end data shape
+    # means "week block" for a camp but "Jun 14 – Jun 18" for a trip.
+    if (start and end
+            and get_profile(activity.get("activity_type")).date_model == "date_range"):
+        return f"{_short_date(start)} – {_short_date(end)}"
     anchor = activity.get("week_start") or start
     short = _short_date(anchor)
     return f"Week of {short}" if short else None
@@ -477,6 +482,24 @@ def on_enter_watched(storage: Any, user_id: str, activity: Dict[str, Any]) -> Di
                 source="cos_agent",
             )
             result["seeded"].append("action")
+
+        # Vertical-declared unconditional prep to-dos (e.g. a trip's packing
+        # list). Idempotent by rendered title — kinds legitimately collide.
+        existing_titles = {(t.get("title") or "") for t in existing}
+        for extra in wording.extras:
+            title = extra.title.format(name=name)
+            if title in existing_titles:
+                continue
+            storage.add_todo(
+                user_id,
+                title=title,
+                kid_name=activity.get("kid_name"),
+                activity_id=aid,
+                kind=extra.kind,
+                detail=extra.detail,
+                source="cos_agent",
+            )
+            result["seeded"].append(extra.kind)
 
         if connected and profile.email_sync:
             storage.create_email_sync_run(user_id=user_id, trigger="activity_registered")

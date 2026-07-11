@@ -3023,10 +3023,13 @@ class DuckDBStorage(StorageBackend):
         """THE date write path for tracked activities (v17) — no caller writes
         week_start/start_date/rrule columns directly.
 
-        Two live shapes (Phase 2 scope):
+        Shapes (by the vertical's date_model):
         - week_block (no rrule): ``start_date`` anchors the week —
           ``week_start`` is DERIVED (= start_date) and ``end_date`` defaults to
           start_date + 4 days.
+        - single_date / date_range (no rrule, Phases 5–6): same start/end
+          columns, but a missing ``end_date`` defaults to ``start_date`` — a
+          school event or trip must never get a fabricated workweek.
         - recurring_weekly (rrule set): the RRULE string is the single source
           of truth; ``week_start`` is cleared, and the derived
           recurring_appointments row (activity_id back-reference) is
@@ -3036,9 +3039,14 @@ class DuckDBStorage(StorageBackend):
         if not activity:
             raise ValueError(f"tracked activity {activity_id} not found")
 
+        from app.cos.verticals import get_profile
+        profile_model = get_profile(activity.get("activity_type")).date_model
+
         from app import observability as obs
         obs.count("cos.dates.write",
-                  date_model="recurring_weekly" if rrule else "week_block")
+                  date_model="recurring_weekly" if rrule
+                  else profile_model if profile_model in ("single_date", "date_range")
+                  else "week_block")
 
         if rrule:
             self._con.execute(
@@ -3062,9 +3070,14 @@ class DuckDBStorage(StorageBackend):
         if start_date:
             derived_end = end_date
             if derived_end is None:
-                from datetime import date, timedelta
-                derived_end = (date.fromisoformat(str(start_date)[:10])
-                               + timedelta(days=4)).isoformat()
+                if profile_model in ("single_date", "date_range"):
+                    # One stated day IS the item (picture day, a trip whose
+                    # return date isn't known yet) — never fabricate a week.
+                    derived_end = str(start_date)[:10]
+                else:
+                    from datetime import date, timedelta
+                    derived_end = (date.fromisoformat(str(start_date)[:10])
+                                   + timedelta(days=4)).isoformat()
             self._con.execute(
                 """
                 UPDATE tracked_activities

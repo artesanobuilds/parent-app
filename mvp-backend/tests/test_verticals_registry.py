@@ -87,8 +87,25 @@ def test_all_wording_templates_render():
         assert "{name}" in w.payment_title and "{price}" in w.payment_title
         w.payment_title.format(name="X", price="1")
         w.confirm_title.format(name="X")
+        for extra in w.extras:
+            assert extra.kind in {"payment", "form", "action", "task"}
+            extra.title.format(name="X")
+            assert extra.detail.strip()
         assert profile.research_focus.strip()
         assert profile.door.title and profile.door.starter_prompt
+
+
+def test_trip_profile_capabilities():
+    # Phase 6, deliberately thin: a trip covers its kids, watches nothing,
+    # and its only special behavior is registry DATA (the prep extras).
+    trip = verticals.REGISTRY[verticals.TRIP]
+    assert trip.date_model == "date_range"
+    assert trip.provides_coverage
+    assert not trip.email_sync and not trip.registration_watch
+    assert not trip.ingest_taxonomy
+    assert trip.flag == "vertical-v5-trips"
+    kinds = [e.kind for e in trip.todo_wording.extras]
+    assert kinds == ["action", "form", "action"]  # packing, consent, meds
 
 
 def test_get_profile_degrades_to_camp():
@@ -96,8 +113,8 @@ def test_get_profile_degrades_to_camp():
     assert verticals.get_profile(None) is camp
     assert verticals.get_profile("") is camp
     assert verticals.get_profile("garbage") is camp
-    # Canonical but not yet registered (school_event lands Phase 5, trip
-    # Phase 6): degrade, don't crash.
+    # Canonical but not yet registered (empty as of Phase 6 — all five are in;
+    # the loop guards any future taxonomy addition): degrade, don't crash.
     for pending in verticals.ACTIVITY_TYPES - set(verticals.REGISTRY):
         assert verticals.get_profile(pending) is camp
     assert verticals.get_profile("  OUTING ") is verticals.REGISTRY[verticals.OUTING]

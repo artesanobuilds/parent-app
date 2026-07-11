@@ -314,3 +314,29 @@ def test_chat_agent_knows_planned():
     tools_src = (BACKEND_ROOT / "app/cos/tools.py").read_text()
     assert '"planned"' in agent_src
     assert "planned" in tools_src
+
+
+def test_on_enter_watched_trip_seeds_prep_todos_idempotently(store):
+    # Phase 6: a booked trip seeds its registry-declared prep extras —
+    # packing (action), travel consent (form), meds & documents (action) —
+    # alongside the payment todo, and never double-seeds.
+    uid = "life-user-trip"
+    aid = store.track_activity(uid, name="Tahoe", status="planned",
+                               activity_type="trip", price_amount=900.0)
+    activity = store.get_tracked_activity(aid)
+
+    lifecycle.on_enter_watched(store, uid, activity)
+    todos = [t for t in store.list_todos(uid) if t.get("activity_id") == aid]
+    titles = {t["title"] for t in todos}
+    assert "Make the packing list for Tahoe" in titles
+    assert "Travel consent letter for Tahoe" in titles
+    assert "Meds & documents for Tahoe" in titles
+    consent = next(t for t in todos if "consent" in t["title"].lower())
+    assert consent["kind"] == "form"
+    assert sorted(t["kind"] for t in todos) == [
+        "action", "action", "action", "form", "payment",
+    ]  # 2 extras actions + forward-confirmation action
+
+    lifecycle.on_enter_watched(store, uid, activity)
+    again = [t for t in store.list_todos(uid) if t.get("activity_id") == aid]
+    assert len(again) == len(todos)

@@ -12,16 +12,16 @@ conditionals ("seed a payment to-do when price is known") stay in code —
 Structural divergence promotes to a strategy function only on the SECOND real
 occurrence, never speculatively.
 
-Profiles are registered in the phase that ships their vertical: camp (V1) and
-outing (V3, built) today; extracurricular lands with Phase 3, school_event
-with Phase 5, trip with Phase 6. A canonical type with no registered profile
-degrades to the camp profile — mirroring how `lifecycle.stage_for` degrades
-unknown statuses — so pre-registration rows never crash anything.
+Profiles are registered in the phase that ships their vertical: all five are
+in as of Phase 6 (camp V1, extracurricular V2, outing V3, school_event V4,
+trip V5). A canonical type with no registered profile degrades to the camp
+profile — mirroring how `lifecycle.stage_for` degrades unknown statuses — so
+a future taxonomy addition never crashes anything.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 CAMP = "camp"
 EXTRACURRICULAR = "extracurricular"
@@ -52,7 +52,7 @@ KIND_FOR_TYPE = {
     EXTRACURRICULAR: "class",
     OUTING: "event",
     SCHOOL_EVENT: "event",
-    TRIP: "camp",  # placeholder until Phase 6 adds the date_range model
+    TRIP: "trip",
 }
 
 
@@ -75,18 +75,33 @@ def derive_from_category(category: Optional[str]) -> str:
 
 
 @dataclass(frozen=True)
+class ExtraTodo:
+    """One unconditional baseline to-do a vertical seeds on entering WATCHED
+    (e.g. a trip's packing list). Pure wording — `{name}` = activity name."""
+
+    kind: str  # payment | form | action | task
+    title: str
+    detail: str
+
+
+@dataclass(frozen=True)
 class TodoWording:
     """Templates for the baseline to-dos seeded when an activity is registered.
 
     `{name}` = activity name; `{price}` = pre-formatted amount (no `$`).
     The camp templates must render EXACTLY the strings the lifecycle tests
     lock — wording lives here, the seeding conditionals stay in lifecycle.
+    `extras` are seeded unconditionally (idempotent by rendered title) —
+    added in Phase 6 when trips needed prep to-dos that aren't tied to a
+    price or Gmail state (the dataclass "fought back"; second shape change
+    would promote to a strategy, this one stays data).
     """
 
     payment_title: str
     payment_detail: str
     confirm_title: str
     confirm_detail: str
+    extras: Tuple[ExtraTodo, ...] = field(default=())
 
 
 @dataclass(frozen=True)
@@ -236,6 +251,55 @@ REGISTRY: Dict[str, VerticalProfile] = {
         ingest_taxonomy=False,
         harness_spec="tier-1/cos-quick-outings.flow.yml",
     ),
+    TRIP: VerticalProfile(
+        key=TRIP,
+        label="Family trips",
+        chip_label="Trip",
+        date_model="date_range",
+        # A trip week is covered childcare — it must never read as a gap.
+        provides_coverage=True,
+        todo_wording=TodoWording(
+            payment_title="Pay ${price} for {name}",
+            payment_detail="Added when you marked this booked — check it off once paid.",
+            confirm_title="Forward or paste {name}'s booking confirmation",
+            confirm_detail=(
+                "Gmail isn't connected, so I can't watch for it automatically — "
+                "paste it in and I'll pull out the dates and payments."
+            ),
+            extras=(
+                ExtraTodo(
+                    kind="action",
+                    title="Make the packing list for {name}",
+                    detail="Clothes for the dates, sleep comforts, chargers — start it early.",
+                ),
+                ExtraTodo(
+                    kind="form",
+                    title="Travel consent letter for {name}",
+                    detail=(
+                        "If one parent travels alone, a signed consent letter from the "
+                        "other parent avoids questions at airports and borders."
+                    ),
+                ),
+                ExtraTodo(
+                    kind="action",
+                    title="Meds & documents for {name}",
+                    detail="Medications, insurance cards, and each kid's ID or passport.",
+                ),
+            ),
+        ),
+        research_focus="family trip destination logistics details location",
+        door=Door(
+            title="Family trips",
+            subtitle="Dates, both calendars, packing — not bookings.",
+            starter_prompt="Help me get our family trip onto the plan.",
+        ),
+        email_sync=False,
+        registration_watch=False,
+        ingest_taxonomy=False,
+        # Door visibility only — organic trip items always render on the board.
+        flag="vertical-v5-trips",
+        harness_spec="tier-1/trip-week.flow.yml",
+    ),
 }
 
 
@@ -280,6 +344,18 @@ def get_profile(activity_type: Optional[str]) -> VerticalProfile:
         from app import observability as obs
         obs.count("cos.type.degraded")
     return profile if profile is not None else REGISTRY[DEFAULT_ACTIVITY_TYPE]
+
+
+def date_model_of(activity: Dict) -> str:
+    """The EFFECTIVE date model of a tracked-activity row, for analytics —
+    decided by the data shape first (an rrule is recurring regardless of
+    profile), then by the vertical for the start/end shapes."""
+    if activity.get("rrule"):
+        return "recurring_weekly"
+    if not activity.get("start_date"):
+        return "none"
+    model = get_profile(activity.get("activity_type")).date_model
+    return model if model in ("single_date", "date_range") else "week_block"
 
 
 def default_doors() -> List[VerticalProfile]:

@@ -188,11 +188,11 @@ def track_activity(body: TrackActivityBody, user_id: str = Depends(current_user)
     # Read the created row back so the event carries the DERIVED type (a
     # candidate's category may have decided it) + the actual date model.
     created = storage.get_tracked_activity(activity_id) or {}
+    from app.cos.verticals import date_model_of
     _track("activity_tracked", user_id, {
         "status": (payload.get("status") or "considering"),
         "activity_type": created.get("activity_type"),
-        "date_model": ("recurring_weekly" if created.get("rrule")
-                       else "week_block" if created.get("start_date") else "none"),
+        "date_model": date_model_of(created),
     })
     # Created straight into a watched status (= already registered) — fire the
     # same registration side effects as a transition (see cos/lifecycle).

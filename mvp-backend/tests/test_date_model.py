@@ -235,3 +235,68 @@ def test_uncovered_weeks_linked_camp_kind_mismatch_still_covers():
     assert planning.uncovered_weeks(entries, ["2026-07-13"], _KIDS, tracked) == []
     # ...and without the tracked join it would have been a gap (fallback).
     assert planning.uncovered_weeks(entries, ["2026-07-13"], _KIDS) != []
+
+
+# ── date_range (trips, Phase 6) ──────────────────────────────────────
+
+
+def test_trip_stores_the_real_range_and_renders_it(store):
+    aid = store.track_activity(
+        "u1", name="Tahoe with the kids", activity_type="trip",
+        start_date="2026-06-14", end_date="2026-06-18",
+    )
+    got = store.get_tracked_activity(aid)
+    assert got["start_date"] == "2026-06-14"
+    assert got["end_date"] == "2026-06-18"
+    # week_start stays the anchor week so week-scoped queries still see it.
+    assert got["week_start"] == "2026-06-14"
+    assert lifecycle.format_when(got) == "Jun 14 – Jun 18"
+
+
+def test_trip_range_crossing_months_renders_both(store):
+    aid = store.track_activity(
+        "u1", name="Grandma's", activity_type="trip",
+        start_date="2026-06-28", end_date="2026-07-02",
+    )
+    assert lifecycle.format_when(store.get_tracked_activity(aid)) == "Jun 28 – Jul 2"
+
+
+def test_trip_missing_end_defaults_to_start_not_a_fabricated_week(store):
+    aid = store.track_activity(
+        "u1", name="Day trip", activity_type="trip", start_date="2026-06-14",
+    )
+    got = store.get_tracked_activity(aid)
+    assert got["end_date"] == "2026-06-14"
+    assert lifecycle.format_when(got) == "Jun 14"
+
+
+def test_school_event_missing_end_is_a_single_day(store):
+    # Phase 6 fixed the latent Phase-5 edge: the agent path often passes only
+    # start_date — a picture day must never grow a fabricated workweek.
+    aid = store.track_activity(
+        "u1", name="Picture Day", activity_type="school_event",
+        start_date="2027-03-14",
+    )
+    got = store.get_tracked_activity(aid)
+    assert got["end_date"] == "2027-03-14"
+    assert lifecycle.format_when(got) == "Mar 14"
+
+
+def test_same_range_still_a_week_for_camps(store):
+    # The date_range rendering is profile-decided: identical start/end data on
+    # a CAMP keeps the week-block rendering.
+    aid = store.track_activity(
+        "u1", name="Camp Galileo", activity_type="camp",
+        start_date="2026-06-14", end_date="2026-06-18",
+    )
+    assert lifecycle.format_when(store.get_tracked_activity(aid)) == "Week of Jun 14"
+
+
+def test_uncovered_weeks_linked_trip_covers():
+    entries = [{"kid_name": "Ceiba", "week_start": "2026-06-14",
+                "kind": "trip", "activity_id": "act-trip"}]
+    tracked = [{"id": "act-trip", "activity_type": "trip"}]
+    # Linked trip covers by vertical (provides_coverage=True)...
+    assert planning.uncovered_weeks(entries, ["2026-06-14"], _KIDS, tracked) == []
+    # ...while the bare kind="trip" is NOT in the legacy fallback kind-set.
+    assert planning.uncovered_weeks(entries, ["2026-06-14"], _KIDS) != []

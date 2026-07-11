@@ -160,11 +160,12 @@ def _make_track_activity_tool(user_id: str):
         decides). ``price_status`` is "tbd" or "confirmed".
 
         Dates: for a specific week pass ``start_date`` (ISO date; optional
-        ``end_date``). For a WEEKLY class/practice pass ``rrule`` (RFC-5545,
-        FREQ=WEEKLY with ONE BYDAY, e.g. "FREQ=WEEKLY;BYDAY=TU") plus
-        ``recur_time`` "HH:MM" (optional ``recur_duration_min``, and
-        ``start_date``/``end_date`` as the active period). Returns a short
-        confirmation including the new id.
+        ``end_date``). For a TRIP or single-day school event pass the real
+        ``start_date`` AND ``end_date`` (equal for one day). For a WEEKLY
+        class/practice pass ``rrule`` (RFC-5545, FREQ=WEEKLY with ONE BYDAY,
+        e.g. "FREQ=WEEKLY;BYDAY=TU") plus ``recur_time`` "HH:MM" (optional
+        ``recur_duration_min``, and ``start_date``/``end_date`` as the active
+        period). Returns a short confirmation including the new id.
         """
         rrule_error = _weekly_rrule_error(rrule)
         if rrule_error:
@@ -220,8 +221,7 @@ def _capture_tracked(user_id: str, activity_id: str) -> None:
         capture("activity_tracked", user_id, {
             "status": a.get("status") or "exploring",
             "activity_type": a.get("activity_type"),
-            "date_model": ("recurring_weekly" if a.get("rrule")
-                           else "week_block" if a.get("start_date") else "none"),
+            "date_model": cos_verticals.date_model_of(a),
         })
     except Exception:  # noqa: BLE001 — analytics must never break the tool
         pass

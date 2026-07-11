@@ -159,7 +159,10 @@
 
 - id: blackout-week
   message: "Block out the week of July 20 — we'll be at grandma's."
-  expect_any: [AddToCalendar]
+  # Since the Phase-6 trips section, a stay at grandma's is a TRIP —
+  # TrackActivity(activity_type=trip) is now a designed (richer) capture; the
+  # bare AddToCalendar block-out remains acceptable.
+  expect_any: [AddToCalendar, TrackActivity]
 
 - id: caregiver-fridays
   message: "Grandma can do pickups on Fridays."
@@ -189,3 +192,13 @@
   expect_any: [WatchRegistration]
   expect_args:
     WatchRegistration: {opens_at: "08-12"}
+
+- id: family-trip
+  # Phase 6: a stated trip must be tracked with the REAL date range (never a
+  # fabricated week block) so it covers its days and renders "Jun 14 – Jun 18".
+  # "next year" keeps the date unambiguous on any run date — a bare June date
+  # can be in the past, where a clarifying question is legitimately correct.
+  message: "We're taking the kids to Lake Tahoe June 14 through 18 next year — get that on the plan."
+  expect_any: [TrackActivity]
+  expect_args:
+    TrackActivity: {activity_type: "trip", start_date: "06-14", end_date: "06-18"}

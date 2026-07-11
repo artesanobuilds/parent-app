@@ -109,3 +109,49 @@ def test_v2_door_to_typed_board_card(client, auth, monkeypatch):
 
     # Cleanup for repeatability within the shared module DB.
     client.delete(f"/cos/activities/{activity_id}", headers=auth)
+
+
+def test_v5_trip_door_to_range_card_and_prep_todos(client, auth, monkeypatch):
+    # 1) Door gated by its flag (env kill-switch, same mechanism as V2).
+    monkeypatch.setenv("FLAG_VERTICAL_V5_TRIPS", "0")
+    doors = {d["key"] for d in client.get("/cos/verticals", headers=auth).json()["verticals"]}
+    assert "trip" not in doors
+    monkeypatch.setenv("FLAG_VERTICAL_V5_TRIPS", "1")
+    doors = {d["key"]: d for d in client.get("/cos/verticals", headers=auth).json()["verticals"]}
+    assert "trip" in doors and doors["trip"]["starter_prompt"]
+
+    # 2) Track a booked trip with its REAL range, as the agent/UI would.
+    resp = client.post(
+        "/cos/activities/track",
+        headers=auth,
+        json={
+            "user_id": USER,
+            "name": "Tahoe with the kids",
+            "activity_type": "trip",
+            "status": "signed_up",
+            "start_date": "2026-06-14",
+            "end_date": "2026-06-18",
+            "price_amount": 900.0,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    activity_id = resp.json()["id"]
+
+    # 3) Board: typed card + the range when line (never "Week of ...").
+    board = client.get("/cos/plan/board", headers=auth).json()
+    cards = [a for s in board["stages"] for a in s["activities"] if a["id"] == activity_id]
+    assert cards, "tracked trip missing from board"
+    assert cards[0]["activity_type"] == "trip"
+    assert cards[0]["when"] == "Jun 14 – Jun 18"
+
+    # 4) Created straight into signed_up → the enter-WATCHED hook seeded the
+    # trip prep extras alongside the payment to-do.
+    todos = client.get("/cos/todos", headers=auth).json()["todos"]
+    mine = [t for t in todos if t.get("activity_id") == activity_id]
+    titles = " | ".join(t["title"] for t in mine)
+    assert "packing list" in titles.lower()
+    assert "consent" in titles.lower()
+    assert any(t["kind"] == "form" for t in mine)
+
+    # Cleanup for repeatability within the shared module DB.
+    client.delete(f"/cos/activities/{activity_id}", headers=auth)

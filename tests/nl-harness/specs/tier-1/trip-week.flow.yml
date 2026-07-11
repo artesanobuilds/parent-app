@@ -1,0 +1,45 @@
+spec:
+  name: trip-week
+  tier: 1
+  modules: [cos, chat, profile]
+  intent: >
+    V5 family trips (vertical expansion Phase 6): a parent tells the agent
+    about a booked family trip with real dates ("we're taking the kids to
+    Lake Tahoe June 14 through 18 — already booked"). The agent must track it
+    as a signed_up activity typed trip carrying the date_range model (real
+    start AND end, never a fabricated week block), which the board renders
+    with a range "when" line ("Jun 14 – Jun 18") and the enter-WATCHED hook
+    seeds the trip prep to-dos (packing list, travel consent, meds & docs).
+    This is the black-box lock on the door's promise: dates, both calendars,
+    packing — not bookings.
+
+  personas:
+    parent:
+      preset: existing-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "RUN_OPENAI_FLOWS=true (/cos/chat runs against OpenAI; skipped otherwise)"
+
+  invariants:
+    - "POST /cos/chat about the booked trip completes with a non-empty reply"
+    - "GET /cos/activities?status=signed_up contains an activity whose name references Tahoe with activity_type=trip"
+    - "The activity carries the real range: start_date and end_date are both set and differ"
+    - "GET /cos/plan/board renders the card with a range when string (contains both dates)"
+    - "The trip prep to-dos were seeded: a packing to-do exists for the activity"
+
+  boundary_contracts:
+    - endpoint: POST /cos/chat
+      as: parent
+      streaming: true
+      status: 200
+
+    - endpoint: GET /cos/activities
+      as: parent
+      status: 200
+      response_includes: [activities]
+
+    - endpoint: GET /cos/plan/board
+      as: parent
+      status: 200
+      response_includes: [stages]
