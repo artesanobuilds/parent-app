@@ -1,0 +1,47 @@
+spec:
+  name: cos-quick-outings
+  tier: 1
+  modules: [cos, chat, profile]
+  intent: >
+    The Chief-of-Staff can fulfil LIGHTWEIGHT planning asks — "what can we do with
+    the kids this weekend?" — without any of the camp/school lifecycle. This is the
+    ephemeral SuggestOutings path (its own flow, not the heavy discovery→board
+    pipeline). A parent with two very young kids (a toddler + an infant) asks for
+    weekend ideas in a named city; the agent should ask how many they'd like, then
+    return that many age-appropriate outings — and, crucially, save NOTHING to the
+    plan (no tracked activity, no board card, no to-do). Verifies the conversational
+    contract (the count-ask + ephemerality), which the deterministic unit/E2E tests
+    can't observe.
+
+  personas:
+    parent:
+      preset: existing-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "RUN_OPENAI_FLOWS=true (/cos/chat + web search run against OpenAI/Tavily; skipped otherwise)"
+    - "A TAVILY key is configured on the backend so SuggestOutings can search"
+
+  invariants:
+    - "The flow re-seeds the parent's profile with a toddler (age 2.5) + an infant (age 0.4) so age-fit is exercised"
+    - "GET /cos/activities is empty before the outing turns (clean slate)"
+    - "POST /cos/chat 'what can we do with the kids in San Francisco this weekend?' streams a non-empty assistant reply"
+    - "POST /cos/chat 'three please' streams a non-empty assistant reply (the count answer is accepted)"
+    - "After BOTH turns, GET /cos/activities is STILL empty — the outing suggestions are ephemeral (no tracked activity created)"
+    - "After BOTH turns, GET /cos/plan/board shows no non-empty stage — nothing was pinned to the board"
+
+  boundary_contracts:
+    - endpoint: POST /cos/chat
+      as: parent
+      streaming: true
+      status: 200
+
+    - endpoint: GET /cos/activities
+      as: parent
+      status: 200
+      response_includes: [activities]
+
+    - endpoint: GET /cos/plan/board
+      as: parent
+      status: 200
+      response_includes: [stages]
