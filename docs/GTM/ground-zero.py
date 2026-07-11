@@ -128,7 +128,7 @@ def create_doc():
 
     meta = doc.add_paragraph()
     meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = meta.add_run('June 2026\nMiguel Alvarado, Heather Hannan-Kramer, Greg Harris')
+    run = meta.add_run('June 2026 · revised July 2026\nMiguel Alvarado, Heather Hannan-Kramer, Greg Harris')
     run.font.name = 'Georgia'
     run.font.size = Pt(11)
     run.font.color.rgb = INK_MUTED
@@ -149,6 +149,7 @@ def create_doc():
         '9. Beta Launch Plan',
         '10. Decisions from Our First Meeting',
         '11. Market Opportunity',
+        '12. Go-To-Market Strategy',
     ]
     for item in toc_items:
         p = doc.add_paragraph(item)
@@ -360,10 +361,13 @@ def create_doc():
     items = [
         ('Onboarding', 'A multi-step flow that learns about the parent and their children. '
          'Collects name, kid names/ages, parenting philosophy, challenges, location, '
-         'cultural background. Two paths: structured form or conversational chat with the AI.'),
+         'cultural background. Two paths: structured form or conversational chat with the AI. '
+         'Hardened after real beta-family incidents so a fresh install can never silently '
+         'lose a family\'s answers.'),
         ('Parent coaching agent', 'An AI assistant that remembers your family, adapts to your '
          'parenting style, and gives concrete, actionable advice. Not generic—it knows '
-         'your kid\'s age band, your co-parenting situation, your stressors.'),
+         'your kid\'s age band, your co-parenting situation, your stressors. Works by text '
+         'or real-time voice.'),
         ('Kid companion agents', 'One AI companion per child, automatically generated from '
          'the parent\'s profile. Age-appropriate personality. Voice-first interaction '
          '(the child speaks, the companion speaks back). Parent writes a "letter" that '
@@ -372,6 +376,15 @@ def create_doc():
          'other parents. Saved articles. Tag-based filtering.'),
         ('Handoff mode', 'Parent pins a kid companion, hands the device to the child. '
          'A curtain covers the parent UI. Child interacts only with their companion.'),
+        ('The Plan tab', 'A fifth tab, chat-first: the home of the family chief of staff '
+         '(detailed below)—Chat, Discover, Shortlist, and Calendar in one place, plus '
+         '"add from a message or photo" ingestion.'),
+        ('Settings & profile control', 'A full settings hub: edit everything the system '
+         'knows about you and each kid, review the family-wide "what we\'ve learned" '
+         'profile, add or delete a kid profile (with complete data cleanup), and connect '
+         'or disconnect Google accounts.'),
+        ('In-app debug reporting', 'One tap sends diagnostics to the team—how beta '
+         'families report issues without leaving the app.'),
     ]
     for title, desc in items:
         p = doc.add_paragraph()
@@ -381,7 +394,7 @@ def create_doc():
 
     doc.add_heading('The backend (deployed on Railway)', level=2)
     items = [
-        ('AI agent pipeline', 'Powered by OpenAI\'s latest model (GPT-5.2). Each kid companion '
+        ('AI agent pipeline', 'Powered by OpenAI\'s latest model (GPT-5.5). Each kid companion '
          'runs through a multi-stage pipeline: prompt synthesis (builds the system prompt from '
          'the parent\'s letter + kid profile), then streams responses through a real-time '
          'moderation pipeline.'),
@@ -391,18 +404,62 @@ def create_doc():
         ('Crisis detection', 'Self-harm, abuse, and suicide language triggers an instant '
          'parent notification, conversation lock, and crisis resources displayed to the child. '
          'The agent cannot be restarted until the parent explicitly intervenes.'),
-        ('Voice pipeline (v2 in progress)', 'Real-time voice via ElevenLabs Conversational AI. '
-         'WebRTC audio—under 150ms latency from the child speaking to the companion responding. '
-         'The child just talks; no typing required.'),
+        ('Voice pipeline (v2 — shipped)', 'Real-time voice via ElevenLabs Conversational AI, '
+         'live for both kid companions and the parent coach. WebRTC audio—under 150ms latency '
+         'from the child speaking to the companion responding. The child just talks; '
+         'no typing required.'),
         ('Intelligent family profile', 'Every interaction—parent coaching session, kid conversation, '
          'onboarding answer—feeds back into a living profile of the family. The system learns '
          'parenting style, kid temperaments, recurring challenges, and communication patterns '
          'over time. This isn\'t a static form you fill out once; it\'s a profile that gets '
          'smarter with every conversation, so the advice gets more relevant the longer you use it.'),
         ('Content management system', 'A web-based editor for creating and organizing articles, '
-         'categories, and community posts. Used internally to manage the content library.'),
+         'categories, and community posts, plus admin controls for the background agents '
+         '(email-sync and calendar-sync schedules, run history). Used internally.'),
     ]
     for title, desc in items:
+        p = doc.add_paragraph()
+        run = p.add_run(title + '. ')
+        run.bold = True
+        p.add_run(desc)
+
+    doc.add_heading('The family chief of staff (shipped since the June meeting)', level=2)
+    doc.add_paragraph(
+        'The "parenting agenda manager" that Section 8 of the June draft described as our '
+        'next major feature is now built, deployed to production, and validated with real '
+        'family data. It is the operational half of the product—and, per Section 12, the '
+        'centerpiece of our go-to-market. What exists today:'
+    )
+    cos_items = [
+        ('Activity discovery agent', 'A background research agent that finds real camps and '
+         'activities near you—filtered by radius and a free-form focus ("art camps only"), '
+         'scored against each kid\'s age and interests, with a live progress feed while it '
+         'searches. Asks for the top N but reviews a much larger pool behind the scenes.'),
+        ('Chief-of-staff chat', 'A conversational agent with 19 working tools: it compares '
+         'shortlisted options ("help me decide"—cost, age eligibility, schedule conflicts, '
+         'coverage gaps across kids and weeks), tracks decisions with rationale, manages '
+         'to-dos, drafts emails to camp directors (never sends), looks up and saves camps '
+         'you already registered for, and can kick off new discovery runs mid-conversation.'),
+        ('Flyer and message ingestion', 'Paste a text message or snap a photo of a paper '
+         'flyer; the vision pipeline extracts the activity, tracks it, adds calendar entries, '
+         'and spawns the follow-up to-dos (confirm eligibility, pay the fee).'),
+        ('Gmail agent', 'With permission (Google OAuth, shipped end-to-end), a daily agent '
+         'reads camp-related email for registered activities and turns it into calendar '
+         'entries and tasks.'),
+        ('Two-way Google Calendar sync', 'The family plan lives where parents already look. '
+         'Pulls external events in; pushes plan entries out.'),
+        ('The Plan hub', 'A chat-first iOS tab—Chat, Discover, Shortlist, Calendar—plus a '
+         'full parent web dashboard (login, discovery, week-by-kid calendar with cost and '
+         'coverage callouts, to-dos, chat) served from the same backend.'),
+        ('Profile editing everywhere', 'Parents can view and edit everything the system '
+         'knows—about themselves, each kid, and the family-wide "what we\'ve learned" '
+         'profile—on iOS and web, including adding and deleting kid profiles with full '
+         'data cleanup.'),
+        ('Production hardening', 'Error tracking (Sentry), metrics dashboards (Grafana), '
+         'cost logging per AI call, concurrency fixes proven under fault injection, and '
+         'guardrail tests for the bug classes our beta families actually hit.'),
+    ]
+    for title, desc in cos_items:
         p = doc.add_paragraph()
         run = p.add_run(title + '. ')
         run.bold = True
@@ -414,6 +471,18 @@ def create_doc():
         'hand the phone to their child, and the child can have a voice conversation with '
         'their AI companion—all moderated in real time, with transcripts visible to the parent. '
         'This is not a mockup. It runs.'
+    )
+    doc.add_paragraph(
+        'And on the logistics side: a parent can ask for summer camps near them, watch real '
+        'options stream in scored to each kid\'s age, save a shortlist, ask the chief of staff '
+        'to compare them, snap a photo of a flyer from the school backpack, and see all of it '
+        'land on a calendar that syncs with Google—live in production today.'
+    )
+    doc.add_paragraph(
+        'None of this is demo-ware: real beta families use the production system today, and '
+        'their bug reports have already driven hardening rounds (data-durability fixes, '
+        'profile-edit cleanups, guardrail tests) that made the product sturdier than any '
+        'internal testing could.'
     )
 
     add_horizontal_rule(doc)
@@ -563,9 +632,9 @@ def create_doc():
         ('Real user identity', 'Replace the current name-based login with Apple Sign-In or '
          'a real account system. Two parents named "Miguel" must not collide. This is the '
          'single biggest blocker for putting real families on the app.'),
-        ('Voice v2 (in progress)', 'Complete the ElevenLabs Conversational AI integration. '
-         'Sub-150ms latency voice for kid companions. Currently 80% done—backend complete, '
-         'iOS SDK integrated, wiring into the view layer is the remaining work.'),
+        ('TestFlight release of the new experience', 'The chat-first Plan hub, the profile '
+         'editor, calendar sync, and the Connect-Gmail flow are built and verified—they ship '
+         'to beta families with the next TestFlight build.'),
         ('Crisis parent notification', 'When a kid companion detects a crisis, the parent '
          'currently gets a Slack alert (internal). Before beta, this must be a real push '
          'notification to the parent\'s device.'),
@@ -581,41 +650,25 @@ def create_doc():
         run.bold = True
         p.add_run(desc)
 
-    doc.add_heading('The parenting agenda manager (next major feature)', level=2)
+    doc.add_heading('The parenting agenda manager — shipped', level=2)
     doc.add_paragraph(
-        'This is the second pillar of the product after the companion agents. Where the '
-        'coaching agent helps you think, the agenda manager helps you act. It\'s the agent '
-        'that makes sure nothing falls through the cracks.'
+        'The June draft described this as our next major feature. It is now built and live '
+        'in production—see "The family chief of staff" in Section 5. It became the '
+        '"Superhuman for family scheduling" we sketched, and smarter than the sketch: '
+        'it doesn\'t suggest teen coding camp for your 4-year-old, and it acts like the '
+        'hyper-organized parent friend who texts you "hey, did you sign up for X yet?" '
+        'What changed since June is the strategy around it: our market research (Section 12) '
+        'concluded that this—not the coaching or the companions—is the front door of the '
+        'business.'
     )
-    agenda_items = [
-        ('Proactive discovery', 'Scans for upcoming camps (summer, winter, spring break), '
-         'classes, events, and activities relevant to each child—based on their age, '
-         'interests, and your location. Surfaces options before registration deadlines close, '
-         'not after.'),
-        ('Email and message extraction', 'With permission, reads the parent\'s email and text '
-         'messages to find event information that\'s already there: school newsletters with dates, '
-         'coach emails with practice schedules, camp confirmations with packing lists, '
-         'permission slips with deadlines. Pulls the signal out of the noise.'),
-        ('Family calendar', 'Builds a unified calendar for the whole family—every kid\'s '
-         'activities in one view. Syncs to Google Calendar so it lives where the parent '
-         'already looks. No separate app to check.'),
-        ('Reminders and to-dos', 'Manages the invisible labor: "Soccer registration closes '
-         'Friday." "Pack sunscreen for field trip Monday." "Submit immunization form by the 15th." '
-         'The kind of tasks that live in a parent\'s head rent-free until they\'re missed.'),
-    ]
-    for title, desc in agenda_items:
-        p = doc.add_paragraph()
-        run = p.add_run(title + '. ')
-        run.bold = True
-        p.add_run(desc)
 
-    doc.add_paragraph()
+    doc.add_heading('The next unit of work is validation, not features', level=2)
     doc.add_paragraph(
-        'This is the "Superhuman for family scheduling" concept—but smarter, because it '
-        'knows your family profile. It doesn\'t suggest teen coding camp for your 4-year-old. '
-        'It doesn\'t remind you about a deadline that\'s already passed. It acts like the '
-        'hyper-organized parent friend who somehow always knows what\'s coming up and texts '
-        'you "hey, did you sign up for X yet?"'
+        'The honest diagnosis from our July research: we have built a polished platform in '
+        'silence, with zero waitlist and zero demand signal—the number-one founder mistake '
+        'in every playbook we studied. The platform is over-built for a beta. Before '
+        'greenlighting significant new feature work, we run the validation funnel described '
+        'in Section 12 and let real market data pick our headline.'
     )
 
     doc.add_heading('Other important work (not blocking beta)', level=2)
@@ -638,8 +691,8 @@ def create_doc():
 
     doc.add_heading('Future (after beta feedback)', level=2)
     future = [
-        'Go-to-market strategy and growth channels',
-        'COPPA compliance (required for public launch if under-13 audience)',
+        'COPPA compliance build-out (the amended rule is now in force — see Section 12; '
+        'required before any public kid-facing launch)',
         'Dark mode',
         'Android version',
         'The senior-focused communication app (side concept from the meeting—'
@@ -746,6 +799,22 @@ def create_doc():
     doc.add_paragraph(
         'The following is a structured overview of the addressable market for an AI-powered '
         'family companion. This data supports GTM planning and investor conversations.'
+    )
+    refresh = doc.add_paragraph()
+    run = refresh.add_run('July 2026 refresh. ')
+    run.bold = True
+    run.font.color.rgb = OLIVE_DARK
+    refresh.add_run(
+        'A full deep-research pass (two companion documents in the GTM folder: the market '
+        'research report and its activity-portfolio expansion) sharpened this picture with '
+        'sourced proof-of-budget numbers: Good Inside (Dr. Becky) passed $34M revenue in 2025 '
+        'with 100,000+ subscribers at ~$276/yr; OurFamilyWizard serves ~1M+ families at '
+        '$150–300 per parent per year (often court-mandated); Skylight reports 9.3M users and '
+        '99% year-over-year revenue growth; the average sports family spends ~$1,000+ per '
+        'child per year and 25% of camp parents planned to spend over $2,000 per child in '
+        '2025. The co-parenting segment is projected to be the fastest-growing slice of the '
+        'parenting-app market. Those documents supersede the estimates below where they '
+        'conflict; the figures in this section are kept for continuity.'
     )
 
     doc.add_heading('US market', level=2)
@@ -877,6 +946,305 @@ def create_doc():
 
     add_horizontal_rule(doc)
 
+    # === SECTION 12: GO-TO-MARKET STRATEGY ===
+    doc.add_heading('12. Go-To-Market Strategy', level=1)
+
+    doc.add_paragraph(
+        'Added July 2026; revised after a five-persona adversarial review of the strategy '
+        '(verdict: reshape) plus a verification research pass. The full evidence trail lives '
+        'alongside this document in the GTM folder — gtm-strategy.md is the canonical '
+        'version of what follows. The strategy in one sentence: lead with one acute, '
+        'seasonal logistics pain for one sharp audience — designed so it delivers full '
+        'value even when only ONE parent participates — retain with the always-on '
+        'ingestion loop and the registration-window watchlist, and validate demand with a '
+        'funnel before building anything else.'
+    )
+
+    doc.add_heading('The wedge', level=2)
+    doc.add_paragraph(
+        'We cannot market a platform; strangers buy a fix for the one pain they feel today. '
+        'Our entry point—the wedge—is activity and camp logistics for the load-bearing '
+        'parent in a two-household family. It is acute (85% of parents report losing sleep '
+        'over summer care and scheduling; 90% among working parents — Bright Horizons 2026 '
+        'Modern Family Index), seasonal (predictable registration panics), budgeted '
+        '(separated parents already accept $150–300/parent/yr for court-mandated '
+        'co-parenting apps), and authentic (Miguel is the customer). Crucially, the product '
+        'is SOLO-FIRST: one parent gets full value alone, and the other parent participates '
+        'at zero friction—plain calendar invites and a magic forwarding email address, '
+        'never an app install, never an account, never a charge. Retention comes from the '
+        'always-on ingestion loop (school emails, flyers, registrations) and from watching '
+        'registration windows—the product re-arms every season.'
+    )
+
+    doc.add_heading('Positioning statement', level=3)
+    pos = doc.add_paragraph()
+    run = pos.add_run(
+        'For the parent who carries the logistics of raising kids across two households, '
+        'MVP is the AI chief-of-staff that finds the camps, watches the registration '
+        'windows, turns flyers and school emails into both homes\' calendars, and warns '
+        'you before a coverage gap becomes a fight—and it works even when only one of you '
+        'uses it. Unlike OurFamilyWizard and TalkingParents, which document conflict for '
+        'court, MVP prevents it; unlike ChatGPT, it knows your family, your custody '
+        'rhythm, and your deadlines.'
+    )
+    run.italic = True
+
+    doc.add_heading('Why not lead with the coach or the companions', level=3)
+    doc.add_paragraph(
+        '"An AI that gives parenting advice" is ChatGPT with extra steps—Milo, a '
+        'better-funded, OpenAI-endorsed family AI copilot, shut down in January 2026 in '
+        'exactly that squeeze ("the technology is simply too early to be reliable in any '
+        'useful way" — its founder\'s farewell post), and Good Inside already owns the '
+        'coaching brand position. Worse, for OUR buyer the coach is a liability before '
+        'it\'s a hook: AI chat logs carry no legal privilege and are discoverable in '
+        'custody litigation, so a separated parent will not confide in a coach whose '
+        'transcripts could surface in court. The coach therefore stays in the product as a '
+        'supporting feature and out of the marketing until its zero-retention privacy '
+        'architecture ships (see regulatory posture below). Our defensible moats are what '
+        'generic AI structurally cannot do: a persistent family profile, agentic work '
+        '(camp research, registration watching, flyer-to-calendar, Gmail and calendar '
+        'sync), and two-household coordination.'
+    )
+
+    doc.add_heading('From camp planner to Activity OS (solving seasonality)', level=2)
+    doc.add_paragraph(
+        'Camp planning alone is a January–April business. The expansion research reframes it '
+        'as one instance of a repeating job—discover, decide, register, coordinate the things '
+        'my kids do—across five verticals that chain into a year-round relay. The engine we '
+        'built (discovery agent, fit scoring, flyer vision, Gmail reading, calendar sync) is '
+        'activity-type-agnostic; only the marketing entry point rotates.'
+    )
+
+    verticals_table = doc.add_table(rows=6, cols=3)
+    verticals_table.style = 'Table Grid'
+    vheaders = ['Vertical', 'Rhythm', 'Role']
+    for i, h in enumerate(vheaders):
+        cell = verticals_table.cell(0, i)
+        cell.text = h
+        cell.paragraphs[0].runs[0].bold = True
+        cell.paragraphs[0].runs[0].font.size = Pt(9)
+        set_cell_bg(cell, 'E8EBDC')
+    vrows = [
+        ('Camps + school-break coverage', '3–4 acute episodes/yr', 'The anchor and launch wedge'),
+        ('Extracurriculars & youth sports', 'Weekly + 2 enrollment seasons', 'Highest family spend; makes it a weekly habit'),
+        ('School life (emails, flyers, permission slips)', 'Daily in school year', 'The sleeper: 80+ school emails/mo; our ingestion pipeline already does this for camps'),
+        ('Weekend & local outings', 'Weekly', 'Engagement and content ("it\'s my weekend with the kids")'),
+        ('Trips & vacations', '1–3 episodes/yr', 'Custody-schedule-scoped only; never "AI trip planner"'),
+    ]
+    for row_idx, (v, r, role) in enumerate(vrows, 1):
+        verticals_table.cell(row_idx, 0).text = v
+        verticals_table.cell(row_idx, 1).text = r
+        verticals_table.cell(row_idx, 2).text = role
+        for col in range(3):
+            verticals_table.cell(row_idx, col).paragraphs[0].runs[0].font.size = Pt(9)
+
+    doc.add_paragraph()
+    doc.add_paragraph(
+        'Discipline rule: one agent with five entry doors, not five features on a homepage. '
+        'The landing page always leads with whichever seasonal episode is next on the '
+        'calendar (as of July: fall activity registration and the back-to-school email '
+        'wave); the "your family\'s activity year" map is the reveal, never the pitch. '
+        'This also strengthens pricing: the subscription is roughly 3% of the $3,000–5,000+ '
+        'a two-kid activity family already spends on the things it coordinates.'
+    )
+
+    doc.add_heading('Three design commitments from the adversarial review', level=2)
+    doc.add_paragraph(
+        'In July 2026 we ran the strategy through a five-persona adversarial council '
+        '(skeptic, optimist, first-principles analyst, market researcher, and a role-played '
+        'buyer), then fact-checked its load-bearing claims at primary sources. It confirmed '
+        'the wedge and forced three product commitments:'
+    )
+    commitments = [
+        ('1. Solo-first, zero-friction second parent.', 'The single biggest failure mode '
+         'in this category is "my ex won\'t use the app"—so common the incumbents publish '
+         'help articles about it, and their only remedy is a court order. Our answer is '
+         'design, not litigation: parent #1 gets full value alone; parent #2 participates '
+         'by accepting ordinary calendar invites and forwarding emails to a magic '
+         'address—no install, no account, no cost. No co-parenting product on the market '
+         'does frictionless inclusion (their "solo modes" mean documenting unilaterally '
+         'for court). The positioning line: "the logistics work even when only one of '
+         'you does."'),
+        ('2. The registration-window watchlist (the "spot-getter").', 'The sharpest camp '
+         'pain is not choosing—it\'s getting a SPOT: popular registrations sell out in '
+         'minutes, parents set alarms and trade dates in group chats, and no national '
+         'parent-side product watches registration-open windows (the only entrant is a '
+         'manual, single-metro database). "We watch the registration dates near you, '
+         'alert you before they open, and have your details ready" turns our discovery '
+         'agent from list-maker into spot-getter—and re-arms the product every season, '
+         'which is the honest retention engine.'),
+        ('3. Split data model: durable logistics, zero-retention coach.', 'Co-parenting '
+         'incumbents SELL discoverability (court-certified records; published subpoena '
+         'fee schedules), and family-law attorneys now warn divorcing clients that AI '
+         'chat logs are discoverable and carry no privilege. So we split the product\'s '
+         'data in two and say so loudly: logistics data (calendar, activities, handoffs) '
+         'is durable, exportable, yours; the AI coach runs zero-retention—no server-side '
+         'transcripts, nothing to produce. Honest copy only: this reduces exposure, it '
+         'does not create legal privilege. No family app occupies this position today.'),
+    ]
+    for title, desc in commitments:
+        p = doc.add_paragraph()
+        run = p.add_run(title + ' ')
+        run.bold = True
+        p.add_run(desc)
+
+    doc.add_heading('Who we acquire first (beachhead personas)', level=2)
+    personas = [
+        ('The two-home logistics dad', '35–48, divorced or separated, shared custody, kids '
+         '3–12. Already pays for OurFamilyWizard (often court-ordered). Trigger: camp season, '
+         'a missed activity that caused conflict. Miguel\'s mirror—and the founder story is '
+         'the content engine.'),
+        ('The maxed-out coordinating mom', '32–45, dual-income, primary logistics owner, '
+         'carries the mental load (mothers carry ~67% more household to-do items — Univ. of '
+         'Bath, 2025). Trigger: the spring camp-planning panic and the 40-tab spreadsheet. '
+         'Heather is this persona—she lives it daily with her 9- and 5-year-old girls—so '
+         'this segment, like the first, gets a founder\'s authentic voice.'),
+        ('The newly separated parent', 'In the acute chaos phase; highest willingness to '
+         'adopt a new system; reachable through attorneys, mediators, and therapists—a '
+         'referral channel we will pilot.'),
+    ]
+    for title, desc in personas:
+        p = doc.add_paragraph()
+        run = p.add_run(title + '. ')
+        run.bold = True
+        p.add_run(desc)
+
+    doc.add_heading('Pricing hypothesis (to be tested, not assumed)', level=2)
+    doc.add_paragraph(
+        'Test range: $99–$149 per family per year, with $199 kept as the top '
+        'willingness-to-pay bucket to measure headroom. One subscription covers the '
+        'family; the second parent is genuinely free forever. The adversarial review '
+        'corrected our original $199 anchor: court-ordered parents can\'t cancel '
+        'OurFamilyWizard, so we are additive to that spend, not a replacement—our real '
+        'price competition is the AI family-assistant market, which clusters at $39–99/yr '
+        '(Ohai $99, Nori ~$96, Skylight Plus $79). Anchor the copy against the activity '
+        'budget ("~3% of what you already spend on the things it coordinates") and the '
+        'prevented scramble week, never against OFW. Hard paywall with a trial rather '
+        'than freemium (RevenueCat 2026: ~5x conversion, near-identical retention), plus '
+        'a seasonal risk-reversal in year one ("full refund before September 1—if it '
+        'doesn\'t survive one real summer, you pay nothing"). The funnel\'s '
+        'willingness-to-pay question sets the final number, segmented by household '
+        'structure.'
+    )
+
+    doc.add_heading('The validation funnel (the next 90 days)', level=2)
+    doc.add_paragraph(
+        'Both playbooks we studied agree: validate demand before building more. Two engines '
+        'run in parallel, both feeding one email list.'
+    )
+    funnel_items = [
+        ('The Family Snapshot quiz', 'Our 8-step onboarding, ported to a public landing '
+         'page as a quiz. Email capture at question 3–4; a friction question whose answer '
+         'options map to the five verticals (so respondents vote on our headline for us); '
+         'a household-structure question ("does your kids\' other parent live with '
+         'you?")—the single most valuable segmentation of the willingness-to-pay data; '
+         'the willingness-to-pay question; and a genuinely useful AI-generated payoff: '
+         'each kid\'s stage, named friction points, three things to try this week, and a '
+         '12-month map of the family\'s activity year. Free to generate; the full version '
+         'requires an account. This is simultaneously the lead magnet, the pricing test, '
+         'and a live product demo.'),
+        ('Paid truth serum', '~$20/day of Meta ads for two weeks, pixel firing only on '
+         'email capture, 5–8 hooks tested. The flagship creative: snap a photo of the '
+         'field-trip flyer, and the permission-slip task, the fee to-do, and the date land '
+         'on both parents\' calendars in five seconds—visual, verifiable, unfakeable. Two '
+         'hooks from the adversarial review join the set: "it watches registration-open '
+         'dates so you don\'t have to set alarms" and "works even if your ex never '
+         'installs it—they just get calendar invites."'),
+        ('Founder-led content — two voices', 'Daily educational posts for 30 days, split '
+         'across two authentic founder voices: Miguel on the divorce-dad / two-household '
+         'angle, Heather on the mental-load / coordinating-mom angle. Between them the '
+         'founders embody both beachhead personas first-hand, and their kids\' ages '
+         'overlap (roughly 4–5 and 9–10), so every stage-specific topic—bedtime for the '
+         'little one, activities and friendships for the big kid—is lived experience, '
+         'told from two household structures. Same playbook as Dr. Becky / Big Little '
+         'Feelings: give away genuinely useful material and the audience compounds into '
+         'demand. No selling—one line pointing to the Snapshot. Two voices also halves '
+         'the per-person cadence needed to stay daily.'),
+        ('Early-access cohort', 'The warmest leads become founding families: a lifetime '
+         'discount (~$99/yr locked for life vs. $199 standard) in exchange for daily '
+         'feedback—early product champions, not revenue.'),
+    ]
+    for title, desc in funnel_items:
+        p = doc.add_paragraph()
+        run = p.add_run(title + '. ')
+        run.bold = True
+        p.add_run(desc)
+
+    doc.add_heading('Decision gates (numbers, not vibes)', level=3)
+    gates = [
+        'Gate zero, before any ad spend (48 hours, under $50): message 25 separated '
+        'parents with the solo-first pitch. Pass = at least 5 would pay ~$10/mo AND at '
+        'least 15 believe zero-friction ex participation (invites + email forwarding) '
+        'would actually happen in their situation. Fail the second condition → lead with '
+        'the maxed-out-mom persona instead of the co-parent angle.',
+        '200 emails by day 30, or the offer/messaging is wrong (pivot the hook before '
+        'abandoning the wedge).',
+        'Median willingness-to-pay ≥ $100/yr green-lights the paid cohort; $50–99 means '
+        'reprice and re-message; below $50 means rethink the wedge.',
+        'Cost per email ≤ $3–5 after creative iteration, or paid is shelved in favor of '
+        'organic + referrals.',
+        'If one non-camp vertical wins the quiz friction vote by more than 2x, the '
+        'headline changes—the product doesn\'t have to.',
+        'Sports-registration claims stay out of ads until the discovery agent\'s hit-rate '
+        'is validated in 2–3 metro areas.',
+    ]
+    for g in gates:
+        doc.add_paragraph(g, style='List Bullet')
+
+    doc.add_heading('Regulatory posture and trust', level=2)
+    doc.add_paragraph(
+        'We market a PARENT-FACING tool, full stop. The kids\' voice companion stays out of '
+        'all GTM until compliance and legal review are complete: the amended COPPA rule is '
+        'now in force (compliance date April 22, 2026—voiceprints are now "personal '
+        'information," AI training requires separate verifiable parental consent, indefinite '
+        'retention is banned), and the FTC opened a formal inquiry into companion chatbots '
+        'and children in September 2025. Regardless of marketing, we build the compliance '
+        'kit: age gates, consent flows, a written retention policy, and data deletion. '
+        'Trust is also a moat we can buy cheaply: one named clinical/child-development '
+        'advisor, a public evidence-and-methodology page, and a plain-language safety and '
+        'data page—which now also states the split data model from design commitment #3 '
+        '(durable, exportable logistics data; zero-retention coach). Social proof is never '
+        'fabricated—until real testimonials exist (with consent), we borrow authority '
+        'from cited research and the founder story.'
+    )
+
+    doc.add_heading('Honest ceiling and what raises it', level=2)
+    doc.add_paragraph(
+        'Modeled scenarios put the base case around $250–300K ARR at 24 months (roughly '
+        '1,800–2,200 paying families at $129)—a strong independent business, not yet a '
+        'venture story. Three '
+        'things upgrade it: funnel proof that acquisition cost is far below lifetime value; '
+        'a camp-booking marketplace take-rate on top of the discovery agent; and B2B2C '
+        'channels (family-law mediators and therapists, employers/EAPs, pediatricians) that '
+        'de-risk churn the way court mandates de-risk OurFamilyWizard\'s. We do not raise '
+        'money before the funnel produces those numbers—our AI-augmented build speed means '
+        'we can reach revenue cheaply.'
+    )
+
+    doc.add_heading('The 90-day sequence', level=3)
+    ninety = [
+        ('Weeks 1–2 — falsify cheap, instrument the truth.', 'Run gate zero (the 25-parent '
+         'solo-first test); harvest verbatim parent language from Reddit/Facebook into a '
+         'swipe file; ship the Family Snapshot funnel with the fall-registration lead; '
+         'publish the evidence + safety/data pages; approach one advisor.'),
+        ('Weeks 3–6 — run both engines.', 'Meta ads at $20/day; daily founder content in '
+         'two voices (Miguel and Heather, alternating); drive toward the 200-email bar and '
+         'the WTP read; recruit the founding-family cohort from the warmest leads. In '
+         'parallel, small funnel-informed product work: the zero-friction parent-#2 flow '
+         'and a first registration-window watchlist for one or two pilot metros.'),
+        ('Weeks 7–12 — convert and decide.', 'Founding-family lifetime deal with daily '
+         'feedback; hard-paywall trial plus the September-1 risk reversal; first real '
+         'testimonials; pilot outreach to 3–5 family-law mediators/therapists. Then the '
+         'gates decide what we do next.'),
+    ]
+    for title, desc in ninety:
+        p = doc.add_paragraph()
+        run = p.add_run(title + ' ')
+        run.bold = True
+        p.add_run(desc)
+
+    add_horizontal_rule(doc)
+
     # === CLOSING ===
     doc.add_paragraph()
     closing = doc.add_paragraph()
@@ -890,7 +1258,7 @@ def create_doc():
     doc.add_paragraph()
     footer = doc.add_paragraph()
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = footer.add_run('MVP — June 2026')
+    run = footer.add_run('MVP — June 2026, rev. July 2026')
     run.font.size = Pt(10)
     run.font.color.rgb = INK_MUTED
 

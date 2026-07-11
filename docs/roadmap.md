@@ -2,6 +2,23 @@
 
 Living list of next-up work. Order is a rough priority, not a commitment. Items move to `docs/history/NNN.md` when shipped.
 
+## Architectural Infra — Auth + Analytics/Flags + Security Hardening (2026-07, plan CLOSED)
+
+The infra buildout plan (`~/.claude/plans/i-want-to-start-humble-floyd.md`) is **closed** — Phases 1–3 shipped and are LIVE in prod. Setup docs: `setup/auth-setup.md`, `setup/security-hardening-setup.md`, `setup/analytics-posthog-setup.md`. Remaining items below folded into this roadmap so the plan can rest.
+
+### ✅ Shipped + LIVE in prod
+- **Phase 1 — Security quick wins.** CMS admin cookie-session auth (`VITE_ADMIN_TOKEN` removed from the browser bundle), 404-not-403 BOLA sweep, `app/security_headers.py` middleware, `delete_family` purges parquet, LLM tool-scoping guard test, gitleaks allowlist, env catalog. `ADMIN_TOKEN` rotated.
+- **Phase 2 — Auth hardening.** Native Apple + Google Sign-In (login, not just Gmail/Calendar), JWT HS256 access + rotating refresh tokens with reuse-detection, `user_accounts`/`auth_identities`/`refresh_tokens` tables, dual-accept `current_user` (zero call-site churn), `has_profile` routing (returning users skip onboarding on any device), legacy-account claim + admin safety net (`/admin/auth/link-legacy`, `/admin/auth/migration-status`). First founder migrated in prod. iOS shipped via TestFlight.
+- **Phase 3 — PostHog analytics + flags + experiments.** Cloud US project 505309, $0 billing cap, privacy-first (no autocapture/replay, opaque `analytics_id`, strict allowlist + PII denylist, person-deletion wired into `delete_family`). Backend `_track` call sites across the funnel; dashboard (posthog-js) + iOS (posthog-ios, consent-gated) clients. **Full iOS event coverage** (2026-07-10): every-screen `screen_viewed` via a `View.trackScreen()` modifier, `chat_opened {agent_kind}`, kid+parent `voice_session_ended {duration_s}`.
+
+### Yet to do (carried over from the closed plan)
+- **Phase 3 console tail (Miguel, PostHog UI).** Create the 3 feature flags — `kid_chat_disabled`, `research_enabled`, `email_sync_enabled` — in the PostHog console (until then `flags.is_enabled` returns the code default; the `FLAG_<KEY>` env override already works deploy-free). Configure Experiments once flags flow.
+- **Phase 4 — At-rest encryption (own phase; prod-data risk).** `DUCKDB_ENCRYPTION_KEY` → in-memory connect + `ATTACH … (ENCRYPTION_KEY ?)` with a one-time plaintext→encrypted boot upgrade; parquet snapshot encryption (`PRAGMA add_parquet_key` + `ENCRYPTION_CONFIG`) with per-file plaintext fallback for pre-migration snapshots. Separate key from `INTEGRATION_ENC_KEY`; "lose key = lose volume" documented. Verify: `tests/test_duckdb_encryption.py` (roundtrip, upgrade, mixed bootstrap, drift tolerance) + staging rehearsal on a prod-volume copy; deploy = explicit auth + **volume snapshot first**.
+- **Phase 5 — Security CI (needs GitHub remote — none today).** `.github/workflows/security.yml` (pip-audit, bandit, semgrep, gitleaks, osv-scanner, trivy image), `ci.yml` (pytest + both tsc/builds so the Phase 1–3 guard tests actually run), `dependabot.yml`. Enable Dependabot alerts + secret-scanning push protection + CodeQL after pushing.
+- **Retire legacy auth (post-migration, trigger = `migration-status` `unclaimed` empties or +30 days).** T2: `AUTH_ISSUE_TOKEN_ENABLED=0` (issue-token → 410); then `AUTH_LEGACY_TOKENS_ENABLED=0` (JWT-only `current_user`); then delete the dead code (issue-token endpoint, `issue/lookup/revoke_auth_token`, `auth_tokens` table, iOS `AuthService.obtainToken` + legacy branches, dashboard user_id login, the `legacy_*` claim path). Update root CLAUDE.md's prod-debugging playbook (the issue-token-as-any-user read trick dies → admin single-user export). Existing in-place-update users get the gentle non-blocking "Secure your account" nudge until then.
+- **5 known claim-path bugs (deferred — only 1 founder left, manual cleanup acceptable).** Documented in memory `project_auth_v2` KNOWN CLAIM-PATH BUGS.
+- **Deferred / separate plans:** COPPA/compliance workstream (parent VPC gate for kid-chat, written children's-data security program, retention policy, DPAs, App Store privacy labels — deadline already passed, schedule soon); Logto self-hosted adoption at open-beta/MFA trigger (migration = import `auth_identities` + `user_accounts`); `PUBLIC_BASE_URL` on Railway (https share links).
+
 ## Pre-Launch Hardening — Security, Reliability & Scalability Overhaul (2026-06-27)
 
 **Why this exists.** On June 24 multiple testers (Miguel, Heather) reported the Plan tab "stuck on 0 found." An SRE investigation of prod data (durable `research_runs` table + Railway logs) found it was **not a crash** — every run completed with 25–33 candidates — but a **perceived hang from head-of-line blocking**: the research worker was a single daemon thread, so concurrent users serialized (Heather waited 176s behind her own run on Jun 22 → 6.5 min total; Jun 24 three users serialized through one worker), and the UI showed "0 found" with no progress during the queue wait and polled forever. The current architecture (single Railway instance, single-writer DuckDB on a local volume, no queue, no LLM backoff, log-scraping as the only observability) is fine for a closed beta but **will not survive a public launch**. This epic is the hardening pass to do **before** opening up.
@@ -42,7 +59,7 @@ Adopted the NL-Harness Playbook's §4.8 fault-injection model for parent-app —
 - **Load test — measure the real concurrency ceiling** (deferred from 2026-06-27). Two halves: (a) *cheap/free now* — scale the Phase-2 saturation harness (mock OpenAI, `tools/run-fault-flows.sh`) to 25/50/100 concurrent enqueues and measure the **orchestration** ceiling (pool drain time, atomic-claim contention, the single DuckDB write-lock, FastAPI threadpool, queue depth) with zero OpenAI cost; (b) *the real ceiling* — a small real-OpenAI run at the target concurrency to find the OpenAI-tier TPM/RPM wall (the one thing the mock can't measure). Publish the curve before opening up. Pairs with tuning `RESEARCH_WORKER_CONCURRENCY` (currently 3; raising it is a single Railway env var — bounded by the OpenAI tier, which the load test sizes).
 
 ### Security (pre-launch audit)
-- **Identity hardening.** Closed beta uses opaque client-claimed `user_id` + Bearer tokens (`/auth/issue-token`). Public launch needs real auth (Apple Sign-In / verified email), token expiry/rotation, and removal of the "client claims a user_id" trust assumption (already flagged in the Family Companion v1 section — make it a launch gate).
+- **✅ Identity hardening — SHIPPED (auth v2).** Native Apple + Google Sign-In, JWT access + rotating refresh, no more "client claims a user_id" trust. Remaining launch gate = retire the legacy `/auth/issue-token` path at T2 (tracked in the top "Architectural Infra" section).
 - **Google verification + CASA.** `gmail.readonly` is a restricted scope; the OAuth app + annual CASA security assessment must clear before non-test users can connect Gmail. Long lead time — start now.
 - **Secret rotation + management.** OpenAI/ElevenLabs/Tavily/Fernet keys live in `.env` + Railway env. Establish rotation cadence, move to a secret manager, and confirm `INTEGRATION_ENC_KEY` (encrypts refresh tokens at rest) has a documented rotation/re-encrypt plan.
 - **Admin surface review.** `/data/export`, `/data/download/{filename}`, `/cms/*` are `ADMIN_TOKEN`-gated (shared secret). Before launch: per-operator auth/audit on these, and confirm the download path's traversal guard + that exported parquet (full user PII) can't leak.
@@ -73,7 +90,7 @@ Branch `feat/activity-planning-chief-of-staff`. A deep-research background agent
 ### Yet to do
 - **Latency optimization — partially done.** ✅ Shipped the **batch record tool** (`record_activity_candidates(list)`): the agent now records all finds from a search in one LLM turn instead of one turn per candidate (was ~26 round-trips with input tokens ballooning ~7k→~59k, ~$2/run for 8). Live progress is preserved — the tool trickles a per-candidate `Found: <name>` via an `on_each` hook so the feed still climbs one at a time. **Still open:** consider lowering the default `max_candidates` and/or a cheaper model for the extract turns if cost is still high. Read the per-run profiler line (`[research] discovered N in Xs | LLM …x/…s | …`) to confirm the turn count dropped.
 - **Phase 3 — multimodal ingestion — backend ✅ (`ca324b9`) + iOS ✅ (`368efe7`).** `POST /ingest/text` + `POST /ingest/image` (vision over flyer/form/screenshot photos) → `ExtractedActivity` (shared 2-stage schema, injection-hardened like `summary.py`) → deterministic `materialize()` spawns a pending activity + action-item to-dos + calendar entries; under-age kids land `pending_eligibility` + a confirm to-do (never auto-confirm). Plus `POST /cos/draft-email` (LLM-drafted, grounded on a tracked activity, HITL — never sends). 58 offline tests green; real-LLM extraction live-validated (gpt-5.5, 0.96 conf). iOS: an "Add from a message or photo" sheet on the Plan tab (`IngestView`) — Paste (TextEditor) or Photo (`PhotosPicker`, no camera/permission by design since the app's camera-usage string declares the camera is never used); images downscaled to 2000px/JPEG to stay under the 8MB cap; result card shows the extracted activity + spawned follow-ups; build SUCCEEDED. Known gap: the model sometimes returns a date *range* as one `"start/end"` string — `materialize()` skips un-parseable dates (activity+todos still land); expand ranges later. **Deployed + validated in prod (2026-06-20)** — all 5 routes live, content migration preserved (110/45/27), live ingest smoke passed, smoke user cleaned up via the `delete_family` cascade. **Still open:** **Gmail `gmail.readonly` Google verification + CASA** — the full Google OAuth flow + R3 daily email-sync now exist (`integration_accounts` table), but the restricted-scope verification + annual CASA assessment must clear before non-test users can connect Gmail (long lead — in flight).
-- **Phase 3b — export/share**: regenerate the workbook-style xlsx/pdf (openpyxl), scoped nanny/therapist share links. (Two-way Google Calendar sync shipped separately as R4; the xlsx export + share links have NOT.)
+- **✅ Phase 3b — export/share — SHIPPED.** `GET /cos/plan/export.xlsx` regenerates the workbook-style xlsx (openpyxl); scoped, read-only, expiring nanny/therapist **share links** (`issue_share_token` + `list_share_tokens`). (Two-way Google Calendar sync shipped separately as R4.) Fast-follow: `PUBLIC_BASE_URL` on Railway for https share links.
 - **Surfacing the COS coordination on the clients** — the chat-first Plan hub shipped (✅), but the direct calendar/logistics *editing* UI is still thin (CRUD exists; editing is mostly via chat). Port the export once Phase 3b lands.
 - **✅ Web dashboard IS deployed.** The Dockerfile builds `parent-dashboard` (multi-stage) and `app/server.py` serves it at `/dashboard` (SPA fallback). It ships with every `railway up` — no separate deploy needed.
 - **Phase 5 acceptance replay**: feed the original Alvarado artifacts (iMessage/flyer photos/forms) through the live pipeline and score against `Alvarado_Summer_2026_Camps.xlsx`.
@@ -114,7 +131,7 @@ Branch `feat/activity-planning-chief-of-staff`. A deep-research background agent
 
 Surgical fixes shipped in `7e33828` (HomeView config, streamTask cancel, ContentService HTTP status, NotificationCenter removal, @MainActor ServerConfiguration, etc.). Deferred from that review:
 
-- **`userID` is the parent's first name.** Onboarding stores the typed name as the identity used for tokens + profile, so two parents named "Miguel" collide on the same token and family data. This is the same auth-model gap the backend reviews flagged; it's a **v1 blocker**. Wire a real per-account identifier (UUID at first launch, then Apple Sign-In) end to end — iOS `userID`, `/auth/issue-token`, and every `authorize_user_match`.
+- **✅ `userID` identity — SHIPPED (auth v2).** New users get a UUID from native Apple/Google Sign-In (no more first-name collisions); legacy name-based ids are grandfathered and claim their data on first sign-in. Done end to end (iOS `userID`, auth router, `authorize_user_match`). See the top "Architectural Infra" section + `setup/auth-setup.md`.
 - **Split `OnboardingView.swift` (1390 lines, 16 `@State`).** Break into one step per `struct` driven by a shared `@Observable` (or `ObservableObject`) `OnboardingViewModel`. Largest single maintenance burden in the app; makes step testing possible and stops sibling-step re-renders on every keystroke.
 - **`@Observable` macro migration** for the view models (`KidsHomeViewModel`, `KidPickerViewModel`, `ReviewLetterViewModel`, `KidChatViewModel`, `ContentViewModel`). Removes `@Published`/`ObservableObject`, gives per-property invalidation. Confirm the iOS-17+ floor first (the app already uses iOS-17 APIs like `AVAudioApplication.requestRecordPermission`, so likely safe).
 - **Protocol-abstract the services** (`ContentService`, `KidAgentService`, `ChatService`) and inject them into view models so they're mockable in tests; today they're static/`@MainActor` structs called directly.
@@ -152,7 +169,7 @@ Surgical fixes shipped in `7e33828` (HomeView config, streamTask cancel, Content
 
 ## iOS
 
-- **Build environment.** This machine is missing the iOS 26.4 platform install — `xcodebuild` can't run a real build from CLI. Either install the platform or document that builds happen exclusively in Xcode.
+- **✅ Build environment — resolved.** CLI `xcodebuild` builds run cleanly against the iOS Simulator SDK (iOS ships via TestFlight at 1.61/build 75). No longer Xcode-only.
 - **Returning-user path.** `OnboardingView` welcome screen has a "Welcome back" branch that bypasses every demographic step. Decide whether returning users should be re-prompted for fields that didn't exist when they first onboarded (e.g., zip), or whether we surface a "Complete your profile" nudge in Settings instead.
 - **✅ Profile editing — SHIPPED.** Settings → **Profile** hub lets users edit structured parent/kid fields directly (Basics editors, Add-a-kid, family-wide "What we've learned", delete-a-kid), backed by `PATCH /profile` / `PATCH /profile/kids/{name}` / `DELETE /profile/kids/{name}` with `replace_lists` semantics. Replaces the old re-onboard / chat-only path.
 
@@ -169,7 +186,7 @@ Plan: `~/.claude/plans/we-need-to-work-lively-wave.md`. Auto-generated kid agent
 
 - Mixed ages allowed under explicit informed-consent agreement signed in-app by the parent.
 - **Not COPPA-compliant.** Cannot list publicly on the App Store; cannot run marketing aimed at children.
-- Pre-launch gates: real auth (JWT + locked CORS + rate limits), real tables for kid data (not JSON blobs), chunk-buffered moderation with crisis routing, eval suite v1 (~120 cases) wired to CI, kill-switch per `agent_id`, Slack telemetry.
+- Pre-launch gates: ✅ real auth (JWT + rotating refresh — shipped), locked CORS + rate limits, real tables for kid data (not JSON blobs), chunk-buffered moderation with crisis routing, eval suite v1 (~120 cases) wired to CI, kill-switch per `agent_id`, Slack telemetry.
 - Voice (Whisper/`SFSpeechRecognizer` STT + TTS) is in scope for v0; both pipelines moderation-gated.
 
 ### v1 — public-launch audience decision
@@ -194,10 +211,10 @@ Two paths to evaluate at end of beta. Decide based on which audience produced th
 - Parent has full transcript access — non-negotiable, surfaced as a feature.
 - Crisis keywords (self-harm, abuse, suicide) trigger immediate parent notification + crisis resources displayed to kid + chat freeze.
 
-## Held for mobile coordination (from 2026-05-11 Vix review)
+## Held for mobile coordination (from 2026-05-11 Vix review) — ✅ BOTH SHIPPED
 
-- **Lock `/content/community/new` + `/content/community/{post_id}/replies` server-side.** Vix found these accept an arbitrary `user_id`/`author_name` with no auth (impersonation + spam). The iOS `ContentService` now attaches a Bearer token to both calls (shipped), but the **server-side `Depends(current_user)` + `authorize_user_match` is deliberately NOT deployed yet** — turning it on now would 401 every TestFlight 1.3 user (same trap as `/profile/seed`). Add the server lock in the same release as the next TestFlight build that includes the auth-sending `ContentService`.
-- **Set `ADMIN_TOKEN` on Railway.** `/data/export`, `/data/download`, and all `/cms/*` mutations are now gated behind an `X-Admin-Token` header (fail-closed: they return 503 until `ADMIN_TOKEN` is set). After deploy, set `ADMIN_TOKEN` via `railway variables set` and put the same value in `MVP_ADMIN_TOKEN` locally for `sync-data.sh`. Until then, prod data sync is intentionally disabled.
+- **✅ Locked `/content/community/new` + `/content/community/{post_id}/replies` server-side.** Both now `Depends(current_user)` (server.py:824, 866) — Security phase 1 + auth v2's dual-accept `current_user` closed the impersonation/spam hole without 401'ing legacy TestFlight users.
+- **✅ `ADMIN_TOKEN` set + rotated on Railway.** `/data/*` + `/cms/*` gated (CMS moved to a cookie-session login; `VITE_ADMIN_TOKEN` removed from the bundle). Prod data sync works with `MVP_ADMIN_TOKEN` locally.
 
 ## Vix review backlog (2026-05-11) — unfixed findings
 
@@ -241,11 +258,11 @@ Independent deep review by Vix. The verified blockers (unauth `/data/*` + `/cms/
 - **N-7** repeated local `from fastapi import HTTPException` (already imported at top) — clean up the in-function imports.
 
 ### Open questions for the owner (from Vix's review)
-1. Crisis parent-notification: `parent_notified_at` is always `None` — no APNs/SMS/email, only Slack-to-oncall. Interim email before beta?
+1. ✅ RESOLVED — Crisis parent-notification now delivers via **APNs push** (verified on device 2026-07-06, `setup/apns-setup.md`); `parent_notified_at` is stamped on send. (Optional email fallback still open.)
 2. Kid auth identity: kid runs under the parent's token; is the PIN a real boundary or UI-only? (Decides H-2 severity.)
 3. COPPA: consent is self-reported (any kid can fabricate parent + age band). Needs legal review.
 4. Parquet export scope: only `user_data` is exported; `kid_messages`/`consent_records`/`moderation_events`/`daily_summaries` never are. Intentional?
-5. `revoke_auth_token` has no caller — no logout endpoint; tokens die only by 30d expiry or `delete_family`. Add logout + lost-device revoke?
+5. ✅ RESOLVED — auth v2 ships `/auth/logout` (revokes the refresh-token family) + rotating refresh with reuse-detection (a replayed token nukes the whole family). Lost-device revoke is covered by refresh-token revocation.
 6. Orphaned crisis locks: reviving requires the old `agent_id`, but `upsert_kid_agent_config` mints a new one — old lock rows orphan. Define the lifecycle.
 
 ## Family Companion v0 — pre-beta blockers (from 2026-05-07 critic review)
@@ -253,13 +270,13 @@ Independent deep review by Vix. The verified blockers (unauth `/data/*` + `/cms/
 Findings doc: `docs/code-review-findings.md`. Items already shipped this session are removed; these are what's left before any family touches the build.
 
 ### Identity & access
-- **App Attest / Apple Sign-In on `/auth/issue-token`.** Today the endpoint is rate-limited per-IP but still accepts an arbitrary `user_id` from the body. Until App Attest or an out-of-band invite-code flow is in place, the closed beta is one leaked `user_id` away from full read access on a victim family. Pair the iOS side with a `DCAppAttestService` keypair attestation; verify on the server.
+- **✅ Apple Sign-In — SHIPPED (auth v2); App Attest dropped as moot.** Native Apple + Google Sign-In replaced the "client claims a `user_id`" trust model. `/auth/issue-token` still accepts a body `user_id` but is now gated (`AUTH_ISSUE_TOKEN_ENABLED`), refuses already-claimed accounts, and retires at T2 — so the "one leaked user_id away" threat is closed for the new account model. `DCAppAttestService` attestation is no longer needed.
 - **Audit/redact `user_id` in Slack alerts and DEBUG logs.** Demote `logging.basicConfig(level=DEBUG)` in production; redact `user_id` to a stable hash prefix in `telemetry._post_slack`.
-- **Re-name `JWT` → `opaque session token` in code/docs.** The roadmap claims JWT but the implementation ships uuid4 hex tokens. Either ship a real JWT (HS256 with rotating secret) or stop calling it that.
+- **✅ Real JWT — SHIPPED.** Auth v2 ships genuine JWT HS256 access tokens (`AUTH_JWT_SECRET`) + rotating opaque refresh tokens with reuse-detection. The naming now matches the implementation.
 
 ### Crisis safety
-- **Real APNs parent push for crisis events.** The lock-and-freeze path is wired (parent must call `/kid-agent/{agent_id}/revive` to clear), but the `parent_notified_at` field is still set to `None` because there is no APNs delivery yet. Pair with iOS to register a device token at consent time, send via APNs from the crisis branch with retry+jitter, stamp `parent_notified_at` on success. Email fallback (Resend/Postmark) when APNs fails twice.
-- **Crisis-routing telemetry SLO.** Define and instrument `crisis_event_to_parent_notified_p99 ≤ 60s`. Until `/metrics` exists this lives as a derived metric over `moderation_events.created_at` vs `parent_notified_at`.
+- **✅ Real APNs parent push for crisis events — SHIPPED + verified on device (2026-07-06).** Crisis lock fires an APNs push to the parent (env-gated `APNS_*`, `.p8` at `mvp-backend/secrets`, Key K97TDFQ2UM / Team 5K4ZDG6NFD / bundle MVP.MVParent; `APNS_AUTH_KEY` or `APNS_AUTH_KEY_FILE`). See `setup/apns-setup.md`. (Email fallback via Resend/Postmark remains an optional follow-up.)
+- **Crisis-routing telemetry SLO.** Define and instrument `crisis_event_to_parent_notified_p99 ≤ 60s`. The metric surface now exists (OTel→Grafana + APNs stamps `parent_notified_at`), so this can be a derived metric over `moderation_events.created_at` vs `parent_notified_at` + a Grafana alert — the SLO instrumentation itself is still to build.
 - **Voice STT crisis test class.** Whisper / SFSpeechRecognizer mishears "I want to hide myself" as "I want to die myself" and vice versa. Add `evals/cases/stt_perturbation.yaml` (~10 cases) — actual STT misreads of crisis language; assert detection still fires.
 
 ### Eval harness rewrite
@@ -275,8 +292,8 @@ Findings doc: `docs/code-review-findings.md`. Items already shipped this session
 - **Drop `RUN_KID_EVALS=1` opt-in.** Nightly GitHub Action runs the full suite, posts the markdown report, blocks deploys on red.
 
 ### Observability & launch readiness
-- **`/metrics` endpoint via `prometheus-client`.** Gate to admin or VPN. Latency histograms on `moderate_input`, `moderate_with_openai`, the `/kid-chat` stream. Counters on every fail-closed path. One starter alert: moderation-API-error-rate > 1% over 5m.
-- **Structured logs** with Request-ID propagation. Today `logger.info("[kid_chat] start ...")` is plain text and the Slack alert can't be tied to a single server log line.
+- **✅ Metrics/alerting — SHIPPED via OTel→Grafana Cloud** (superseded the `prometheus-client /metrics` approach): HTTP + custom metrics export to Grafana with Slack alerting, read-only Grafana MCP. Still open: add the fine-grained histograms (`moderate_input`, `moderate_with_openai`, `/kid-chat` stream) + the moderation-error-rate alert onto that surface.
+- **Structured logs** — partially addressed: `[COST]` per-workflow correlation ids + Sentry tie errors to context. Still open: extend Request-ID propagation to **all** paths (matches the "extend structured logging to all paths" note in the Observability subsection above).
 - **API versioning prefix.** New kid endpoints under `/v1/`. The roadmap explicitly anticipates a v1 break.
 - **Pagination cursors.** `/kid-chat/transcripts`, `/kid-moderation/events`, `/summary/list` — `limit` only; past message #N parents silently lose history.
 - **Idempotency-Key on `/kid-agent/config`.** Letter resubmission on flaky network creates a new version row each time.

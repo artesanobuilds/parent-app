@@ -35,11 +35,15 @@ flowchart TB
         EL["ElevenLabs<br/>ConvAI v2 voice"]
         SLACK["Slack<br/>alerts"]
         GOOG["🟢 Google OAuth<br/>Gmail + Calendar"]
+        APPLE["🟢 Apple / Google<br/>Sign-In (login)"]
+        PH["🟢 PostHog<br/>analytics + flags"]
     end
 
-    iOS -->|"Bearer token"| API
-    CMS -->|"X-Admin-Token"| API
-    DASH -->|"Bearer token"| API
+    iOS -->|"JWT (Apple/Google Sign-In); legacy bearer"| API
+    CMS -->|"admin cookie-session / X-Admin-Token"| API
+    DASH -->|"JWT bearer"| API
+    API --> APPLE
+    API --> PH
 
     API <--> DUCK
     DUCK <-->|"bootstrap / export"| PARQ
@@ -64,7 +68,7 @@ flowchart TB
 ```mermaid
 flowchart LR
     subgraph Edge["Edge"]
-        AUTH["auth.py<br/>opaque bearer tokens"]
+        AUTH["auth.py + auth_router.py + auth_providers.py<br/>JWT access + rotating refresh<br/>(Apple/Google Sign-In); dual-accept legacy bearer"]
         RL["rate_limit.py<br/>token buckets:<br/>chat · config · auth (60/hr) · 🟢research"]
     end
 
@@ -85,6 +89,7 @@ flowchart LR
         SYNC["🟢 email_sync/ · calendar_sync/<br/>daily worker threads"]
         VOICE["convai endpoints<br/>signed ElevenLabs tokens"]
         OBS["observability/<br/>Sentry + OTel → Grafana"]
+        ANALYTICS["🟢 analytics/<br/>PostHog: allowlist+denylist events,<br/>opaque analytics_id, flags, person-delete"]
         TEL["telemetry.py → Slack"]
     end
 
@@ -200,6 +205,17 @@ flowchart TB
 (confirmed vs TBD), **time conflicts** (camp hours vs therapy), **age-eligibility** flags,
 caregiver **coverage gaps**, and **uncovered weeks**.
 
+**Activity lifecycle board (`GET /cos/plan/board`, single source of truth `app/cos/lifecycle.py`).**
+Every tracked activity sits in one of 4 stages — Considering → To register (`planned`) →
+Registered · needs action → All set — with register/pay surfaced as next-**actions** via typed
+to-dos. A register hook (instant email-sync + seeded typed to-dos) fires at every WATCHED entry,
+including chat tools. `POST /cos/plan/reset` starts over; pass-anywhere + delete-forever
+(cascade) are supported. Drives both the iOS Plan tab and the web dashboard.
+
+**Export + share (Phase 3b, LIVE).** `GET /cos/plan/export.xlsx` regenerates the workbook-style
+spreadsheet (openpyxl); scoped, read-only, expiring **share links** (`issue_share_token`) let a
+nanny/therapist see a filtered slice without an account.
+
 ### 3c. Multimodal ingestion → plan
 
 ```mermaid
@@ -240,7 +256,7 @@ erDiagram
 
 | Domain | Tables |
 |---|---|
-| Core / auth | `user_data`, `auth_tokens`, `consent_records`, `audit_events` |
+| Core / auth | `user_data`, `user_accounts`, `auth_identities`, `refresh_tokens`, `auth_tokens` (legacy), `consent_records`, `audit_events` |
 | Content | `categories`, `articles`, `community_posts`, `post_replies` |
 | Kid companion | `kid_agent_configs`, `kid_messages`, `kid_credentials`, `moderation_events`, `kid_agent_crisis_locks`, `daily_summaries` |
 | 🟢 Discovery | `research_runs`, `activity_candidates` (+ `city`, `region`, `distance_mi` — v8/v9) |
@@ -252,8 +268,17 @@ erDiagram
 
 ## 5. Cross-cutting
 
-- **Auth:** opaque bearer tokens (`/auth/issue-token`), hashed at rest; `authorize_user_match`
-  blocks cross-user access on every write.
+- **Auth (v2, LIVE):** native Apple + Google Sign-In → JWT HS256 access tokens (30-min) +
+  rotating refresh tokens with reuse-detection (`user_accounts`/`auth_identities`/`refresh_tokens`).
+  `current_user` **dual-accepts** JWT (no-DB path) or a legacy opaque token (gated by
+  `AUTH_LEGACY_TOKENS_ENABLED`); `has_profile` routes returning users straight past onboarding;
+  legacy accounts claim their data on first sign-in (admin safety net for lost tokens).
+  `/auth/issue-token` is gated (`AUTH_ISSUE_TOKEN_ENABLED`) and refuses claimed accounts — it
+  retires at T2. `authorize_user_match` still blocks cross-user access (404, not 403) on every write.
+- **Analytics & flags:** PostHog (`app/analytics/`, env-gated no-op) — strict event allowlist +
+  PII denylist, distinct_id = opaque `analytics_id` (never user_id), feature flags with
+  `FLAG_<KEY>` env kill-switch, person-deletion wired into `delete_family`. Dashboard + iOS clients
+  run no autocapture / no session replay.
 - **Rate limiting:** in-process token buckets per `(user, class)` — `chat`, `config`,
   `auth` (60/hr), 🟢`research` (runs are expensive → 20/hr).
 - **Moderation (kid only):** deterministic crisis regex → OpenAI moderation → age classifier →
