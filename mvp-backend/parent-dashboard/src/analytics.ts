@@ -18,6 +18,9 @@ const EVENTS: Record<string, readonly string[]> = {
   activity_tracked: ['status'],
   plan_exported: ['format'],
   research_run_started: [],
+  // Vertical doors — tap distribution informs which vertical ships next.
+  door_opened: ['door'],
+  door_converted: ['door'],
 };
 
 // Keys that must never be sent, whatever a call site passes.

@@ -27,6 +27,9 @@ enum Analytics {
         // Client-only engagement events.
         "screen_viewed": ["screen"],
         "content_opened": ["type"],
+        // Vertical doors — tap distribution informs which vertical ships next.
+        "door_opened": ["door"],
+        "door_converted": ["door"],
     ]
 
     /// Keys that must never be sent, whatever a call site passes.

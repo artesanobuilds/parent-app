@@ -255,6 +255,11 @@ export const getPlanSummary = () => api<PlanSummary>('/cos/plan/summary');
 // to-dos and the ONE computed next_step (see app/cos/lifecycle.py).
 export const getBoard = () => api<PlanBoard>('/cos/plan/board');
 
+// Flag-filtered vertical doors for the "Plan something" disclosure. Cached
+// last-good client-side (src/lib/doors.ts) — never blocks board render.
+export const getVerticals = () =>
+  api<{ verticals: import('../types').VerticalDoor[] }>('/cos/verticals');
+
 // Wipe the plan (activities, to-dos, calendar, coverage, discovery, ingest).
 // Profile, kids, and chats are kept.
 export const resetPlan = () =>

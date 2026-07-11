@@ -152,6 +152,36 @@ REGISTRY: Dict[str, VerticalProfile] = {
         ingest_taxonomy=False,
         harness_spec="tier-1/cos-chat-power-tools.flow.yml",
     ),
+    EXTRACURRICULAR: VerticalProfile(
+        key=EXTRACURRICULAR,
+        label="Classes & sports",
+        chip_label="Class",
+        date_model="recurring_weekly",
+        # A weekly class/practice counts as covering its week — same semantics
+        # the legacy kind-set fallback ('class'/'program' cover) always had.
+        provides_coverage=True,
+        todo_wording=TodoWording(
+            payment_title="Pay the ${price} fee for {name}",
+            payment_detail="Added when you marked this registered — check it off once the fee is paid.",
+            confirm_title="Forward or paste {name}'s registration confirmation",
+            confirm_detail=(
+                "Gmail isn't connected, so I can't watch for it automatically — "
+                "paste it in and I'll pull out fees, gear lists, and start dates."
+            ),
+        ),
+        research_focus="youth class sport registration schedule fees location",
+        door=Door(
+            title="Classes & sports",
+            subtitle="Year-round activities — find one, register, never miss a season.",
+            starter_prompt="Help me find a class or sport for my kid this season.",
+        ),
+        email_sync=True,
+        registration_watch=True,
+        ingest_taxonomy=False,
+        # Door visibility only — organic V2 items always render on the board.
+        flag="vertical-v2-extracurriculars",
+        harness_spec="tier-1/extracurricular-fall-signup.flow.yml",
+    ),
     OUTING: VerticalProfile(
         key=OUTING,
         label="Outings",

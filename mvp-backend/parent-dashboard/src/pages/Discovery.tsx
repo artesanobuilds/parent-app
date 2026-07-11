@@ -19,6 +19,7 @@ import {
   trackActivity,
 } from '../api';
 import type { Candidate, ResearchProgress, TrackedActivity } from '../types';
+import { currentSeason } from '../lib/season';
 
 // localStorage key: lets us reconnect to an in-flight run after a reload/nav.
 const RUN_KEY = 'discovery_active_run';
@@ -244,7 +245,9 @@ export default function Discovery() {
     try {
       const trimmedZip = zip.trim();
       const params: Record<string, unknown> = {
-        season: 'summer 2026',
+        // Derived, not hardcoded — the old 'summer 2026' literal went stale
+        // the day summer ended (vertical expansion Phase 3).
+        season: currentSeason(),
         radius_miles: radius,
         max_candidates: count,
       };

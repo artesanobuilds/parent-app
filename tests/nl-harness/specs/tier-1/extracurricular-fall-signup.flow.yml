@@ -1,0 +1,43 @@
+spec:
+  name: extracurricular-fall-signup
+  tier: 1
+  modules: [cos, chat, profile]
+  intent: >
+    V2 extracurriculars (vertical expansion Phase 3): a parent tells the agent
+    about a weekly class they already registered for ("Mar is doing soccer this
+    fall, every Tuesday at 4pm, $200 — already signed her up"). The agent must
+    track it as a signed_up activity carrying the recurring-weekly date model
+    (rrule as source of truth), which the board then renders with a typed card
+    (activity_type=extracurricular) and a server-rendered "when" line. This is
+    the black-box lock on the door's core promise: say it once, it's on the
+    board with its schedule.
+
+  personas:
+    parent:
+      preset: existing-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "RUN_OPENAI_FLOWS=true (/cos/chat runs against OpenAI; skipped otherwise)"
+
+  invariants:
+    - "POST /cos/chat about the weekly soccer signup completes with a non-empty reply"
+    - "GET /cos/activities?status=signed_up contains an activity whose name references soccer"
+    - "The tracked activity carries the recurring date model: rrule is set (weekly) OR a derived recurring appointment exists for it"
+    - "GET /cos/plan/board renders the card with a non-empty when string"
+
+  boundary_contracts:
+    - endpoint: POST /cos/chat
+      as: parent
+      streaming: true
+      status: 200
+
+    - endpoint: GET /cos/activities
+      as: parent
+      status: 200
+      response_includes: [activities]
+
+    - endpoint: GET /cos/plan/board
+      as: parent
+      status: 200
+      response_includes: [stages]

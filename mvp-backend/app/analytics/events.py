@@ -37,6 +37,11 @@ EVENTS: dict[str, set[str]] = {
     # Content + navigation engagement (client)
     "content_opened": {"type"},                      # library article / community post
     "screen_viewed": {"screen"},                     # every screen (tabs + pushed/presented)
+    # Vertical doors ("Plan something" disclosure). door = the vertical key.
+    # Tap distribution across doors informs which vertical ships next
+    # (plan one-agent-five-doors, Phase 3).
+    "door_opened": {"door"},                         # a door tapped in the sheet/menu
+    "door_converted": {"door"},                      # its starter prompt actually sent
     # Safety
     "crisis_lock_triggered": {"category"},
     "companion_reactivated": set(),

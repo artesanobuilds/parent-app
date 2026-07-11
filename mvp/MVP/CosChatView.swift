@@ -8,10 +8,14 @@ import MarkdownUI
 /// conversation survives switching segments.
 struct CosChatView: View {
     @ObservedObject var viewModel: CosChatViewModel
+    /// Vertical doors rendered as starter cards in the empty state (server-
+    /// driven copy from GET /cos/verticals; empty when not yet fetched).
+    var doors: [VerticalDoor] = []
     @State private var messageText: String = ""
 
-    init(viewModel: CosChatViewModel) {
+    init(viewModel: CosChatViewModel, doors: [VerticalDoor] = []) {
         self.viewModel = viewModel
+        self.doors = doors
     }
 
     var body: some View {
@@ -96,6 +100,55 @@ struct CosChatView: View {
                 Text("Track an activity, sort out coverage gaps, or get help deciding between camps. The chief of staff sees your family's plan.")
                     .font(.hearthBodyMD)
                     .foregroundColor(.inkSecondary)
+            }
+
+            // The entry doors, as starter cards (one per vertical, copy from
+            // the registry). Tap = door_opened + door_converted in one step —
+            // in chat the tap IS the conversion.
+            if !doors.isEmpty {
+                VStack(alignment: .leading, spacing: .hearth300) {
+                    Text("PLAN SOMETHING")
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkMuted)
+                        .tracking(0.6)
+                        .padding(.top, .hearth300)
+
+                    ForEach(doors) { door in
+                        Button {
+                            Analytics.capture("door_opened", ["door": door.key])
+                            sendSuggestion(door.starterPrompt)
+                            Analytics.capture("door_converted", ["door": door.key])
+                        } label: {
+                            HStack(spacing: .hearth400) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(door.title)
+                                        .font(.hearthBodyMD.weight(.semibold))
+                                        .foregroundColor(.inkPrimary)
+                                    Text(door.subtitle)
+                                        .font(.hearthBodySM)
+                                        .foregroundColor(.inkSecondary)
+                                        .multilineTextAlignment(.leading)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.inkMuted)
+                            }
+                            .padding(.horizontal, .hearth500)
+                            .padding(.vertical, .hearth400)
+                            .background(
+                                RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                                    .fill(Color.bgElevated)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                                            .stroke(Color.borderHairline, lineWidth: 1)
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(viewModel.isSending || viewModel.isUserIDMissing)
+                    }
+                }
             }
 
             VStack(alignment: .leading, spacing: .hearth300) {

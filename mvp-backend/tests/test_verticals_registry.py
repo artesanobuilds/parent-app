@@ -96,9 +96,15 @@ def test_get_profile_degrades_to_camp():
     assert verticals.get_profile(None) is camp
     assert verticals.get_profile("") is camp
     assert verticals.get_profile("garbage") is camp
-    # Canonical but not yet registered (pre-Phase-3): degrade, don't crash.
-    assert verticals.get_profile(verticals.EXTRACURRICULAR) is camp
+    # Canonical but not yet registered (school_event lands Phase 5, trip
+    # Phase 6): degrade, don't crash.
+    for pending in verticals.ACTIVITY_TYPES - set(verticals.REGISTRY):
+        assert verticals.get_profile(pending) is camp
     assert verticals.get_profile("  OUTING ") is verticals.REGISTRY[verticals.OUTING]
+    assert (
+        verticals.get_profile(verticals.EXTRACURRICULAR)
+        is verticals.REGISTRY[verticals.EXTRACURRICULAR]
+    )
 
 
 def test_camp_capabilities():

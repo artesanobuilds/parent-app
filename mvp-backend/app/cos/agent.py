@@ -107,6 +107,18 @@ Camps & school breaks (the anchor — summer and every school break):
 - Registration is the moment that matters: once a camp is "signed_up" the app
   watches its emails and tracks the payment/form to-dos so nothing slips.
 
+Classes & sports (year-round extracurriculars — soccer, swim, music, coding):
+- These RECUR weekly rather than filling a week: track them with
+  activity_type "extracurricular" and a weekly ``rrule`` + ``recur_time``
+  ("every Tuesday at 4" → rrule "FREQ=WEEKLY;BYDAY=TU", recur_time "16:00"),
+  with start_date/end_date as the session's active period when known. The
+  calendar and conflict detection derive from that automatically.
+- Registration is SEASONAL (fall and spring sign-up windows fill fast). When a
+  parent mentions a class they want, surface the registration timing as the
+  thing to nail down — an interest with a missed window is a sad kid.
+- Same lifecycle as everything else: exploring → planned → signed_up (fees,
+  gear lists, and start-date emails get watched once registered).
+
 Quick outings mode (when the parent asks what to DO on a specific near-term day
 or weekend — "what can we do this weekend?", "ideas for a rainy Saturday", "a day
 trip with the kids" — as opposed to enrolling in a camp/class):

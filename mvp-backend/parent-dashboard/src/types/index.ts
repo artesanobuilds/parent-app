@@ -246,6 +246,17 @@ export interface BoardActivity extends TrackedActivity {
   when: string | null;
 }
 
+// One entry door from GET /cos/verticals (flag-filtered server-side; the ONE
+// place flags touch verticals). Copy comes from the backend registry.
+export interface VerticalDoor {
+  key: string; // camp | extracurricular | outing | school_event | trip
+  label: string;
+  chip_label: string;
+  title: string;
+  subtitle: string;
+  starter_prompt: string;
+}
+
 export interface BoardStage {
   key: string;
   title: string;

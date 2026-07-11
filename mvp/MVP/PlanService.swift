@@ -243,6 +243,29 @@ struct PlanBoard: Codable, Hashable {
     }
 }
 
+/// One entry door for the "Plan something" disclosure (GET /cos/verticals).
+/// Copy is server-driven from the vertical registry; flags filter server-side.
+struct VerticalDoor: Codable, Identifiable, Hashable {
+    let key: String
+    let label: String
+    let chipLabel: String
+    let title: String
+    let subtitle: String
+    let starterPrompt: String
+
+    var id: String { key }
+
+    enum CodingKeys: String, CodingKey {
+        case key, label, title, subtitle
+        case chipLabel = "chip_label"
+        case starterPrompt = "starter_prompt"
+    }
+}
+
+struct VerticalsResponse: Codable {
+    let verticals: [VerticalDoor]
+}
+
 /// A calendar entry (GET /cos/calendar). Week-keyed so a compact week×kid view
 /// is a query over these.
 struct CalendarEntry: Codable, Identifiable, Hashable {
@@ -596,6 +619,16 @@ enum PlanService {
     static func board(baseURL: URL, userID: String) async throws -> PlanBoard {
         let url = baseURL.appendingPathComponent("cos/plan/board")
         return try await sendDecoded(await authedGET(url, userID: userID, baseURL: baseURL))
+    }
+
+    /// Flag-filtered vertical doors for the "Plan something" disclosure
+    /// (GET /cos/verticals — the ONE place flags touch verticals). Callers
+    /// cache last-good and never block board render on this.
+    static func verticals(baseURL: URL, userID: String) async throws -> [VerticalDoor] {
+        let url = baseURL.appendingPathComponent("cos/verticals")
+        let resp: VerticalsResponse = try await sendDecoded(
+            await authedGET(url, userID: userID, baseURL: baseURL))
+        return resp.verticals
     }
 
     /// Advance/edit a tracked activity (PATCH /cos/activities/{id}) — e.g.

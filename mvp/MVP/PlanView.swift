@@ -15,6 +15,10 @@ struct PlanView: View {
     @State private var segment: PlanSegment = .chat
     @State private var showIngest = false
     @State private var showSortFilter = false
+    // Vertical chip filter on the board (attribute, never navigation) and the
+    // "Plan something" door sheet (the five doors behind ONE disclosure).
+    @State private var typeFilter: String?
+    @State private var showDoors = false
     // One-time board explainer (self-documenting first run) — persists dismissal.
     @AppStorage("plan_board_explainer_seen") private var boardExplainerSeen = false
     // Confirm-gated destructive actions on the board.
@@ -57,6 +61,11 @@ struct PlanView: View {
             .background(Color.bgCanvas.ignoresSafeArea())
             .sheet(isPresented: $showIngest) {
                 IngestView(viewModel: viewModel)
+            }
+            .sheet(isPresented: $showDoors) {
+                doorSheet
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showSortFilter) {
                 sortFilterSheet
@@ -160,6 +169,19 @@ struct PlanView: View {
                     .foregroundColor(.inkPrimary)
             }
             Spacer()
+            if !viewModel.doors.isEmpty {
+                Button {
+                    showDoors = true
+                } label: {
+                    Label("Plan something", systemImage: "plus")
+                        .font(.hearthBodySM.weight(.semibold))
+                        .foregroundColor(.inkOnPhotoLight)
+                        .padding(.horizontal, .hearth400)
+                        .padding(.vertical, .hearth300)
+                        .background(Capsule().fill(Color.accentDefault))
+                }
+                .buttonStyle(.plain)
+            }
             planMenu
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -243,7 +265,7 @@ struct PlanView: View {
         case .chat:
             // The chat owns its own pinned input bar + scroll; MainTabView's
             // bottom padding already lifts the whole tab clear of the tab bar.
-            CosChatView(viewModel: cosVM)
+            CosChatView(viewModel: cosVM, doors: viewModel.doors)
 
         case .discover:
             ScrollView {
@@ -842,13 +864,32 @@ struct PlanView: View {
     @ViewBuilder
     private var boardSection: some View {
         if let board = viewModel.board {
-            let nonEmpty = board.stages.filter { !$0.activities.isEmpty }
+            // Vertical is an ATTRIBUTE + chip filter, never navigation: the
+            // chip row appears only when the board actually spans verticals.
+            let typeCounts = boardTypeCounts(board)
+            let multiVertical = typeCounts.count > 1
+            let nonEmpty = board.stages
+                .map { stage in
+                    BoardStage(
+                        key: stage.key, title: stage.title, blurb: stage.blurb,
+                        activities: typeFilter == nil
+                            ? stage.activities
+                            : stage.activities.filter {
+                                ($0.activityType ?? "camp") == typeFilter
+                            }
+                    )
+                }
+                .filter { !$0.activities.isEmpty }
             VStack(alignment: .leading, spacing: .hearth700) {
                 if !nonEmpty.isEmpty && !boardExplainerSeen {
                     boardExplainer
                 }
+                if multiVertical {
+                    verticalChipRow(typeCounts)
+                }
                 ForEach(nonEmpty) { stage in
-                    stageGroup(stage, gmailConnected: board.gmailConnected)
+                    stageGroup(stage, gmailConnected: board.gmailConnected,
+                               showVerticalChip: multiVertical)
                 }
                 if let considering = nonEmpty.first(where: { $0.key == "considering" }),
                    considering.activities.count >= 2 {
@@ -871,6 +912,68 @@ struct PlanView: View {
                 }
             }
         }
+    }
+
+    // MARK: - The five doors ("Plan something" disclosure)
+
+    /// One vertical = one door, copy served by the registry via
+    /// GET /cos/verticals (flags filter server-side; the client renders
+    /// whatever arrives — latent verticals are just doors with no items yet).
+    private var doorSheet: some View {
+        VStack(alignment: .leading, spacing: .hearth500) {
+            Text("Plan something")
+                .font(.hearthDisplayMD)
+                .foregroundColor(.inkPrimary)
+            Text("Pick a door — the chief of staff takes it from there.")
+                .font(.hearthBodySM)
+                .foregroundColor(.inkSecondary)
+            ForEach(viewModel.doors) { door in
+                Button {
+                    openDoor(door)
+                } label: {
+                    HStack(spacing: .hearth400) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(door.title)
+                                .font(.hearthBodyMD.weight(.semibold))
+                                .foregroundColor(.inkPrimary)
+                            Text(door.subtitle)
+                                .font(.hearthBodySM)
+                                .foregroundColor(.inkSecondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.inkMuted)
+                    }
+                    .padding(.hearth500)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                            .fill(Color.bgElevated)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                                    .stroke(Color.borderHairline, lineWidth: 1)
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.hearth700)
+        .background(Color.bgCanvas.ignoresSafeArea())
+    }
+
+    /// Door tap → the chat segment with the door's starter prompt sent as the
+    /// first turn. Tap distribution (door_opened/door_converted) informs which
+    /// vertical ships next.
+    private func openDoor(_ door: VerticalDoor) {
+        Analytics.capture("door_opened", ["door": door.key])
+        showDoors = false
+        withAnimation(.hearthFast) { segment = .chat }
+        cosVM.send(door.starterPrompt)
+        Analytics.capture("door_converted", ["door": door.key])
     }
 
     /// One-time first-run explainer: teaches the whole arc before the first tap
@@ -903,7 +1006,8 @@ struct PlanView: View {
         )
     }
 
-    private func stageGroup(_ stage: BoardStage, gmailConnected: Bool) -> some View {
+    private func stageGroup(_ stage: BoardStage, gmailConnected: Bool,
+                            showVerticalChip: Bool) -> some View {
         VStack(alignment: .leading, spacing: .hearth400) {
             HStack(alignment: .firstTextBaseline) {
                 Text(stage.title)
@@ -919,244 +1023,85 @@ struct PlanView: View {
                 .font(.hearthBodySM)
                 .foregroundColor(.inkSecondary)
             ForEach(stage.activities) { activity in
-                boardCard(activity, gmailConnected: gmailConnected)
-            }
-        }
-    }
-
-    private func boardCard(_ activity: BoardActivity, gmailConnected: Bool) -> some View {
-        let busy = viewModel.mutatingIds.contains(activity.id)
-        return VStack(alignment: .leading, spacing: .hearth400) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(activity.name)
-                    .font(.hearthBodyLG.weight(.semibold))
-                    .foregroundColor(.inkPrimary)
-                    .multilineTextAlignment(.leading)
-                Spacer()
-                cardOverflowMenu(activity)
-            }
-            HStack(spacing: .hearth300) {
-                if let kid = activity.kidName {
-                    Text(kid)
-                        .font(.hearthBodySM)
-                        .foregroundColor(.inkSecondary)
-                        .padding(.horizontal, .hearth400)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Color.accentTint))
-                }
-                if let provider = activity.provider {
-                    Text(provider)
-                        .font(.hearthBodySM)
-                        .foregroundColor(.inkSecondary)
-                }
-                Spacer(minLength: 0)
-                if let price = activity.priceAmount {
-                    Text("$\(Int(price))")
-                        .font(.hearthCaptionMono)
-                        .foregroundColor(.inkSecondary)
-                }
-            }
-            // Server-rendered date line — shown verbatim (never re-formatted here).
-            if let when = activity.when {
-                Text(when)
-                    .font(.hearthBodySM)
-                    .foregroundColor(.inkSecondary)
-            }
-            trackingLine(activity, gmailConnected: gmailConnected)
-            nextStepControls(activity)
-            // Any remaining open to-dos beyond the headline one, each completable.
-            if activity.openTodos.count > 1 {
-                VStack(alignment: .leading, spacing: .hearth300) {
-                    ForEach(activity.openTodos.dropFirst()) { todo in
-                        todoRow(todo)
-                    }
-                }
-            }
-        }
-        .padding(.hearth500)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(cardBackground)
-        .opacity(busy ? 0.55 : 1)
-        .disabled(busy)
-    }
-
-    /// Per-card secondary actions: Pass works from ANY stage (plans change even
-    /// after registering — a registered pass confirms first since it clears the
-    /// item's to-dos); declined cards gain a permanent, confirm-gated delete.
-    @ViewBuilder
-    private func cardOverflowMenu(_ activity: BoardActivity) -> some View {
-        let stage = activity.nextStep.stage
-        if stage == "considering" {
-            // Low-stakes: keep the direct inline Pass, no menu needed.
-            Button {
-                Task { await viewModel.advance(activity, to: "declined",
-                                               rationale: "Passed from the board") }
-            } label: {
-                Text("Pass")
-                    .font(.hearthBodySM)
-                    .foregroundColor(.inkMuted)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Pass on \(activity.name)")
-        } else {
-            Menu {
-                if stage == "declined" {
-                    Button(role: .destructive) { deleteTarget = activity } label: {
-                        Label("Delete forever", systemImage: "trash")
-                    }
-                } else if stage == "to_register" {
-                    Button {
-                        Task { await viewModel.advance(activity, to: "declined",
-                                                       rationale: "Passed from the board") }
-                    } label: {
-                        Label("Pass on this", systemImage: "xmark.circle")
-                    }
-                } else {
-                    // Registered / all-set: confirm first — passing clears its to-dos.
-                    Button { passTarget = activity } label: {
-                        Label("Pass on this", systemImage: "xmark.circle")
-                    }
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.inkMuted)
-                    .frame(width: 32, height: 32)
-            }
-            .accessibilityLabel("More actions for \(activity.name)")
-        }
-    }
-
-    /// The visible "this is what the system is doing" line — automated behavior
-    /// is never invisible (the lesson from the crisis-lock UX).
-    @ViewBuilder
-    private func trackingLine(_ activity: BoardActivity, gmailConnected: Bool) -> some View {
-        let stage = activity.nextStep.stage
-        if stage == "registered" || stage == "all_set" {
-            if activity.watching {
-                Label("Watching \(activity.provider ?? activity.name)'s emails for confirmations & payment reminders",
-                      systemImage: "eye")
-                    .font(.hearthBodySM)
-                    .foregroundColor(.inkMuted)
-            } else if !activity.watchable {
-                Label("Add the camp's contact email so I can watch for confirmations",
-                      systemImage: "envelope.badge")
-                    .font(.hearthBodySM)
-                    .foregroundColor(.statusWarning)
-            } else if !gmailConnected {
-                Label("Connect Gmail to auto-track camp emails — or paste a confirmation into Add info",
-                      systemImage: "envelope")
-                    .font(.hearthBodySM)
-                    .foregroundColor(.inkMuted)
-            }
-        }
-    }
-
-    /// The ONE primary next action; its hint (the consequence) renders right
-    /// under the button so a first-timer can predict the tap.
-    @ViewBuilder
-    private func nextStepControls(_ activity: BoardActivity) -> some View {
-        let step = activity.nextStep
-        VStack(alignment: .leading, spacing: .hearth300) {
-            switch step.action {
-            case "plan":
-                boardPrimaryButton(step.label, icon: "checkmark") {
-                    Task { await viewModel.advance(activity, to: "planned",
-                                                   rationale: "Chosen from the board") }
-                }
-            case "register":
-                HStack(spacing: .hearth400) {
-                    if let urlString = step.url, let url = URL(string: urlString) {
-                        Link(destination: url) {
-                            boardButtonLabel(step.label, icon: "arrow.up.right.square")
-                        }
-                    }
-                    Button {
-                        Task { await viewModel.advance(activity, to: "signed_up") }
-                    } label: {
-                        Text("Mark registered")
-                            .font(.hearthBodyMD.weight(.semibold))
-                            .foregroundColor(.accentDefault)
-                            .padding(.horizontal, .hearth500)
-                            .padding(.vertical, .hearth400)
-                            .background(Capsule().fill(Color.accentTint))
-                    }
-                    .buttonStyle(.plain)
-                }
-            case "mark_registered":
-                boardPrimaryButton(step.label, icon: "checkmark.seal") {
-                    Task { await viewModel.advance(activity, to: "signed_up") }
-                }
-            case "complete_todo":
-                boardPrimaryButton(step.label, icon: "checkmark.circle") {
-                    if let todoId = step.todoId {
+                BoardCardView(
+                    activity: activity,
+                    gmailConnected: gmailConnected,
+                    busy: viewModel.mutatingIds.contains(activity.id),
+                    showVerticalChip: showVerticalChip,
+                    busyTodoIds: viewModel.mutatingIds,
+                    onAdvance: { a, status, rationale in
+                        Task { await viewModel.advance(a, to: status, rationale: rationale) }
+                    },
+                    onCompleteTodo: { todoId in
                         Task { await viewModel.completeTodo(todoId) }
-                    }
-                }
-            case "resolve":
-                boardPrimaryButton(step.label, icon: "questionmark.circle") {
-                    withAnimation(.hearthFast) { segment = .chat }
-                    cosVM.send("Help me resolve this for \(activity.name): \(step.label)")
-                }
-            case "restore":
-                boardPrimaryButton(step.label, icon: "arrow.uturn.backward") {
-                    Task { await viewModel.advance(activity, to: "exploring") }
-                }
-            default:
-                EmptyView()
-            }
-            if !step.hint.isEmpty {
-                Text(step.hint)
-                    .font(.hearthBodySM)
-                    .foregroundColor(.inkMuted)
+                    },
+                    onResolveInChat: { a, label in
+                        withAnimation(.hearthFast) { segment = .chat }
+                        cosVM.send("Help me resolve this for \(a.name): \(label)")
+                    },
+                    onPassConfirm: { a in passTarget = a },
+                    onDeleteConfirm: { a in deleteTarget = a }
+                )
             }
         }
     }
 
-    private func boardPrimaryButton(_ title: String, icon: String,
-                                    action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            boardButtonLabel(title, icon: icon)
+    /// Board-wide activity counts per vertical (canonical keys; NULL→camp).
+    private func boardTypeCounts(_ board: PlanBoard) -> [(type: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        var order: [String] = []
+        for stage in board.stages {
+            for activity in stage.activities {
+                let t = activity.activityType ?? "camp"
+                if counts[t] == nil { order.append(t) }
+                counts[t, default: 0] += 1
+            }
+        }
+        return order.map { ($0, counts[$0] ?? 0) }
+    }
+
+    private func verticalChipRow(_ counts: [(type: String, count: Int)]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: .hearth300) {
+                filterChip("All", count: counts.reduce(0) { $0 + $1.count },
+                           selected: typeFilter == nil) { typeFilter = nil }
+                ForEach(counts, id: \.type) { entry in
+                    filterChip(BoardCardView.chipLabels[entry.type] ?? entry.type,
+                               count: entry.count,
+                               selected: typeFilter == entry.type) {
+                        typeFilter = typeFilter == entry.type ? nil : entry.type
+                    }
+                }
+            }
+        }
+    }
+
+    private func filterChip(_ label: String, count: Int, selected: Bool,
+                            action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.hearthFast) { action() }
+        } label: {
+            HStack(spacing: .hearth300) {
+                Text(label)
+                    .font(.hearthBodySM.weight(selected ? .semibold : .regular))
+                Text("\(count)")
+                    .font(.hearthCaptionMono)
+            }
+            .foregroundColor(selected ? .inkPrimary : .inkSecondary)
+            .padding(.horizontal, .hearth400)
+            .padding(.vertical, .hearth300)
+            .background(
+                Capsule()
+                    .fill(selected ? Color.accentTint : Color.bgElevated)
+                    .overlay(
+                        Capsule().stroke(
+                            selected ? Color.accentDefault : Color.borderHairline,
+                            lineWidth: 1
+                        )
+                    )
+            )
         }
         .buttonStyle(.plain)
-    }
-
-    private func boardButtonLabel(_ title: String, icon: String) -> some View {
-        Label(title, systemImage: icon)
-            .font(.hearthBodyMD.weight(.semibold))
-            .foregroundColor(.inkOnPhotoLight)
-            .lineLimit(2)
-            .multilineTextAlignment(.leading)
-            .padding(.horizontal, .hearth500)
-            .padding(.vertical, .hearth400)
-            .background(Capsule().fill(Color.accentDefault))
-    }
-
-    private func todoRow(_ todo: PlanTodo) -> some View {
-        let busy = viewModel.mutatingIds.contains(todo.id)
-        return HStack(spacing: .hearth300) {
-            Button {
-                Task { await viewModel.completeTodo(todo.id) }
-            } label: {
-                Image(systemName: "circle")
-                    .font(.system(size: 15))
-                    .foregroundColor(.accentDefault)
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Mark done: \(todo.title)")
-            Text(todo.title)
-                .font(.hearthBodySM)
-                .foregroundColor(.inkSecondary)
-            Spacer(minLength: 0)
-            if let due = todo.dueDate {
-                Text(due)
-                    .font(.hearthCaptionMono)
-                    .foregroundColor(.inkMuted)
-            }
-        }
-        .opacity(busy ? 0.55 : 1)
-        .disabled(busy)
     }
 
     // MARK: - Calendar (R4 — compact week×kid view)

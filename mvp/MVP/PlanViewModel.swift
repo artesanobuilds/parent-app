@@ -47,6 +47,19 @@ final class PlanViewModel: ObservableObject {
 
     // Lifecycle board: activities grouped by stage with next steps + to-dos.
     @Published private(set) var board: PlanBoard?
+
+    // Vertical doors for the "Plan something" disclosure. Rendered from a
+    // last-good cache immediately; refreshed with the plan (fail-open — a
+    // flag-eval outage or slow network never blanks the affordance).
+    @Published private(set) var doors: [VerticalDoor] = PlanViewModel.cachedDoors()
+    private static let doorsCacheKey = "vertical_doors_v1"
+
+    private static func cachedDoors() -> [VerticalDoor] {
+        guard let data = UserDefaults.standard.data(forKey: doorsCacheKey),
+              let doors = try? JSONDecoder().decode([VerticalDoor].self, from: data)
+        else { return [] }
+        return doors
+    }
     /// Activity/to-do ids with a mutation in flight (disables just that card).
     @Published private(set) var mutatingIds: Set<String> = []
 
@@ -435,6 +448,13 @@ final class PlanViewModel: ObservableObject {
             board = try await PlanService.board(baseURL: baseURL, userID: userId)
         } catch {
             print("[PlanViewModel] board failed: \(error)")
+        }
+        // Doors are best-effort: keep last-good on any failure.
+        if let fetched = try? await PlanService.verticals(baseURL: baseURL, userID: userId) {
+            doors = fetched
+            if let data = try? JSONEncoder().encode(fetched) {
+                UserDefaults.standard.set(data, forKey: Self.doorsCacheKey)
+            }
         }
     }
 
