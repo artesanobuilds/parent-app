@@ -41,6 +41,13 @@ EVENTS: dict[str, set[str]] = {
     # Content + navigation engagement (client)
     "content_opened": {"type"},                      # library article / community post
     "screen_viewed": {"screen"},                     # every screen (tabs + pushed/presented)
+    # Registration-window watchlist (Phase 4) — the retention pillar. Enums
+    # only: source manual|email|agent_research, confidence confirmed|estimated,
+    # kind t_minus_7|day_of.
+    "registration_window_watched": {"source", "confidence"},
+    "registration_window_notified": {"kind"},
+    "registration_window_confirmed": set(),   # the estimated→confirmed one-tap
+    "registration_window_dismissed": set(),
     # Vertical doors ("Plan something" disclosure). door = the vertical key.
     # Tap distribution across doors informs which vertical ships next
     # (plan one-agent-five-doors, Phase 3).

@@ -972,6 +972,50 @@ def _make_update_activity_tool(user_id: str):
     return UpdateActivity
 
 
+def _make_watch_registration_tool(user_id: str):
+    @tool
+    def WatchRegistration(
+        opens_at: str,
+        activity_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        signup_url: Optional[str] = None,
+        source: str = "manual",
+    ) -> str:
+        """Watch a registration window so the parent never misses a signup
+        opening. Use when the parent says WHEN registration opens ("rec soccer
+        signup opens August 12"). ``opens_at`` is an ISO date "YYYY-MM-DD"
+        (day known, exact time not) or a full datetime. Pass ``activity_id``
+        when it's for a tracked activity. ``source``: "manual" when the parent
+        told you the date; "agent_research" when YOU found it on the web (it's
+        then marked estimated and the parent gets asked to confirm). The app
+        reminds them 7 days out and again the day it opens."""
+        from app.analytics import flags
+
+        if not flags.is_enabled("registration-watchlist", user_id, default=True):
+            return "The registration watchlist isn't enabled for this account yet."
+        from app.watchlist.service import watch_registration
+
+        try:
+            window = watch_registration(
+                _storage(), user_id,
+                opens_at=opens_at, activity_id=activity_id,
+                provider=provider, signup_url=signup_url, source=source,
+            )
+        except Exception as exc:
+            # Durable-verified user-state write: failures SURFACE to the agent
+            # ("we're watching it" must be true the moment it's said).
+            return _tool_error("WatchRegistration", exc, user_id)
+        hedge = (" I've marked the date as unconfirmed and will ask them to "
+                 "verify it a week out." if window.get("confidence") == "estimated" else "")
+        return (
+            f"Watching it — registration opens {window.get('opens_at')}. "
+            f"I'll remind them a week ahead and the day it opens.{hedge} "
+            f"(window id={window['id']})"
+        )
+
+    return WatchRegistration
+
+
 def _make_untrack_activity_tool(user_id: str):
     @tool
     def UntrackActivity(activity_id: str) -> str:
@@ -1234,5 +1278,6 @@ def build_cos_tools(user_id: str) -> list:
         _make_start_discovery_tool(user_id),
         _make_suggest_outings_tool(user_id),
         _make_get_kids_info_tool(user_id),
+        _make_watch_registration_tool(user_id),
         _make_help_tool(user_id),
     ]

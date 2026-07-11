@@ -236,6 +236,16 @@ export interface NextStep {
   todo_id?: string | null; // action=complete_todo
 }
 
+// A watching registration window joined onto a board card (Phase 4).
+export interface RegistrationWindowInfo {
+  id: string;
+  opens_at: string | null;
+  // Server-rendered "Registration opens Aug 12 · watching" — verbatim.
+  line: string;
+  confidence: string; // confirmed | estimated
+  source: string; // manual | email | agent_research
+}
+
 export interface BoardActivity extends TrackedActivity {
   open_todos: BoardTodo[];
   next_step: NextStep;
@@ -244,6 +254,7 @@ export interface BoardActivity extends TrackedActivity {
   // Server-rendered date line ("Week of Jul 13" / "Tuesdays 4:00 PM") —
   // rendered VERBATIM; date-display logic never forks per client.
   when: string | null;
+  registration_window: RegistrationWindowInfo | null;
 }
 
 // One entry door from GET /cos/verticals (flag-filtered server-side; the ONE

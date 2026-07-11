@@ -186,6 +186,14 @@ def _friendly_time(hhmm: Optional[str]) -> Optional[str]:
         return None
 
 
+def _window_line(window: Dict[str, Any]) -> str:
+    """'Registration opens Aug 12 · watching' (+ estimated hedge)."""
+    short = _short_date(window.get("opens_at"))
+    when = f"opens {short}" if short else "window watched"
+    hedge = " (date unconfirmed)" if window.get("confidence") == "estimated" else ""
+    return f"Registration {when}{hedge} · watching"
+
+
 def format_when(activity: Dict[str, Any]) -> Optional[str]:
     """One human 'when' string for an activity card, decided by the DATA shape
     (an rrule row renders recurring even while its vertical profile is still
@@ -229,6 +237,7 @@ def build_board(
     todos: List[Dict[str, Any]],
     *,
     gmail_connected: bool = False,
+    registration_windows: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Group activities into board stages, joining each with its open to-dos and
     computed next_step. This one payload drives BOTH clients (iOS + web) so the
@@ -240,6 +249,14 @@ def build_board(
         aid = t.get("activity_id")
         if aid:
             open_by_activity.setdefault(aid, []).append(t)
+
+    # Watching registration windows, joined by activity (Phase 4): the card
+    # shows "Registration opens Aug 12 · watching" with confidence labeled —
+    # automated behavior is never invisible.
+    window_by_activity: Dict[str, Dict[str, Any]] = {}
+    for w in registration_windows or []:
+        if (w.get("status") == "watching") and w.get("activity_id"):
+            window_by_activity.setdefault(w["activity_id"], w)
 
     sections: Dict[str, List[Dict[str, Any]]] = {s["key"]: [] for s in STAGES}
     for a in activities:
@@ -253,6 +270,18 @@ def build_board(
         entry["activity_type"] = normalize_activity_type(a.get("activity_type"))
         # One server-rendered date string; clients show it verbatim.
         entry["when"] = format_when(a)
+        window = window_by_activity.get(a["id"])
+        entry["registration_window"] = (
+            {
+                "id": window.get("id"),
+                "opens_at": window.get("opens_at"),
+                # Server-rendered line, clients show verbatim (format_when rule).
+                "line": _window_line(window),
+                "confidence": window.get("confidence"),
+                "source": window.get("source"),
+            }
+            if window else None
+        )
         # A registered camp with no contact email can't be watched — surface it
         # so the client can ask for the email instead of silently not tracking.
         status = (a.get("status") or "").strip().lower()
@@ -343,6 +372,7 @@ def transition(
             on_enter_watched(storage, user_id, updated)
         elif entered_declined(old_status, new_status):
             on_enter_declined(storage, user_id, updated)
+        _maybe_watch_registration(storage, user_id, updated)
     return updated
 
 
@@ -350,6 +380,12 @@ def on_created(storage: Any, user_id: str, activity_id: str, status: Optional[st
     """Creating an activity directly in a watched status (e.g. "save the camp
     I already registered for") is also a registration — fire the same side
     effects as a transition into WATCHED. Never raises."""
+    try:
+        activity = storage.get_tracked_activity(activity_id)
+        if activity:
+            _maybe_watch_registration(storage, user_id, activity)
+    except Exception:  # noqa: BLE001 — best-effort side effects
+        pass
     if (status or "").strip().lower() not in WATCHED:
         return
     try:
@@ -362,6 +398,17 @@ def on_created(storage: Any, user_id: str, activity_id: str, status: Optional[st
             "[lifecycle] on_created side effects failed"
         )
         obs.count("cos.lifecycle.hook_error", hook="on_created")
+
+
+def _maybe_watch_registration(storage: Any, user_id: str, activity: Dict[str, Any]) -> None:
+    """Auto-create a registration window for watch-capable activities carrying
+    a known open date (Phase 4). Delegates to the watchlist's one write path;
+    best-effort by design."""
+    try:
+        from app.watchlist.service import maybe_watch_from_activity
+        maybe_watch_from_activity(storage, user_id, activity)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ── Transition side effects ──────────────────────────────────────────

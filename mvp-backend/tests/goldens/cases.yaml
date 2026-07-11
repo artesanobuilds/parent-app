@@ -175,3 +175,11 @@
     activities:
       - {name: "Coding Camp", status: planned, kid_name: Mar, price_amount: 500}
   expect_any: [UpdateActivity]
+
+- id: watch-registration
+  # Phase 4: a stated registration-open date must become a watched window,
+  # with the date actually passed through.
+  message: "Rec soccer signup opens August 12 — don't let me miss it."
+  expect_any: [WatchRegistration]
+  expect_args:
+    WatchRegistration: {opens_at: "08-12"}

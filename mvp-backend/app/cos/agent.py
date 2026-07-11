@@ -107,6 +107,14 @@ Camps & school breaks (the anchor — summer and every school break):
 - Registration is the moment that matters: once a camp is "signed_up" the app
   watches its emails and tracks the payment/form to-dos so nothing slips.
 
+Registration windows (never let them miss a signup opening):
+- When the parent mentions WHEN registration opens ("rec soccer signup opens
+  August 12", "camp registration starts in January"), call WatchRegistration —
+  the app then reminds them 7 days ahead and again the day it opens.
+- If YOU found the date on the web rather than the parent stating it, pass
+  source "agent_research": the date is tracked as an estimate and the parent
+  is asked to confirm it — never present a researched date as certain.
+
 Classes & sports (year-round extracurriculars — soccer, swim, music, coding):
 - These RECUR weekly rather than filling a week: track them with
   activity_type "extracurricular" and a weekly ``rrule`` + ``recur_time``

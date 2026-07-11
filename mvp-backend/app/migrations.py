@@ -235,6 +235,13 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
     # display hints only. Idempotent (WHERE start_date IS NULL).
     (17, "tracked_activities.date_model",
      lambda con: _add_tracked_activity_dates(con)),
+    # Vertical expansion Phase 4: registration-window watchlist. Both tables
+    # are NEW (CREATE IF NOT EXISTS in ACTIVITY_DDL covers fresh and legacy
+    # DBs alike), so this is a marker: it records WHEN the watchlist schema
+    # arrived, and pins the tables' registration in BOOTSTRAP_TABLES + the
+    # .dockerignore exclusions (a volume rebuild must never silently delete
+    # the watchlist — it IS the product promise).
+    (18, "watchlist.registration_windows", None),
 ]
 
 

@@ -129,6 +129,13 @@ export function BoardCard({
       </div>
       {/* Server-rendered date line — shown verbatim (never re-formatted here) */}
       {a.when && <div className="mt-200 text-sm text-ink-secondary">{a.when}</div>}
+      {/* Registration watchlist line (Phase 4) — the watching is never invisible */}
+      {a.registration_window && (
+        <div className="mt-200 flex items-center gap-200 text-xs text-ink-muted">
+          <Eye className="w-4 h-4 shrink-0" />
+          <span>{a.registration_window.line}</span>
+        </div>
+      )}
 
       {/* The ONE primary action, hint (its consequence) directly underneath */}
       {step.action !== 'none' && (

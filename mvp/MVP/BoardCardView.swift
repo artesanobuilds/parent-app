@@ -83,6 +83,12 @@ struct BoardCardView: View {
                     .font(.hearthBodySM)
                     .foregroundColor(.inkSecondary)
             }
+            // Registration watchlist line (Phase 4) — watching is never invisible.
+            if let window = activity.registrationWindow {
+                Label(window.line, systemImage: "bell")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+            }
             trackingLine
             nextStepControls
             // Any remaining open to-dos beyond the headline one, each completable.

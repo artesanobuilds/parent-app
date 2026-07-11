@@ -111,6 +111,27 @@ def count(name: str, n: int = 1, **labels: Any) -> None:
         pass
 
 
+_histograms: dict = {}
+
+
+def observe(name: str, value: float, **labels: Any) -> None:
+    """Histogram twin of count() — same no-op/swallow-safe posture. Used for
+    the watchlist's delivery latency (a growing due→sent lag predicts misses
+    before the miss detector fires)."""
+    if not _otel_on:
+        return
+    try:
+        from opentelemetry import metrics
+
+        hist = _histograms.get(name)
+        if hist is None:
+            hist = metrics.get_meter("mvp.domain").create_histogram(name)
+            _histograms[name] = hist
+        hist.record(value, {k: str(v) for k, v in labels.items() if v is not None})
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # ── Metrics: OpenTelemetry (OTLP push) → Grafana Cloud ───────────────────────
 
 def init_otel(app: Any) -> bool:
@@ -198,4 +219,57 @@ def register_domain_metrics(storage: Any) -> bool:
         description="Research runs currently queued or running",
     )
     logger.info("[observability] domain metrics registered (research run health)")
+    return True
+
+
+def register_watchlist_metrics(storage: Any) -> bool:
+    """Watchlist SLO gauges (vertical expansion Phase 4). Grafana alerts on:
+    heartbeat > 3× poll (worker dead/hung) and missed > 0 (a watching window
+    passed its opens_at with no day_of delivery — a broken promise)."""
+    if not _otel_on:
+        return False
+    try:
+        from opentelemetry import metrics
+        from opentelemetry.metrics import Observation
+    except Exception:  # noqa: BLE001
+        return False
+
+    import time as _time
+
+    meter = metrics.get_meter("mvp.domain")
+
+    def _seconds_since_tick(_options):
+        try:
+            from app.watchlist import worker as wl_worker
+            if wl_worker.last_tick_at is None:
+                return []  # not ticked yet (boot) — absence, not zero
+            return [Observation(float(_time.time() - wl_worker.last_tick_at))]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _watching(_options):
+        try:
+            return [Observation(len(storage.list_watching_windows()))]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _missed(_options):
+        try:
+            return [Observation(int(storage.count_missed_windows()))]
+        except Exception:  # noqa: BLE001
+            return []
+
+    meter.create_observable_gauge(
+        "watchlist.seconds_since_last_tick", callbacks=[_seconds_since_tick],
+        unit="s", description="Age of the watchlist worker's last sweep (heartbeat)",
+    )
+    meter.create_observable_gauge(
+        "watchlist.windows.watching", callbacks=[_watching], unit="1",
+        description="Registration windows currently being watched",
+    )
+    meter.create_observable_gauge(
+        "watchlist.windows.missed", callbacks=[_missed], unit="1",
+        description="Watching windows past opens_at with no day_of delivery — MUST be 0",
+    )
+    logger.info("[observability] watchlist SLO metrics registered")
     return True

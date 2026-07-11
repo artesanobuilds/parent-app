@@ -265,7 +265,84 @@ def plan_board(user_id: str = Depends(current_user)):
         storage.list_tracked_activities(user_id),
         storage.list_todos(user_id),
         gmail_connected=lifecycle.gmail_connected(storage, user_id),
+        registration_windows=storage.list_registration_windows(
+            user_id, status="watching"
+        ),
     )
+
+
+# ── Registration-window watchlist (Phase 4) ──────────────────────────
+
+
+class WatchWindowBody(BaseModel):
+    user_id: str
+    opens_at: str  # ISO date ("2026-08-12", local-day semantics) or datetime
+    activity_id: Optional[str] = None
+    provider: Optional[str] = None
+    signup_url: Optional[str] = None
+    closes_at: Optional[str] = None
+    source: str = "manual"
+
+
+class WindowPatch(BaseModel):
+    user_id: str
+    # dismiss | confirm — confirm flips an estimated date to confirmed (the
+    # trust design's one-tap), optionally with a corrected opens_at.
+    action: str
+    opens_at: Optional[str] = None
+
+
+@router.get("/windows")
+def list_windows(status: Optional[str] = None, user_id: str = Depends(current_user)):
+    return {"windows": _storage().list_registration_windows(user_id, status=status)}
+
+
+@router.post("/windows")
+def create_window(body: WatchWindowBody, user_id: str = Depends(current_user)):
+    authorize_user_match(authenticated=user_id, claimed=body.user_id)
+    from app.watchlist.service import watch_registration
+
+    try:
+        window = watch_registration(
+            _storage(), user_id,
+            opens_at=body.opens_at, activity_id=body.activity_id,
+            provider=body.provider, signup_url=body.signup_url,
+            closes_at=body.closes_at, source=body.source,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"window": window}
+
+
+@router.patch("/windows/{window_id}")
+def patch_window(
+    window_id: str, body: WindowPatch, user_id: str = Depends(current_user)
+):
+    authorize_user_match(authenticated=user_id, claimed=body.user_id)
+    storage = _storage()
+    window = storage.get_registration_window(window_id)
+    if not window:
+        raise HTTPException(status_code=404, detail="window not found")
+    authorize_user_match(authenticated=user_id, claimed=window["user_id"], resource=True)
+
+    if body.action == "dismiss":
+        storage.update_registration_window(window_id, status="dismissed")
+        _track("registration_window_dismissed", user_id, {})
+    elif body.action == "confirm":
+        fields: Dict[str, Any] = {"confidence": "confirmed"}
+        if body.opens_at:
+            from app.watchlist import windows as W
+            parsed = W.parse_ts(body.opens_at)
+            if parsed is None:
+                raise HTTPException(status_code=422, detail="bad opens_at")
+            # A changed opens_at is a NEW snapshot — the delivery log's
+            # NOT-EXISTS guard re-arms both notifications automatically.
+            fields["opens_at"] = parsed.isoformat()
+        storage.update_registration_window(window_id, **fields)
+        _track("registration_window_confirmed", user_id, {})
+    else:
+        raise HTTPException(status_code=422, detail="action must be dismiss or confirm")
+    return {"window": storage.get_registration_window(window_id)}
 
 
 def _door_payload(profile) -> Dict[str, Any]:

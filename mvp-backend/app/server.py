@@ -92,6 +92,13 @@ async def lifespan(app: FastAPI):
         init_calendar_sync_worker(storage_backend).start()
     except Exception:
         logger.exception("[calendar-sync] worker failed to start")
+    # Registration-window watchlist (Phase 4): catch-up sweep with due-time
+    # semantics — any downtime is repaired within one poll of boot.
+    try:
+        from app.watchlist.worker import init_worker as init_watchlist_worker
+        init_watchlist_worker(storage_backend).start()
+    except Exception:
+        logger.exception("[watchlist] worker failed to start")
     yield
     try:
         from app.research.worker import research_worker
@@ -111,6 +118,12 @@ async def lifespan(app: FastAPI):
             calendar_sync_worker.stop()
     except Exception:
         logger.exception("[calendar-sync] worker failed to stop cleanly")
+    try:
+        from app.watchlist.worker import watchlist_worker
+        if watchlist_worker is not None:
+            watchlist_worker.stop()
+    except Exception:
+        logger.exception("[watchlist] worker failed to stop cleanly")
     persist_state()
     try:
         from app.analytics import shutdown as analytics_shutdown
@@ -143,9 +156,10 @@ app.include_router(calendar_sync_router)
 # Metrics via OpenTelemetry → Grafana Cloud (gated on OTEL_EXPORTER_OTLP_ENDPOINT —
 # no-op if unset). Instrument after the app + routers exist; register the domain
 # gauges that read research-run health. See setup/grafana-observability-setup.md.
-from app.observability import init_otel, register_domain_metrics
+from app.observability import init_otel, register_domain_metrics, register_watchlist_metrics
 if init_otel(app):
     register_domain_metrics(storage_backend)
+    register_watchlist_metrics(storage_backend)
 
 # Lock CORS to known origins. Env: ALLOWED_ORIGINS=https://a.com,https://b.com
 # Default keeps localhost dev usable. iOS does not need CORS (not a browser).

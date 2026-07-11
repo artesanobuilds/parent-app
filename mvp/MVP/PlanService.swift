@@ -210,6 +210,8 @@ struct BoardActivity: Codable, Identifiable, Hashable {
     /// Server-rendered date line ("Week of Jul 13" / "Tuesdays 4:00 PM") —
     /// rendered VERBATIM; date-display logic never forks per client.
     let when: String?
+    /// A watching registration window joined onto the card (Phase 4).
+    let registrationWindow: RegistrationWindowInfo?
 
     enum CodingKeys: String, CodingKey {
         case id, name, status, provider, watchable, watching, when
@@ -220,6 +222,22 @@ struct BoardActivity: Codable, Identifiable, Hashable {
         case openTodos = "open_todos"
         case nextStep = "next_step"
         case activityType = "activity_type"
+        case registrationWindow = "registration_window"
+    }
+}
+
+/// "Registration opens Aug 12 · watching" — the server renders `line`; the
+/// client shows it verbatim (same rule as `when`).
+struct RegistrationWindowInfo: Codable, Hashable {
+    let id: String?
+    let opensAt: String?
+    let line: String
+    let confidence: String?
+    let source: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, line, confidence, source
+        case opensAt = "opens_at"
     }
 }
 

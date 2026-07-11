@@ -702,6 +702,46 @@ class DuckDBStorage(StorageBackend):
         value      JSON NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT now()
     );
+
+    -- Registration-window watchlist (vertical expansion Phase 4, GTM Pillar 1).
+    -- A window = "registration for X opens at T" that the parent must not miss.
+    -- Buckets like "opening soon" are DERIVED from opens_at at read time and
+    -- never stored. status is watching, dismissed or closed.
+    CREATE TABLE IF NOT EXISTS registration_windows (
+        id               TEXT PRIMARY KEY,
+        user_id          TEXT NOT NULL,
+        activity_id      TEXT,                     -- nullable link to tracked_activities.id
+        provider         TEXT,
+        signup_url       TEXT,
+        opens_at         TIMESTAMPTZ,              -- UTC. Local rules use tz
+        tz               TEXT,                     -- IANA, from the family ZIP
+        opens_time_known BOOLEAN NOT NULL DEFAULT FALSE,
+        closes_at        TIMESTAMPTZ,
+        source           TEXT NOT NULL DEFAULT 'manual',      -- manual, email or agent_research
+        confidence       TEXT NOT NULL DEFAULT 'confirmed',   -- confirmed or estimated
+        status           TEXT NOT NULL DEFAULT 'watching',
+        metro            TEXT,
+        created_at       TIMESTAMPTZ DEFAULT now(),
+        updated_at       TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_registration_windows_user ON registration_windows (user_id, status);
+    CREATE INDEX IF NOT EXISTS idx_registration_windows_status ON registration_windows (status, opens_at);
+
+    -- Append-only delivery log. The (window_id, kind, opens_at_snapshot)
+    -- NOT-EXISTS due-selection is simultaneously restart idempotency, re-arm
+    -- on date change (new opens_at = new snapshot) and the audit trail.
+    CREATE TABLE IF NOT EXISTS window_notifications (
+        id                TEXT PRIMARY KEY,
+        window_id         TEXT NOT NULL,
+        kind              TEXT NOT NULL,            -- t_minus_7 or day_of
+        opens_at_snapshot TIMESTAMPTZ,
+        sent_at           TIMESTAMPTZ DEFAULT now(),
+        transport         TEXT,                     -- push or todo_only
+        outcome           TEXT                      -- sent, no_push_token, failed or disabled
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_window_notifications_window ON window_notifications (window_id, kind);
     """
 
     # Every table that must survive a volume rebuild, mapped to its parquet
@@ -747,6 +787,11 @@ class DuckDBStorage(StorageBackend):
         ("email_sync_runs", "email_sync_runs.parquet"),
         ("calendar_sync_runs", "calendar_sync_runs.parquet"),
         ("agent_config", "agent_config.parquet"),
+        # Registration-window watchlist (Phase 4). A volume rebuild that loses
+        # these silently deletes the product's core promise — export/bootstrap
+        # them like every other user-state table.
+        ("registration_windows", "registration_windows.parquet"),
+        ("window_notifications", "window_notifications.parquet"),
     ]
 
     def __init__(self, db_path: Path | str | None = None) -> None:
@@ -2015,6 +2060,19 @@ class DuckDBStorage(StorageBackend):
             else:
                 deleted["kid_messages"] = 0
 
+            # window_notifications is keyed by window_id, not user_id — cascade
+            # it via the user's windows BEFORE the windows themselves go.
+            deleted["window_notifications"] = self._con.execute(
+                "SELECT count(*) FROM window_notifications WHERE window_id IN "
+                "(SELECT id FROM registration_windows WHERE user_id = ?)",
+                [user_id],
+            ).fetchone()[0]
+            self._con.execute(
+                "DELETE FROM window_notifications WHERE window_id IN "
+                "(SELECT id FROM registration_windows WHERE user_id = ?)",
+                [user_id],
+            )
+
             for table in [
                 "kid_agent_crisis_locks",
                 "kid_agent_configs",
@@ -2045,6 +2103,7 @@ class DuckDBStorage(StorageBackend):
                 "integration_accounts",
                 "email_sync_runs",
                 "calendar_sync_runs",
+                "registration_windows",  # window_notifications cascade above
             ]:
                 pre = self._con.execute(
                     f"SELECT count(*) FROM {table} WHERE user_id = ?",
@@ -3147,6 +3206,14 @@ class DuckDBStorage(StorageBackend):
             self._con.execute(
                 "DELETE FROM recurring_appointments WHERE activity_id = ?", [activity_id]
             )
+            self._con.execute(
+                "DELETE FROM window_notifications WHERE window_id IN "
+                "(SELECT id FROM registration_windows WHERE activity_id = ?)",
+                [activity_id],
+            )
+            self._con.execute(
+                "DELETE FROM registration_windows WHERE activity_id = ?", [activity_id]
+            )
             self._con.execute("DELETE FROM tracked_activities WHERE id = ?", [activity_id])
 
     def reset_plan(self, *, user_id: str, actor: str) -> Dict[str, int]:
@@ -3166,9 +3233,15 @@ class DuckDBStorage(StorageBackend):
             "activity_candidates",
             "research_runs",
             "ingest_artifacts",
+            "registration_windows",  # notifications cascade below
         ]
         deleted: Dict[str, int] = {}
         with self._con.transaction():
+            self._con.execute(
+                "DELETE FROM window_notifications WHERE window_id IN "
+                "(SELECT id FROM registration_windows WHERE user_id = ?)",
+                [user_id],
+            )
             for table in tables:
                 deleted[table] = self._con.execute(
                     f"SELECT count(*) FROM {table} WHERE user_id = ?", [user_id]
@@ -3179,6 +3252,170 @@ class DuckDBStorage(StorageBackend):
             details={"counts": deleted},
         )
         return deleted
+
+    # registration windows (Phase 4 watchlist) ------------------------------
+
+    _WINDOW_COLS = (
+        "id", "user_id", "activity_id", "provider", "signup_url",
+        "opens_at", "tz", "opens_time_known", "closes_at",
+        "source", "confidence", "status", "metro", "created_at", "updated_at",
+    )
+    _WINDOW_TS = ("opens_at", "closes_at", "created_at", "updated_at")
+
+    def transaction(self):
+        """Public transaction context (holds the connection lock across the
+        block). The watchlist worker's durable-first delivery uses this:
+        notification row + fallback to-do commit atomically BEFORE any push."""
+        return self._con.transaction()
+
+    def create_registration_window(
+        self,
+        user_id: str,
+        *,
+        activity_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        signup_url: Optional[str] = None,
+        opens_at: Optional[str] = None,
+        tz: Optional[str] = None,
+        opens_time_known: bool = False,
+        closes_at: Optional[str] = None,
+        source: str = "manual",
+        confidence: str = "confirmed",
+        metro: Optional[str] = None,
+    ) -> str:
+        import uuid
+        window_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO registration_windows (
+                id, user_id, activity_id, provider, signup_url, opens_at, tz,
+                opens_time_known, closes_at, source, confidence, status, metro,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'watching', ?, now(), now())
+            """,
+            [window_id, user_id, activity_id, provider, signup_url, opens_at,
+             tz, bool(opens_time_known), closes_at, source, confidence, metro],
+        )
+        return window_id
+
+    def get_registration_window(self, window_id: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {', '.join(self._WINDOW_COLS)} FROM registration_windows WHERE id = ?",
+            [window_id],
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(self._WINDOW_COLS, row, ts_cols=self._WINDOW_TS)
+
+    def list_registration_windows(
+        self, user_id: str, status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        where = "WHERE user_id = ?"
+        params: List[Any] = [user_id]
+        if status is not None:
+            where += " AND status = ?"
+            params.append(status)
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._WINDOW_COLS)} FROM registration_windows "
+            f"{where} ORDER BY opens_at NULLS LAST, created_at",
+            params,
+        ).fetchall()
+        return [self._row_to_dict(self._WINDOW_COLS, r, ts_cols=self._WINDOW_TS)
+                for r in rows]
+
+    def list_watching_windows(self) -> List[Dict[str, Any]]:
+        """Every watching window across ALL users — the worker's sweep input."""
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._WINDOW_COLS)} FROM registration_windows "
+            "WHERE status = 'watching' ORDER BY opens_at NULLS LAST",
+        ).fetchall()
+        return [self._row_to_dict(self._WINDOW_COLS, r, ts_cols=self._WINDOW_TS)
+                for r in rows]
+
+    def update_registration_window(self, window_id: str, **fields: Any) -> None:
+        allowed = {
+            "activity_id", "provider", "signup_url", "opens_at", "tz",
+            "opens_time_known", "closes_at", "source", "confidence",
+            "status", "metro",
+        }
+        patch = {k: v for k, v in fields.items() if k in allowed}
+        if not patch:
+            return
+        sets = ", ".join(f"{k} = ?" for k in patch)
+        self._con.execute(
+            f"UPDATE registration_windows SET {sets}, updated_at = now() WHERE id = ?",
+            [*patch.values(), window_id],
+        )
+
+    # Append-only delivery log ----------------------------------------------
+
+    def window_notification_exists(
+        self, window_id: str, kind: str, opens_at_snapshot: Optional[str]
+    ) -> bool:
+        """The due-selection guard: one delivery per (window, kind, snapshot).
+        A CHANGED opens_at is a new snapshot → the window re-arms by design."""
+        row = self._con.execute(
+            "SELECT 1 FROM window_notifications WHERE window_id = ? AND kind = ? "
+            "AND opens_at_snapshot IS NOT DISTINCT FROM ? LIMIT 1",
+            [window_id, kind, opens_at_snapshot],
+        ).fetchone()
+        return row is not None
+
+    def insert_window_notification(
+        self,
+        *,
+        window_id: str,
+        kind: str,
+        opens_at_snapshot: Optional[str],
+        transport: str,
+        outcome: Optional[str] = None,
+    ) -> str:
+        import uuid
+        notification_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO window_notifications (
+                id, window_id, kind, opens_at_snapshot, sent_at, transport, outcome
+            ) VALUES (?, ?, ?, ?, now(), ?, ?)
+            """,
+            [notification_id, window_id, kind, opens_at_snapshot, transport, outcome],
+        )
+        return notification_id
+
+    def set_window_notification_outcome(self, notification_id: str, outcome: str) -> None:
+        self._con.execute(
+            "UPDATE window_notifications SET outcome = ? WHERE id = ?",
+            [outcome, notification_id],
+        )
+
+    def list_window_notifications(self, window_id: str) -> List[Dict[str, Any]]:
+        cols = ("id", "window_id", "kind", "opens_at_snapshot", "sent_at",
+                "transport", "outcome")
+        rows = self._con.execute(
+            f"SELECT {', '.join(cols)} FROM window_notifications "
+            "WHERE window_id = ? ORDER BY sent_at",
+            [window_id],
+        ).fetchall()
+        return [self._row_to_dict(cols, r, ts_cols=("opens_at_snapshot", "sent_at"))
+                for r in rows]
+
+    def count_missed_windows(self) -> int:
+        """The miss detector's input: watching windows already PAST opens_at
+        with no day_of delivery row for the current snapshot. Anything > 0 is
+        a broken promise — Grafana alerts on it."""
+        row = self._con.execute(
+            """
+            SELECT count(*) FROM registration_windows w
+            WHERE w.status = 'watching' AND w.opens_at IS NOT NULL
+              AND w.opens_at < now()
+              AND NOT EXISTS (
+                  SELECT 1 FROM window_notifications n
+                  WHERE n.window_id = w.id AND n.kind = 'day_of'
+                    AND n.opens_at_snapshot IS NOT DISTINCT FROM w.opens_at
+              )
+            """,
+        ).fetchone()
+        return int(row[0]) if row else 0
 
     # calendar_entries ------------------------------------------------------
 

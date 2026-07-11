@@ -1,0 +1,43 @@
+spec:
+  name: registration-watch
+  tier: 1
+  modules: [cos, chat, watchlist]
+  intent: >
+    Registration-window watchlist (vertical expansion Phase 4, GTM Pillar 1):
+    a parent tells the agent when a signup opens ("rec soccer signup opens
+    August 12 — don't let me miss it"). The agent must create a WATCHING
+    registration window (WatchRegistration → the one write path), readable via
+    GET /cos/windows with confirmed confidence (the parent stated the date)
+    and a future opens_at. Dismissing the window via PATCH quiets it. This is
+    the black-box lock on the product promise: say the date once, it is
+    watched.
+
+  personas:
+    parent:
+      preset: existing-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "RUN_OPENAI_FLOWS=true (/cos/chat runs against OpenAI; skipped otherwise)"
+
+  invariants:
+    - "POST /cos/chat about the August 12 signup completes with a non-empty reply"
+    - "GET /cos/windows contains a watching window whose opens_at falls in August"
+    - "The window's confidence is 'confirmed' (parent-stated dates are the 100% promise)"
+    - "PATCH /cos/windows/{id} action=dismiss flips status to dismissed"
+
+  boundary_contracts:
+    - endpoint: POST /cos/chat
+      as: parent
+      streaming: true
+      status: 200
+
+    - endpoint: GET /cos/windows
+      as: parent
+      status: 200
+      response_includes: [windows]
+
+    - endpoint: PATCH /cos/windows/{window_id}
+      as: parent
+      status: 200
+      response_includes: [window]

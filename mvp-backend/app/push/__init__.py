@@ -126,39 +126,43 @@ def _provider_jwt() -> str:
         return _jwt_cache
 
 
-def send_crisis_push(*, storage: Any, user_id: str, kid_name: str, agent_id: str) -> None:
-    """Notify the parent that a companion was paused for safety. No-op when APNs
-    is unconfigured. Fire-and-forget: dispatched on a daemon thread, never raises."""
+def send_push(
+    *,
+    storage: Any,
+    user_id: str,
+    title: str,
+    body: str,
+    data: Optional[dict] = None,
+    interruption_level: str = "time-sensitive",
+) -> str:
+    """BLOCKING generic push to all of a user's devices, returning the outcome
+    the caller must record: 'disabled' | 'no_push_token' | 'sent' | 'failed'.
+
+    Extracted from the crisis push for the watchlist's durable-first delivery
+    (vertical expansion Phase 4): the watchlist worker needs the outcome to
+    write into the append-only window_notifications log — a fire-and-forget
+    send can't keep a notification SLO. 'sent' means at least one device
+    accepted. Never raises."""
     if not _apns_on:
-        return
-    threading.Thread(
-        target=_send_blocking,
-        kwargs={"storage": storage, "user_id": user_id, "kid_name": kid_name, "agent_id": agent_id},
-        daemon=True,
-    ).start()
-
-
-def _send_blocking(*, storage: Any, user_id: str, kid_name: str, agent_id: str) -> None:
+        return "disabled"
     try:
         tokens: List[str] = storage.list_push_tokens(user_id)
     except Exception as exc:
         logger.warning("[push] could not load device tokens for %s: %s", user_id, exc)
-        return
+        return "failed"
     if not tokens:
-        return
+        # The silent-majority failure mode: the promise can't reach a phone.
+        # Callers surface this in the UI ("notifications are off").
+        return "no_push_token"
     payload = json.dumps({
         "aps": {
-            "alert": {
-                "title": f"{kid_name}'s companion was paused",
-                "body": "A message was flagged by the safety filter. Tap to review.",
-            },
+            "alert": {"title": title, "body": body},
             "sound": "default",
-            "interruption-level": "time-sensitive",
+            "interruption-level": interruption_level,
         },
-        "type": "crisis_lock",
-        "kid_name": kid_name,
-        "agent_id": agent_id,
+        **(data or {}),
     }).encode()
+    delivered = 0
     try:
         import httpx
         jwt = _provider_jwt()
@@ -172,14 +176,36 @@ def _send_blocking(*, storage: Any, user_id: str, kid_name: str, agent_id: str) 
             for token in tokens:
                 try:
                     resp = client.post(f"{_host}/3/device/{token}", content=payload, headers=headers)
-                    if resp.status_code == 410:  # device unregistered — prune
+                    if resp.status_code < 300:
+                        delivered += 1
+                    elif resp.status_code == 410:  # device unregistered — prune
                         try:
                             storage.delete_push_token(token)
                         except Exception:
                             pass
-                    elif resp.status_code >= 300:
+                    else:
                         logger.warning("[push] APNs %s for a token: %s", resp.status_code, resp.text[:160])
                 except Exception as exc:
                     logger.warning("[push] send failed for a token: %s", exc)
     except Exception as exc:
-        logger.warning("[push] crisis push failed: %s", exc)
+        logger.warning("[push] send_push failed: %s", exc)
+        return "failed"
+    return "sent" if delivered else "failed"
+
+
+def send_crisis_push(*, storage: Any, user_id: str, kid_name: str, agent_id: str) -> None:
+    """Notify the parent that a companion was paused for safety. No-op when APNs
+    is unconfigured. Fire-and-forget: dispatched on a daemon thread, never
+    raises — a fire-and-forget caller of the blocking send_push."""
+    if not _apns_on:
+        return
+    threading.Thread(
+        target=lambda: send_push(
+            storage=storage,
+            user_id=user_id,
+            title=f"{kid_name}'s companion was paused",
+            body="A message was flagged by the safety filter. Tap to review.",
+            data={"type": "crisis_lock", "kid_name": kid_name, "agent_id": agent_id},
+        ),
+        daemon=True,
+    ).start()
