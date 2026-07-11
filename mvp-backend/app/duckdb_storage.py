@@ -2977,6 +2977,10 @@ class DuckDBStorage(StorageBackend):
         if not activity:
             raise ValueError(f"tracked activity {activity_id} not found")
 
+        from app import observability as obs
+        obs.count("cos.dates.write",
+                  date_model="recurring_weekly" if rrule else "week_block")
+
         if rrule:
             self._con.execute(
                 """

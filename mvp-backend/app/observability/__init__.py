@@ -86,6 +86,31 @@ def capture_exception(exc: BaseException, **tags: Any) -> None:
         pass
 
 
+# ── Domain counters (vertical expansion Phase 3.9) ───────────────────────────
+# One facade so call sites stay one-liners: count("cos.doors.request",
+# fail_open=False). No-op when OTel is off (local/tests/CI), swallow-safe
+# always — telemetry must never break the caller. Label discipline (BINDING,
+# see the plan's telemetry section): ≤2 labels per metric, enum values only —
+# bounded cardinality is what keeps Grafana Cloud usable/free.
+
+_counters: dict = {}
+
+
+def count(name: str, n: int = 1, **labels: Any) -> None:
+    if not _otel_on:
+        return
+    try:
+        from opentelemetry import metrics
+
+        counter = _counters.get(name)
+        if counter is None:
+            counter = metrics.get_meter("mvp.domain").create_counter(name)
+            _counters[name] = counter
+        counter.add(n, {k: str(v) for k, v in labels.items() if v is not None})
+    except Exception:  # noqa: BLE001 — telemetry must never break the caller
+        pass
+
+
 # ── Metrics: OpenTelemetry (OTLP push) → Grafana Cloud ───────────────────────
 
 def init_otel(app: Any) -> bool:

@@ -28,7 +28,11 @@ EVENTS: dict[str, set[str]] = {
     # Research / activity planning
     "research_run_started": set(),
     "research_run_completed": {"status", "duration_s", "candidate_count"},
-    "activity_tracked": {"status"},
+    # activity_type/date_model = the per-vertical funnel segmentation
+    # (vertical expansion Phase 3.9). Enums only, never names.
+    "activity_tracked": {"status", "activity_type", "date_model"},
+    # Fired from lifecycle.transition — the Considering→All-set funnel.
+    "activity_stage_advanced": {"to_stage", "activity_type"},
     "plan_exported": {"format"},
     # Voice
     "voice_session_started": {"surface"},

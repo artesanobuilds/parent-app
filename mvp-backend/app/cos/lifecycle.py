@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from app import observability as obs
 from app.cos.verticals import get_profile, normalize_activity_type
 
 # ── The status groups ────────────────────────────────────────────────
@@ -269,6 +270,44 @@ def build_board(
     }
 
 
+def _status_group(status: Optional[str]) -> str:
+    """The lifecycle group a status belongs to — the funnel unit for telemetry
+    (deliberately NOT stage_for, whose registered/all_set split depends on
+    open-todo count and would make the product funnel noisy)."""
+    s = (status or "").strip().lower()
+    if s in PLANNED:
+        return "to_register"
+    if s in WATCHED:
+        return "registered"
+    if s in DONE:
+        return "done"
+    if s in BLOCKED:
+        return "blocked"
+    if s in DECLINED:
+        return "declined"
+    return "considering"
+
+
+def _capture(event: str, user_id: str, props: Dict[str, Any]) -> None:
+    """Fire-and-forget PostHog capture (same posture as server._track)."""
+    try:
+        from app.analytics import capture
+        capture(event, user_id, props)
+    except Exception:  # noqa: BLE001 — analytics must never break a mutation
+        pass
+
+
+def _observe_transition(user_id: str, activity: Dict[str, Any], new_status: str) -> None:
+    """One place emits both telemetry channels for a status change:
+    Grafana counter (system health) + PostHog event (the per-vertical
+    Considering→All-set funnel, the product's core loop)."""
+    to_stage = _status_group(new_status)
+    atype = normalize_activity_type(activity.get("activity_type"))
+    obs.count("cos.lifecycle.transition", to_stage=to_stage, activity_type=atype)
+    _capture("activity_stage_advanced", user_id,
+             {"to_stage": to_stage, "activity_type": atype})
+
+
 # ── The one status write path ────────────────────────────────────────
 # Before these two functions, the "fire on_enter_watched/on_enter_declined
 # when a status crosses" obligation was re-implemented at ~7 call sites
@@ -298,6 +337,7 @@ def transition(
     storage.update_tracked_activity(activity_id, **patch)
     updated = storage.get_tracked_activity(activity_id)
     if updated:
+        _observe_transition(user_id, updated, new_status)
         old_status = existing.get("status")
         if entered_watched(old_status, new_status):
             on_enter_watched(storage, user_id, updated)
@@ -321,6 +361,7 @@ def on_created(storage: Any, user_id: str, activity_id: str, status: Optional[st
         logging.getLogger(__name__).exception(
             "[lifecycle] on_created side effects failed"
         )
+        obs.count("cos.lifecycle.hook_error", hook="on_created")
 
 
 # ── Transition side effects ──────────────────────────────────────────
@@ -397,6 +438,7 @@ def on_enter_watched(storage: Any, user_id: str, activity: Dict[str, Any]) -> Di
     except Exception:  # noqa: BLE001 — best-effort side effects
         import logging
         logging.getLogger(__name__).exception("[lifecycle] on_enter_watched side effects failed")
+        obs.count("cos.lifecycle.hook_error", hook="on_enter_watched")
     return result
 
 
@@ -415,4 +457,5 @@ def on_enter_declined(storage: Any, user_id: str, activity: Dict[str, Any]) -> D
     except Exception:  # noqa: BLE001 — best-effort side effects
         import logging
         logging.getLogger(__name__).exception("[lifecycle] on_enter_declined side effects failed")
+        obs.count("cos.lifecycle.hook_error", hook="on_enter_declined")
     return {"dismissed_todos": dismissed}

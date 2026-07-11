@@ -150,3 +150,42 @@ pipeline doesn't.)
 TracerProvider + OTLP span exporter added to `app/observability` (small change). The
 FastAPI instrumentation already *creates* spans; they just need an exporter. Until
 then, the wizard's trace check stays empty — expected.
+
+---
+
+## 7. Vertical-expansion dashboard + alerts (Phase 3.9, 2026-07-11)
+
+The vertical expansion (plan `one-agent-five-doors`) added domain counters via
+`app.observability.count()`. The MCP token stays read-only by design, so the
+dashboard ships as code: **import `setup/grafana/vertical-expansion-dashboard.json`**
+(Dashboards → New → Import → paste). Panels: hook errors, doors fail-open,
+taxonomy escapes, rrule rejections, transition funnel by stage/vertical,
+date-model mix, lookup-path spend split.
+
+**Counter names** (OTLP→Prometheus appends `_total` to counters, dots→underscores;
+verify post-deploy with `list_prometheus_metric_names(regex="cos_.*")`):
+`cos_lifecycle_transition_total{to_stage, activity_type}` ·
+`cos_lifecycle_hook_error_total{hook}` · `cos_doors_request_total{fail_open}` ·
+`cos_dates_write_total{date_model}` · `cos_dates_rrule_rejected_total{edge}` ·
+`cos_lookup_path_total{path}` · `cos_type_degraded_total`.
+
+**Alert rules to add** (Alerting → Alert rules; reuse the Slack contact point):
+
+1. **COS lifecycle hook errors** — the swallow-safe hooks fail INVISIBLY (users
+   see nothing; to-dos/email-watching silently don't happen):
+   `sum(increase(cos_lifecycle_hook_error_total[1h])) > 0`, pending 0m,
+   no-data → OK (metric only exists after the first error).
+2. **Doors failing open** — flag evaluation is down; everyone silently sees
+   default doors: `sum(increase(cos_doors_request_total{fail_open="true"}[15m])) > 0`
+   **for 15m**, no-data → OK.
+
+Both: no-data must be OK, not Alerting — these series don't exist until the
+first occurrence (that's the point).
+
+**Post-deploy smoke (binding, from the plan's telemetry verification):** fire one
+real action per instrument — track an activity with an rrule, open the doors
+endpoint, run a `pytest tests/test_date_model.py` locally is NOT enough (OTel is
+off in tests); use the live backend — then confirm each series appears:
+`increase(cos_dates_write_total[1h]) > 0` etc. PostHog side: `activity_tracked`
+now carries `activity_type` + `date_model`; new event `activity_stage_advanced`
+{to_stage, activity_type} fires from every lifecycle transition.

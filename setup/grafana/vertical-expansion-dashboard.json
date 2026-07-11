@@ -1,0 +1,198 @@
+{
+  "__comment": "Vertical expansion (one-agent-five-doors) system-health dashboard. Import via Grafana → Dashboards → New → Import → paste this JSON. Metric names assume the as-built OTLP→Prometheus translation (dots→underscores, counters get _total; see setup/grafana-observability-setup.md). If a panel is empty after deploy, verify names with the Grafana MCP: list_prometheus_metric_names(regex='cos_.*'). Counters reset on every deploy — panels use increase() over wide windows on purpose.",
+  "title": "Vertical Expansion — COS health",
+  "uid": "vertical-expansion",
+  "tags": ["mvp-backend", "vertical-expansion"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "5m",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Lifecycle hook errors (24h) — MUST be 0",
+      "description": "cos.lifecycle.hook_error: the swallow-safe hooks (on_enter_watched / on_enter_declined / on_created) failed. Users saw nothing; to-dos/email-sync silently didn't happen. Alert rule fires on >0/h.",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+      "targets": [
+        {
+          "expr": "sum(increase(cos_lifecycle_hook_error_total[24h])) or vector(0)",
+          "legendFormat": "hook errors"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Doors fail-open (24h) — MUST be 0",
+      "description": "cos.doors.request{fail_open=true}: GET /cos/verticals hit the fail-open path — flag evaluation is broken and every user silently sees default doors. Alert rule fires when sustained 15m.",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+      "targets": [
+        {
+          "expr": "sum(increase(cos_doors_request_total{fail_open=\"true\"}[24h])) or vector(0)",
+          "legendFormat": "fail-open requests"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Taxonomy escapes (24h)",
+      "description": "cos.type.degraded: get_profile fell back to camp for a NON-NULL type (unknown string, or canonical-but-unregistered). Sustained growth = rows escaping the taxonomy.",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+      "targets": [
+        {
+          "expr": "sum(increase(cos_type_degraded_total[24h])) or vector(0)",
+          "legendFormat": "degraded lookups"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "RRULE rejections (24h)",
+      "description": "cos.dates.rrule_rejected by edge (tool = the agent proposed it, router = a client sent it). A spike on the tool edge means the agent is hallucinating unsupported recurrence shapes — check the prompt/goldens.",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+      "targets": [
+        {
+          "expr": "sum by (edge) (increase(cos_dates_rrule_rejected_total[24h]))",
+          "legendFormat": "{{edge}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Lifecycle transitions by stage",
+      "description": "cos.lifecycle.transition — the funnel's system-side pulse (product-side lives in PostHog as activity_stage_advanced).",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+      "targets": [
+        {
+          "expr": "sum by (to_stage) (increase(cos_lifecycle_transition_total[1h]))",
+          "legendFormat": "{{to_stage}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" } } },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Lifecycle transitions by vertical",
+      "description": "Same counter split by activity_type — is anyone actually using V2/V3 yet?",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+      "targets": [
+        {
+          "expr": "sum by (activity_type) (increase(cos_lifecycle_transition_total[1h]))",
+          "legendFormat": "{{activity_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" } } },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Date-model writes",
+      "description": "cos.dates.write — week_block vs recurring_weekly through set_activity_dates (the one date write path).",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+      "targets": [
+        {
+          "expr": "sum by (date_model) (increase(cos_dates_write_total[1h]))",
+          "legendFormat": "{{date_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" } } },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "LookupAndSaveActivity path",
+      "description": "cos.lookup.path — candidate reuse is free; the web path spends Tavily + an extraction LLM call per save.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+      "targets": [
+        {
+          "expr": "sum by (path) (increase(cos_lookup_path_total[1h]))",
+          "legendFormat": "{{path}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" } } },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Doors requests",
+      "description": "cos.doors.request — total door-list fetches (both clients refresh on plan load).",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+      "targets": [
+        {
+          "expr": "sum by (fail_open) (increase(cos_doors_request_total[1h]))",
+          "legendFormat": "fail_open={{fail_open}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" } } },
+        "overrides": []
+      }
+    }
+  ]
+}

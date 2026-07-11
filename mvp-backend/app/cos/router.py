@@ -167,18 +167,33 @@ class TrackActivityPatch(BaseModel):
     decision_rationale: Optional[str] = None
 
 
+def _reject_bad_rrule(rrule: Optional[str]) -> None:
+    """Weekly-only RRULE gate at the HTTP edge (422); counted for Grafana."""
+    from app.cos.verticals import weekly_rrule_error
+
+    err = weekly_rrule_error(rrule)
+    if err:
+        from app import observability as obs
+        obs.count("cos.dates.rrule_rejected", edge="router")
+        raise HTTPException(status_code=422, detail=err)
+
+
 @router.post("/activities/track")
 def track_activity(body: TrackActivityBody, user_id: str = Depends(current_user)):
     authorize_user_match(authenticated=user_id, claimed=body.user_id)
-    from app.cos.verticals import weekly_rrule_error
-
-    rrule_error = weekly_rrule_error(body.rrule)
-    if rrule_error:
-        raise HTTPException(status_code=422, detail=rrule_error)
+    _reject_bad_rrule(body.rrule)
     storage = _storage()
     payload = body.model_dump(exclude={"user_id"})
     activity_id = storage.track_activity(user_id, **payload)
-    _track("activity_tracked", user_id, {"status": (payload.get("status") or "considering")})
+    # Read the created row back so the event carries the DERIVED type (a
+    # candidate's category may have decided it) + the actual date model.
+    created = storage.get_tracked_activity(activity_id) or {}
+    _track("activity_tracked", user_id, {
+        "status": (payload.get("status") or "considering"),
+        "activity_type": created.get("activity_type"),
+        "date_model": ("recurring_weekly" if created.get("rrule")
+                       else "week_block" if created.get("start_date") else "none"),
+    })
     # Created straight into a watched status (= already registered) — fire the
     # same registration side effects as a transition (see cos/lifecycle).
     lifecycle.on_created(storage, user_id, activity_id, payload.get("status"))
@@ -200,11 +215,7 @@ def patch_activity(
     if not existing:
         raise HTTPException(status_code=404, detail="tracked activity not found")
     authorize_user_match(authenticated=user_id, claimed=existing["user_id"], resource=True)
-    from app.cos.verticals import weekly_rrule_error
-
-    rrule_error = weekly_rrule_error(body.rrule)
-    if rrule_error:
-        raise HTTPException(status_code=422, detail=rrule_error)
+    _reject_bad_rrule(body.rrule)
     fields = body.model_dump(exclude={"user_id"}, exclude_none=True)
     dates = {k: fields.pop(k) for k in _DATE_FIELDS if k in fields}
     if "week_start" in dates:
@@ -278,6 +289,9 @@ def list_verticals(response: Response, user_id: str = Depends(current_user)):
     from app.analytics import flags
     from app.cos import verticals as cos_verticals
 
+    from app import observability as obs
+
+    fail_open = False
     try:
         doors = []
         for profile in cos_verticals.REGISTRY.values():
@@ -289,6 +303,11 @@ def list_verticals(response: Response, user_id: str = Depends(current_user)):
     except Exception:  # noqa: BLE001 — fail open, never 500 the doors
         logger.exception("[cos] vertical door eval failed; failing open to defaults")
         doors = [_door_payload(p) for p in cos_verticals.default_doors()]
+        fail_open = True
+    # fail_open=true sustained → the flag-eval path is down and every user is
+    # silently seeing default doors (Grafana alerts on this — it's invisible
+    # to users and to Sentry otherwise).
+    obs.count("cos.doors.request", fail_open=fail_open)
     response.headers["Cache-Control"] = "private, max-age=300"
     return {"verticals": doors}
 

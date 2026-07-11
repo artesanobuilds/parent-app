@@ -240,8 +240,18 @@ def weekly_rrule_error(rrule: Optional[str]) -> Optional[str]:
 
 def get_profile(activity_type: Optional[str]) -> VerticalProfile:
     """The profile for an activity_type; canonical-but-unregistered types
-    (e.g. `extracurricular` before Phase 3) and NULL/unknown degrade to camp."""
-    return REGISTRY.get(normalize_activity_type(activity_type), REGISTRY[DEFAULT_ACTIVITY_TYPE])
+    (e.g. `school_event` before Phase 5) and NULL/unknown degrade to camp."""
+    raw = (activity_type or "").strip().lower()
+    profile = REGISTRY.get(normalize_activity_type(activity_type))
+    if profile is not None and (not raw or raw == profile.key):
+        return profile
+    # Degradation fired for a NON-NULL input (unknown string, or canonical but
+    # not yet registered). NULLs are excluded on purpose — pre-v16 legacy rows
+    # would drown the signal. Sustained growth = rows escaping the taxonomy.
+    if raw:
+        from app import observability as obs
+        obs.count("cos.type.degraded")
+    return profile if profile is not None else REGISTRY[DEFAULT_ACTIVITY_TYPE]
 
 
 def default_doors() -> List[VerticalProfile]:

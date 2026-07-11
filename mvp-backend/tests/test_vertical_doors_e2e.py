@@ -51,7 +51,10 @@ def auth(client):
 
 
 def test_v2_door_to_typed_board_card(client, auth, monkeypatch):
-    # 1) Flag OFF by default: the extracurricular door is hidden, defaults show.
+    # 1) Flag explicitly OFF: the extracurricular door hides, defaults show.
+    # (Explicit setenv, not delenv-and-assume: the dev .env sets the FLAG_*
+    # override to 1, and load_dotenv pulls it into the test process.)
+    monkeypatch.setenv("FLAG_VERTICAL_V2_EXTRACURRICULARS", "0")
     doors = {d["key"] for d in client.get("/cos/verticals", headers=auth).json()["verticals"]}
     assert "camp" in doors and "outing" in doors
     assert "extracurricular" not in doors

@@ -115,7 +115,14 @@ Just tell me what you need in plain language — e.g. "what's left to do this we
 
 # Phase-2 date model: weekly-only RRULE validation lives in cos_verticals
 # (enforced at the edges — tool + router — never in the storage format).
-_weekly_rrule_error = cos_verticals.weekly_rrule_error
+# A rejection spike here means the agent is hallucinating unsupported rrules
+# (Grafana watches cos.dates.rrule_rejected).
+def _weekly_rrule_error(rrule):
+    err = cos_verticals.weekly_rrule_error(rrule)
+    if err:
+        from app import observability as obs
+        obs.count("cos.dates.rrule_rejected", edge="tool")
+    return err
 
 
 def _make_track_activity_tool(user_id: str):
@@ -188,6 +195,7 @@ def _make_track_activity_tool(user_id: str):
             return f"Could not track '{name}': {exc}"
         who = f" for {kid_name}" if kid_name else ""
         _maybe_enter_watched(user_id, activity_id, status)
+        _capture_tracked(user_id, activity_id)
         return f"Tracked '{name}'{who} as {status} (id={activity_id})."
 
     return TrackActivity
@@ -199,6 +207,24 @@ def _maybe_enter_watched(user_id: str, activity_id: str, status: Optional[str]) 
     from app.cos import lifecycle
 
     lifecycle.on_created(_storage(), user_id, activity_id, status)
+
+
+def _capture_tracked(user_id: str, activity_id: str) -> None:
+    """activity_tracked from the AGENT path (the router covers the UI path),
+    enriched with vertical + date model — without these props the per-vertical
+    funnel can't segment. Fire-and-forget."""
+    try:
+        from app.analytics import capture
+
+        a = _storage().get_tracked_activity(activity_id) or {}
+        capture("activity_tracked", user_id, {
+            "status": a.get("status") or "exploring",
+            "activity_type": a.get("activity_type"),
+            "date_model": ("recurring_weekly" if a.get("rrule")
+                           else "week_block" if a.get("start_date") else "none"),
+        })
+    except Exception:  # noqa: BLE001 — analytics must never break the tool
+        pass
 
 
 # --------------------------------------------------------------------------- #
@@ -776,7 +802,10 @@ def _make_lookup_and_save_activity_tool(user_id: str):
                 )
             except Exception as exc:
                 return _tool_error("LookupAndSaveActivity", exc, user_id)
+            from app import observability as obs
+            obs.count("cos.lookup.path", path="candidate")  # free — no web spend
             _maybe_enter_watched(user_id, activity_id, status)
+            _capture_tracked(user_id, activity_id)
             return (
                 f"Saved '{match.get('name') or activity_name}' as {status} "
                 f"(matched one of your discovered options, id={activity_id})."
@@ -832,7 +861,10 @@ def _make_lookup_and_save_activity_tool(user_id: str):
             )
         except Exception as exc:
             return _tool_error("LookupAndSaveActivity", exc, user_id)
+        from app import observability as obs
+        obs.count("cos.lookup.path", path="web")  # Tavily + extraction spend
         _maybe_enter_watched(user_id, activity_id, status)
+        _capture_tracked(user_id, activity_id)
 
         bits = []
         if extracted.provider:
