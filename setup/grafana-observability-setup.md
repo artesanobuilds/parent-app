@@ -183,15 +183,17 @@ Both: no-data must be OK, not Alerting — these series don't exist until the
 first occurrence (that's the point).
 
 **Watchlist SLO alerts (Phase 4 — add these too; the dashboard's "Watchlist
-SLO" row visualizes the same signals).** Metric names: gauges keep their name
-(no `_total`): `watchlist_seconds_since_last_tick`, `watchlist_windows_watching`,
-`watchlist_windows_missed`; counters get `_total`:
+SLO" row visualizes the same signals).** Metric names (VERIFIED live
+2026-07-11): Grafana Cloud's OTLP translator appends `_ratio` to unit-"1"
+gauges — `watchlist_windows_watching_ratio`, `watchlist_windows_missed_ratio`
+— while the seconds-unit gauge keeps its name:
+`watchlist_seconds_since_last_tick`; counters get `_total`:
 `watchlist_notifications_sent_total{kind, outcome}`,
 `watchlist_windows_created_total{source, confidence}`; histogram:
 `watchlist_notification_delay_seconds_bucket`.
 
 3. **Watchlist missed a window** — the product promise broken (a window opened
-   with no day-of notification): `max(watchlist_windows_missed) > 0`,
+   with no day-of notification): `max(watchlist_windows_missed_ratio) > 0`,
    pending 0m. **No-data → OK** (gauge registers only when OTel is on and the
    backend is up — a separate liveness concern).
 4. **Watchlist worker stalled** — sweep heartbeat dead; notifications stop

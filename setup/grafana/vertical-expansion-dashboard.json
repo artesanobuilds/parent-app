@@ -362,7 +362,7 @@
    },
    "targets": [
     {
-     "expr": "max(watchlist_windows_missed) or vector(0)",
+     "expr": "max(watchlist_windows_missed_ratio) or vector(0)",
      "legendFormat": "missed"
     }
    ],
@@ -440,7 +440,7 @@
    },
    "targets": [
     {
-     "expr": "max(watchlist_windows_watching) or vector(0)",
+     "expr": "max(watchlist_windows_watching_ratio) or vector(0)",
      "legendFormat": "watching"
     }
    ],
