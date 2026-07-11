@@ -105,6 +105,7 @@ struct NewPostView: View {
                 .padding(.hearth700)
             }
             .background(Color.bgCanvas.ignoresSafeArea())
+            .trackScreen("new_post")
             .navigationTitle("New Post")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.bgCanvas, for: .navigationBar)

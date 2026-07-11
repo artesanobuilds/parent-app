@@ -102,10 +102,21 @@ def callback(
         return _app_redirect("error", reason="missing_code")
     try:
         data = oauth_state.verify_state(state)
+    except ValueError:
+        return _app_redirect("error", reason="bad_state")
+
+    # Sign-in-with-Google (Phase 2 login) reuses this registered redirect_uri
+    # but branches here: verify identity, mint a one-time login code, bounce
+    # back to the app/dashboard. Integration-connect (Gmail/Calendar) is below.
+    if data.get("login"):
+        from app.auth_login_google import complete_google_login
+        return complete_google_login(data, code)
+
+    try:
         user_id = data["user_id"]
         kinds = data["kinds"]
         code_verifier = data["cv"]
-    except (ValueError, KeyError):
+    except KeyError:
         return _app_redirect("error", reason="bad_state")
 
     try:
@@ -135,6 +146,11 @@ def callback(
             account_email=result.email,
             scopes=" ".join(google_flow.scopes_for_kinds([kind])),
         )
+        try:
+            from app.analytics import capture
+            capture("integration_connected", user_id, {"provider": "google", "kind": kind})
+        except Exception:
+            pass
     return _app_redirect("success", provider="google", email=result.email or "")
 
 

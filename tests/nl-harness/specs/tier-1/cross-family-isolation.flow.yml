@@ -1,0 +1,41 @@
+spec:
+  name: cross-family-isolation
+  tier: 1
+  modules: [auth, cos, research, kid_agent]
+  intent: >
+    Object-level authorization (BOLA / OWASP API #1) regression guard. Two
+    unrelated families exist. Family B's bearer token must never read or mutate
+    Family A's rows, and a non-owner must not even learn a resource id exists
+    (mismatches on fetched rows return 404, not 403 — no existence oracle).
+    This is the live-HTTP complement to the hermetic tests/test_bola_sweep.py
+    (which proves every id-addressed route is *gated*); this proves the gate
+    actually scopes to the caller across two real families.
+
+  personas:
+    family_a:
+      preset: existing-parent
+    family_b:
+      preset: existing-parent
+
+  preconditions: []
+
+  invariants:
+    - "Family A can read its own tracked activity (200)"
+    - "Family B GET of Family A's activity id returns 404 (not 403 — no existence oracle)"
+    - "Family B PATCH of Family A's activity id returns 404 and does not mutate it"
+    - "Family B DELETE of Family A's activity id returns 404 and does not delete it"
+    - "Family B GET of Family A's research run id returns 404"
+    - "After the failed cross-family attempts, Family A's activity is unchanged"
+
+  boundary_contracts:
+    - endpoint: PATCH /cos/activities/{activity_id}
+      as: family_b
+      status: 404
+
+    - endpoint: DELETE /cos/activities/{activity_id}
+      as: family_b
+      status: 404
+
+    - endpoint: GET /research/runs/{run_id}
+      as: family_b
+      status: 404

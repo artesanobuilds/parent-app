@@ -38,6 +38,14 @@ openpyxl==3.1.5
 # Google adapters (Gmail + Calendar). The google libs are imported lazily, so
 # they're only exercised once the OAuth flow lands (R3).
 cryptography==49.0.0
+# Phase 2 auth: sign/verify our HS256 access tokens + verify Apple/Google
+# id tokens against their JWKS (PyJWKClient). [crypto] pulls RSA/EC support.
+PyJWT[crypto]==2.10.1
+# Explicit CA bundle for the JWKS TLS fetch (don't depend on the host cert store).
+certifi>=2024.0.0
+# Phase 3: product analytics + feature flags (PostHog). Only imported when
+# POSTHOG_API_KEY is set — a no-op otherwise (app/analytics is env-gated).
+posthog==7.22.0
 google-api-python-client==2.197.0
 google-auth-oauthlib==1.4.0
 # Observability "last mile" (gated on env vars; see app/observability + setup/).

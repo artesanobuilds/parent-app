@@ -47,6 +47,7 @@ struct ReviewLetterView: View {
                 ProgressView().tint(.accentDefault)
             }
         }
+        .trackScreen("review_letter")
         .task { await vm.load() }
     }
 

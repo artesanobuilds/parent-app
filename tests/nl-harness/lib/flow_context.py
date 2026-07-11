@@ -75,6 +75,9 @@ class FlowContext:
     def put(self, path: str, *, json: dict | None = None, as_: Any = ANONYMOUS) -> httpx.Response:
         return self.client.put(path, json=json, as_=as_)
 
+    def patch(self, path: str, *, json: dict | None = None, as_: Any = ANONYMOUS) -> httpx.Response:
+        return self.client.patch(path, json=json, as_=as_)
+
     def delete(self, path: str, *, as_: Any = ANONYMOUS) -> httpx.Response:
         return self.client.delete(path, as_=as_)
 

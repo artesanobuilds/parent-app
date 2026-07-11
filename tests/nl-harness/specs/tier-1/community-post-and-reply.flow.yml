@@ -20,13 +20,18 @@ spec:
     - "GET /content/community?category=<id> returns the post when filtered by its category"
     - "POST /content/community/{post_id}/replies appends a reply with the expected body"
     - "GET /content/community/{post_id}/replies returns the new reply"
-    - "(Future) POST /content/community/new should require auth — currently does not. Captured as xfail until the gate lands."
+    - "Unauthenticated POST /content/community/new returns 401 (auth gate landed 2026-07)"
+    - "Unauthenticated POST /content/community/{post_id}/replies returns 401"
 
   boundary_contracts:
     - endpoint: POST /content/community/new
       as: parent
       status: 200
       response_includes: [id, category, title, preview]
+
+    - endpoint: POST /content/community/new
+      as: anonymous
+      status: 401
 
     - endpoint: GET /content/community
       as: anonymous

@@ -82,6 +82,12 @@ struct MainTabView: View {
             // Custom bottom tab bar
             customTabBar
         }
+        // Engagement: which tabs parents use. Tab name only, no content. Deeper
+        // (pushed/presented) screens self-report via `.trackScreen(...)`.
+        .onAppear { Analytics.capture("screen_viewed", ["screen": selectedTab.rawValue]) }
+        .onChange(of: selectedTab) { _, tab in
+            Analytics.capture("screen_viewed", ["screen": tab.rawValue])
+        }
     }
 
     // MARK: - Custom Tab Bar

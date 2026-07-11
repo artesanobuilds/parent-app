@@ -20,6 +20,7 @@ Rules:
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from typing import Callable, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
@@ -171,7 +172,99 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
              "CREATE INDEX IF NOT EXISTS idx_share_tokens_user ON share_tokens (user_id)"
          ),
      )),
+    # ── Auth v1 (Phase 2). New tables via CREATE-IF-NOT-EXISTS on fresh DBs
+    # (KID_DDL); these mirror them for legacy DBs. See the DDL for column docs.
+    (12, "user_accounts.create",
+     lambda con: con.execute(
+         "CREATE TABLE IF NOT EXISTS user_accounts ("
+         "user_id TEXT PRIMARY KEY, analytics_id TEXT UNIQUE, display_name TEXT, "
+         "primary_email TEXT, created_at TIMESTAMPTZ DEFAULT now())"
+     )),
+    (13, "auth_identities.create",
+     lambda con: (
+         con.execute(
+             "CREATE TABLE IF NOT EXISTS auth_identities ("
+             "id TEXT PRIMARY KEY, user_id TEXT NOT NULL, provider TEXT NOT NULL, "
+             "provider_sub TEXT NOT NULL, email TEXT, email_verified BOOLEAN DEFAULT false, "
+             "created_at TIMESTAMPTZ DEFAULT now(), last_login_at TIMESTAMPTZ, "
+             "UNIQUE (provider, provider_sub))"
+         ),
+         con.execute(
+             "CREATE INDEX IF NOT EXISTS idx_auth_identities_user ON auth_identities (user_id)"
+         ),
+     )),
+    (14, "refresh_tokens.create",
+     lambda con: (
+         con.execute(
+             "CREATE TABLE IF NOT EXISTS refresh_tokens ("
+             "id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, "
+             "token_hash TEXT UNIQUE NOT NULL, platform TEXT, device_name TEXT, "
+             "created_at TIMESTAMPTZ DEFAULT now(), last_used_at TIMESTAMPTZ, "
+             "expires_at TIMESTAMPTZ, rotated_at TIMESTAMPTZ, replaced_by TEXT, "
+             "revoked_at TIMESTAMPTZ)"
+         ),
+         con.execute(
+             "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens (user_id)"
+         ),
+         con.execute(
+             "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_family ON refresh_tokens (family_id)"
+         ),
+     )),
+    # Backfill a user_accounts row (with a fresh analytics_id) for every distinct
+    # existing user across the profile + auth tables. Idempotent: INSERT OR IGNORE
+    # keyed on user_id PK, so re-running only fills gaps.
+    (15, "user_accounts.backfill_existing",
+     lambda con: _backfill_user_accounts(con)),
+    # Vertical expansion Phase 0: every tracked activity gets a canonical
+    # activity_type (camp|extracurricular|outing|school_event|trip). Backfill
+    # is ALL existing rows -> 'camp' — behaviorally true (camp behavior is the
+    # only behavior these rows ever had); rows retype organically on next edit.
+    # Idempotent (WHERE activity_type IS NULL) so it self-heals across the
+    # rollback window. Index lives HERE, not in ACTIVITY_DDL — the DDL runs
+    # before migrations on legacy DBs, where the column doesn't exist yet.
+    (16, "tracked_activities.add_activity_type",
+     lambda con: _add_tracked_activity_type(con)),
 ]
+
+
+def _backfill_user_accounts(con) -> None:
+    import uuid
+    # Union every place a user_id has appeared so no existing family is missed.
+    rows = con.execute(
+        """
+        SELECT DISTINCT user_id FROM (
+            SELECT user_id FROM user_data
+            UNION SELECT user_id FROM auth_tokens
+            UNION SELECT user_id FROM consent_records
+            UNION SELECT user_id FROM kid_agent_configs
+        ) WHERE user_id IS NOT NULL
+        """
+    ).fetchall()
+    for (uid,) in rows:
+        con.execute(
+            "INSERT OR IGNORE INTO user_accounts (user_id, analytics_id, created_at) "
+            "VALUES (?, ?, now())",
+            [uid, uuid.uuid4().hex],
+        )
+
+def _add_tracked_activity_type(con) -> None:
+    cols = {
+        r[0] for r in con.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'tracked_activities'"
+        ).fetchall()
+    }
+    if "activity_type" not in cols:
+        con.execute("ALTER TABLE tracked_activities ADD COLUMN activity_type TEXT")
+    con.execute(
+        "UPDATE tracked_activities SET activity_type = 'camp' "
+        "WHERE activity_type IS NULL"
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tracked_activities_user_type "
+        "ON tracked_activities (user_id, activity_type)"
+    )
+
 
 _MIGRATIONS_DDL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -239,13 +332,35 @@ def run_migrations(con) -> None:
     for version, description, body in sorted(MIGRATIONS, key=lambda m: m[0]):
         if version in applied:
             continue
-        if isinstance(body, str):
-            con.execute(body)
-        elif callable(body):
-            body(con)
-        # body is None -> marker only
-        con.execute(
-            "INSERT INTO schema_migrations (version, description) VALUES (?, ?)",
-            [version, description],
-        )
+        # Body + version stamp commit atomically: a crash between them would
+        # otherwise re-run the body on next boot, which only stays safe while
+        # every migration happens to be idempotent. DuckDB DDL is transactional.
+        with _txn(con):
+            if isinstance(body, str):
+                con.execute(body)
+            elif callable(body):
+                body(con)
+            # body is None -> marker only
+            con.execute(
+                "INSERT INTO schema_migrations (version, description) VALUES (?, ?)",
+                [version, description],
+            )
         logger.info(f"[migrations] applied v{version}: {description}")
+
+
+@contextmanager
+def _txn(con):
+    """BEGIN/COMMIT (ROLLBACK on error) that works for both the storage's
+    thread-safe proxy (preferred: holds the connection lock across the block)
+    and a raw DuckDB connection (tests)."""
+    if hasattr(con, "transaction"):
+        with con.transaction():
+            yield
+        return
+    con.execute("BEGIN TRANSACTION")
+    try:
+        yield
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise

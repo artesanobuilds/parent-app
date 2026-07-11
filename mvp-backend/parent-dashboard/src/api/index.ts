@@ -1,6 +1,13 @@
-// API client for the parent dashboard. Attaches the closed-beta bearer token
-// (see src/auth/store.ts). Dev: vite proxies /auth /research /cos to :8904.
-import { getToken, getUserId } from '../auth/store';
+// API client for the parent dashboard. Attaches the bearer token (see
+// src/auth/store.ts) and transparently refreshes an expired JWT once on 401.
+// Dev: vite proxies /auth /research /cos to :8904.
+import {
+  clearSession,
+  getRefreshToken,
+  getToken,
+  getUserId,
+  updateTokens,
+} from '../auth/store';
 import type {
   AuthTokenResponse,
   Candidate,
@@ -15,12 +22,40 @@ import type {
   TrackedActivity,
 } from '../types';
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
+export interface SessionResponse {
+  access_token: string;
+  refresh_token: string;
+  user_id: string;
+  analytics_id?: string;
+  expires_in?: number;
+}
+
+/** Rotate the access token. Returns true on success. */
+async function tryRefresh(): Promise<boolean> {
+  const refresh = getRefreshToken();
+  if (!refresh) return false;
+  const res = await fetch('/auth/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: refresh }),
+  });
+  if (!res.ok) return false;
+  const body = (await res.json()) as SessionResponse;
+  updateTokens(body.access_token, body.refresh_token);
+  return true;
+}
+
+async function api<T>(path: string, init?: RequestInit, _retried = false): Promise<T> {
   const headers = new Headers(init?.headers);
   const token = getToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
   if (init?.body) headers.set('Content-Type', 'application/json');
   const res = await fetch(path, { ...init, headers });
+  if (res.status === 401 && !_retried) {
+    if (await tryRefresh()) return api<T>(path, init, true);
+    // Refresh failed / no refresh token → session is dead.
+    clearSession();
+  }
   if (!res.ok) throw new Error(`Request failed (${res.status})`);
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -41,6 +76,28 @@ export async function issueToken(userId: string): Promise<AuthTokenResponse> {
   });
   if (!res.ok) throw new Error(`Sign-in failed (${res.status})`);
   return (await res.json()) as AuthTokenResponse;
+}
+
+/** Swap a one-time login_code (from the Google web-redirect) for a session. */
+export async function exchangeLoginCode(code: string): Promise<SessionResponse> {
+  const res = await fetch('/auth/exchange-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ login_code: code, platform: 'web' }),
+  });
+  if (!res.ok) throw new Error(`Sign-in failed (${res.status})`);
+  return (await res.json()) as SessionResponse;
+}
+
+/** Redeem a pairing code minted in the mobile app. */
+export async function pairingLogin(code: string): Promise<SessionResponse> {
+  const res = await fetch('/auth/pairing-login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, platform: 'web' }),
+  });
+  if (!res.ok) throw new Error(`Invalid or expired pairing code (${res.status})`);
+  return (await res.json()) as SessionResponse;
 }
 
 // ── Profile ─────────────────────────────────────────────────────────

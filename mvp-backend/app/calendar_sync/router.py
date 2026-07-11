@@ -3,13 +3,13 @@ schedule config, recent runs. All behind the operator `require_admin_token`
 gate. Mirrors `app/email_sync/router.py`."""
 from __future__ import annotations
 
-import hmac
 import logging
-import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+
+from app.admin_auth import require_admin_token  # shared operator gate (header or CMS cookie)
 
 logger = logging.getLogger(__name__)
 
@@ -23,17 +23,6 @@ def _storage():
     from app.server import storage_backend
 
     return storage_backend
-
-
-def require_admin_token(x_admin_token: Optional[str] = Header(default=None)) -> None:
-    """Self-contained operator gate (mirrors app.server.require_admin_token —
-    defined locally to avoid an import cycle since the router is included before
-    server.py finishes defining its own copy)."""
-    expected = os.getenv("ADMIN_TOKEN")
-    if not expected:
-        raise HTTPException(status_code=503, detail="admin endpoints disabled (ADMIN_TOKEN not set)")
-    if not x_admin_token or not hmac.compare_digest(x_admin_token, expected):
-        raise HTTPException(status_code=401, detail="invalid or missing admin token")
 
 
 class ScheduleConfig(BaseModel):

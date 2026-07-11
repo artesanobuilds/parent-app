@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { useEffect, type ReactNode } from 'react';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
+import { pageview } from './analytics';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Discovery from './pages/Discovery';
@@ -13,7 +14,17 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   return isAuthed ? <>{children}</> : <Navigate to="/login" replace />;
 }
 
+// Explicit, path-only pageviews (autocapture is off). The route name carries no
+// PII, so this is safe on a kid/family surface.
+function usePageviews() {
+  const location = useLocation();
+  useEffect(() => {
+    pageview(location.pathname);
+  }, [location.pathname]);
+}
+
 export default function App() {
+  usePageviews();
   return (
     <Routes>
       <Route path="/login" element={<Login />} />

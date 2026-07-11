@@ -1,0 +1,22 @@
+# gitleaks config for parent-app. Extends the default ruleset; the allowlist
+# below suppresses verified false positives found in the 2026-07 history scan
+# (no real credentials were ever committed — the .p8 APNs key and all API keys
+# have always been gitignored). Re-audit any NEW finding; do not blanket-widen.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Verified non-secrets: docs placeholders, CSS tokens, vendored web assets"
+paths = [
+  # Saved third-party webpage bundle (Claude's own minified analytics/JS) —
+  # not our code, not our secrets.
+  '''spec/look-and-feel/.*_files/.*''',
+  # Hand-authored design-system HTML: CSS custom-property names ("ink/secondary")
+  # trip the generic-api-key heuristic.
+  '''spec/look-and-feel/hearth-design-system\.html''',
+  # Release notes containing the literal placeholder "wrong-token-here".
+  '''docs/release-notes/.*\.md''',
+]
+regexes = [
+  '''wrong-token-here''',
+]

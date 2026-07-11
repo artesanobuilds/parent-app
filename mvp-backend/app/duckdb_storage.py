@@ -262,6 +262,56 @@ class DuckDBStorage(StorageBackend):
 
     CREATE INDEX IF NOT EXISTS idx_auth_tokens_user ON auth_tokens (user_id);
 
+    -- Auth v1 (Phase 2). One row per parent account. user_id stays the same
+    -- soft FK used everywhere else (legacy name for grandfathered users, uuid
+    -- hex for new signups). analytics_id is a distinct opaque id sent to
+    -- product analytics so PII never keys events. Mirrored in migration v12.
+    CREATE TABLE IF NOT EXISTS user_accounts (
+        user_id       TEXT PRIMARY KEY,
+        analytics_id  TEXT UNIQUE,
+        display_name  TEXT,
+        primary_email TEXT,
+        created_at    TIMESTAMPTZ DEFAULT now()
+    );
+
+    -- Provider identities (Sign in with Apple / Google) linked to an account.
+    -- provider_sub is the stable subject from the IdP. Migration v13.
+    CREATE TABLE IF NOT EXISTS auth_identities (
+        id             TEXT PRIMARY KEY,
+        user_id        TEXT NOT NULL,
+        provider       TEXT NOT NULL,
+        provider_sub   TEXT NOT NULL,
+        email          TEXT,
+        email_verified BOOLEAN DEFAULT false,
+        created_at     TIMESTAMPTZ DEFAULT now(),
+        last_login_at  TIMESTAMPTZ,
+        UNIQUE (provider, provider_sub)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_auth_identities_user ON auth_identities (user_id);
+
+    -- Rotating refresh tokens. token_hash is sha256 of the raw token (raw lives
+    -- only on the device). A row with rotated_at/revoked_at set that is
+    -- presented again triggers reuse detection: the whole family_id is revoked.
+    -- Migration v14.
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+        id           TEXT PRIMARY KEY,
+        family_id    TEXT NOT NULL,
+        user_id      TEXT NOT NULL,
+        token_hash   TEXT UNIQUE NOT NULL,
+        platform     TEXT,
+        device_name  TEXT,
+        created_at   TIMESTAMPTZ DEFAULT now(),
+        last_used_at TIMESTAMPTZ,
+        expires_at   TIMESTAMPTZ,
+        rotated_at   TIMESTAMPTZ,
+        replaced_by  TEXT,
+        revoked_at   TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens (user_id);
+    CREATE INDEX IF NOT EXISTS idx_refresh_tokens_family ON refresh_tokens (family_id);
+
     -- APNs device tokens for crisis-lock push notifications (migration v10).
     CREATE TABLE IF NOT EXISTS push_device_tokens (
         token         TEXT PRIMARY KEY,           -- the APNs device token
@@ -416,6 +466,7 @@ class DuckDBStorage(StorageBackend):
         candidate_id      TEXT,                     -- nullable: may be added manually / from ingest
         name              TEXT NOT NULL,
         provider          TEXT,
+        activity_type     TEXT,                     -- camp|extracurricular|outing|school_event|trip (see app/cos/verticals.py) NULL degrades to camp. Index lives in migration v16, not here
         week_start        DATE,
         status            TEXT NOT NULL DEFAULT 'exploring',
             -- reference|exploring|interested|signed_up|confirmed|pending_eligibility|waitlisted|declined|done
@@ -662,6 +713,12 @@ class DuckDBStorage(StorageBackend):
         ("daily_summaries", "daily_summaries.parquet"),
         ("audit_events", "audit_events.parquet"),
         ("auth_tokens", "auth_tokens.parquet"),
+        # Auth v1 (Phase 2). refresh_tokens/user_accounts hold only hashes +
+        # opaque ids; auth_identities holds provider subs + emails (same
+        # sensitivity as consent_records, which is already exported).
+        ("user_accounts", "user_accounts.parquet"),
+        ("auth_identities", "auth_identities.parquet"),
+        ("refresh_tokens", "refresh_tokens.parquet"),
         ("push_device_tokens", "push_device_tokens.parquet"),
         ("share_tokens", "share_tokens.parquet"),
         ("tts_usage_daily", "tts_usage_daily.parquet"),
@@ -1520,6 +1577,303 @@ class DuckDBStorage(StorageBackend):
             [token_hash],
         )
 
+    # ── Auth v1: accounts, identities, refresh tokens (Phase 2) ──────
+
+    def get_or_create_account(
+        self, user_id: str, *, display_name: Optional[str] = None,
+        primary_email: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return the account row for user_id, creating it (with a fresh
+        analytics_id) if absent. Idempotent."""
+        import uuid
+        row = self._con.execute(
+            "SELECT user_id, analytics_id, display_name, primary_email "
+            "FROM user_accounts WHERE user_id = ?", [user_id],
+        ).fetchone()
+        if row is None:
+            analytics_id = uuid.uuid4().hex
+            self._con.execute(
+                "INSERT INTO user_accounts (user_id, analytics_id, display_name, "
+                "primary_email, created_at) VALUES (?, ?, ?, ?, now())",
+                [user_id, analytics_id, display_name, primary_email],
+            )
+            return {"user_id": user_id, "analytics_id": analytics_id,
+                    "display_name": display_name, "primary_email": primary_email}
+        # Backfill display_name/email opportunistically if newly known.
+        if (display_name and not row[2]) or (primary_email and not row[3]):
+            self._con.execute(
+                "UPDATE user_accounts SET display_name = coalesce(?, display_name), "
+                "primary_email = coalesce(?, primary_email) WHERE user_id = ?",
+                [display_name, primary_email, user_id],
+            )
+        return {"user_id": row[0], "analytics_id": row[1],
+                "display_name": display_name or row[2],
+                "primary_email": primary_email or row[3]}
+
+    def analytics_id_for(self, user_id: str) -> Optional[str]:
+        """The opaque analytics id for a user, or None if no account row."""
+        row = self._con.execute(
+            "SELECT analytics_id FROM user_accounts WHERE user_id = ?", [user_id],
+        ).fetchone()
+        return row[0] if row else None
+
+    def user_has_profile(self, user_id: str) -> bool:
+        """True if the user has completed onboarding (a user_data profile row
+        exists). Drives the client's post-sign-in routing: a returning user
+        (any device) skips onboarding; a fresh account goes through it."""
+        row = self._con.execute(
+            "SELECT 1 FROM user_data WHERE user_id = ? LIMIT 1", [user_id],
+        ).fetchone()
+        return row is not None
+
+    def get_identity(self, provider: str, provider_sub: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            "SELECT id, user_id, provider, provider_sub, email, email_verified "
+            "FROM auth_identities WHERE provider = ? AND provider_sub = ?",
+            [provider, provider_sub],
+        ).fetchone()
+        if row is None:
+            return None
+        return {"id": row[0], "user_id": row[1], "provider": row[2],
+                "provider_sub": row[3], "email": row[4], "email_verified": row[5]}
+
+    def link_identity(
+        self, *, user_id: str, provider: str, provider_sub: str,
+        email: Optional[str] = None, email_verified: bool = False,
+    ) -> Dict[str, Any]:
+        """Bind a provider identity to an account. If the (provider, sub) pair
+        already exists, updates last_login_at and returns it (no duplicate)."""
+        import uuid
+        existing = self.get_identity(provider, provider_sub)
+        if existing is not None:
+            self._con.execute(
+                "UPDATE auth_identities SET last_login_at = now() "
+                "WHERE provider = ? AND provider_sub = ?",
+                [provider, provider_sub],
+            )
+            return existing
+        identity_id = uuid.uuid4().hex
+        self._con.execute(
+            "INSERT INTO auth_identities (id, user_id, provider, provider_sub, "
+            "email, email_verified, created_at, last_login_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, now(), now())",
+            [identity_id, user_id, provider, provider_sub, email, email_verified],
+        )
+        return {"id": identity_id, "user_id": user_id, "provider": provider,
+                "provider_sub": provider_sub, "email": email,
+                "email_verified": email_verified}
+
+    def user_has_any_identity(self, user_id: str) -> bool:
+        row = self._con.execute(
+            "SELECT 1 FROM auth_identities WHERE user_id = ? LIMIT 1", [user_id],
+        ).fetchone()
+        return row is not None
+
+    def user_has_identity_for_provider(self, user_id: str, provider: str) -> bool:
+        """True if the account already has an identity for THIS provider. Used by
+        the claim guard so a valid-legacy-proof holder can bind a SECOND provider
+        (Apple + Google) to their account, while still blocking a re-bind of a
+        provider that's already linked (anti-hijack)."""
+        row = self._con.execute(
+            "SELECT 1 FROM auth_identities WHERE user_id = ? AND provider = ? LIMIT 1",
+            [user_id, provider],
+        ).fetchone()
+        return row is not None
+
+    def find_unclaimed_account_by_email(self, email: Optional[str]) -> Optional[str]:
+        """Return the user_id of the SINGLE unclaimed legacy account whose consent
+        email matches `email` (case-insensitive) — for the reinstall 'restore your
+        family' flow. None if zero or more than one match (ambiguous → require
+        manual/admin resolution, never auto-merge kid data on a fuzzy match)."""
+        if not email:
+            return None
+        rows = self._con.execute(
+            "SELECT DISTINCT c.user_id FROM consent_records c "
+            "WHERE lower(c.parent_email) = lower(?) "
+            "  AND NOT EXISTS (SELECT 1 FROM auth_identities i WHERE i.user_id = c.user_id)",
+            [email],
+        ).fetchall()
+        return rows[0][0] if len(rows) == 1 else None
+
+    def create_refresh_token(
+        self, *, user_id: str, family_id: Optional[str] = None,
+        platform: Optional[str] = None, device_name: Optional[str] = None,
+        ttl_days: int = 60,
+    ) -> str:
+        """Mint a refresh token (returns the RAW token; only its hash is stored).
+        A new family_id starts a rotation lineage; pass an existing one to
+        continue a lineage across a rotation."""
+        import secrets, uuid
+        from datetime import datetime, timedelta, timezone
+        raw = secrets.token_urlsafe(48)
+        family_id = family_id or uuid.uuid4().hex
+        expires_at = datetime.now(timezone.utc) + timedelta(days=ttl_days)
+        self._con.execute(
+            "INSERT INTO refresh_tokens (id, family_id, user_id, token_hash, "
+            "platform, device_name, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, now(), ?)",
+            [uuid.uuid4().hex, family_id, user_id, self._hash_token(raw),
+             platform, device_name, expires_at],
+        )
+        return raw
+
+    def rotate_refresh_token(self, raw: str) -> Optional[Dict[str, Any]]:
+        """Validate + rotate a refresh token. Returns
+        {"user_id", "refresh_token", "family_id"} on success, None on an
+        invalid/expired token. REUSE DETECTION: presenting a token whose row is
+        already rotated or revoked nukes the entire family_id and returns None."""
+        token_hash = self._hash_token(raw)
+        row = self._con.execute(
+            "SELECT id, family_id, user_id, expires_at, rotated_at, revoked_at, platform, device_name "
+            "FROM refresh_tokens WHERE token_hash = ?", [token_hash],
+        ).fetchone()
+        if row is None:
+            return None
+        rt_id, family_id, user_id, expires_at, rotated_at, revoked_at, platform, device_name = row
+        if rotated_at is not None or revoked_at is not None:
+            # Reuse of an already-consumed/revoked token → compromise. Nuke the
+            # whole lineage so a stolen token can't ride alongside the real one.
+            self._con.execute(
+                "UPDATE refresh_tokens SET revoked_at = now() "
+                "WHERE family_id = ? AND revoked_at IS NULL", [family_id],
+            )
+            logger.warning("[auth] refresh-token reuse detected; revoked family %s", family_id)
+            return None
+        from datetime import datetime, timezone
+        if expires_at is not None and expires_at <= datetime.now(timezone.utc):
+            return None
+        # Mint the successor in the same family, mark this one rotated.
+        new_raw = self.create_refresh_token(
+            user_id=user_id, family_id=family_id, platform=platform, device_name=device_name,
+        )
+        new_id = self._con.execute(
+            "SELECT id FROM refresh_tokens WHERE token_hash = ?",
+            [self._hash_token(new_raw)],
+        ).fetchone()[0]
+        self._con.execute(
+            "UPDATE refresh_tokens SET rotated_at = now(), replaced_by = ?, last_used_at = now() "
+            "WHERE id = ?", [new_id, rt_id],
+        )
+        return {"user_id": user_id, "refresh_token": new_raw, "family_id": family_id}
+
+    def revoke_refresh_token(self, raw: str) -> None:
+        """Revoke a single refresh token's whole family (logout on one device)."""
+        row = self._con.execute(
+            "SELECT family_id FROM refresh_tokens WHERE token_hash = ?",
+            [self._hash_token(raw)],
+        ).fetchone()
+        if row is not None:
+            self._con.execute(
+                "UPDATE refresh_tokens SET revoked_at = now() "
+                "WHERE family_id = ? AND revoked_at IS NULL", [row[0]],
+            )
+
+    def revoke_all_refresh_tokens(self, user_id: str) -> None:
+        """Revoke every outstanding refresh token for a user (global logout)."""
+        self._con.execute(
+            "UPDATE refresh_tokens SET revoked_at = now() "
+            "WHERE user_id = ? AND revoked_at IS NULL", [user_id],
+        )
+
+    # ── Migration ops (admin: monitor + manual relink safety net) ────
+
+    def migration_status(self) -> Dict[str, Any]:
+        """Snapshot of the legacy→sign-in migration for the operator. Lists every
+        known account with whether it has claimed a provider identity yet, plus
+        which identities exist. No PII beyond user_id/email (operator-only)."""
+        accounts = self._con.execute(
+            "SELECT ua.user_id, ua.primary_email, ua.created_at, "
+            "  (SELECT count(*) FROM auth_identities ai WHERE ai.user_id = ua.user_id) AS identity_count "
+            "FROM user_accounts ua ORDER BY ua.created_at"
+        ).fetchall()
+        identities = self._con.execute(
+            "SELECT provider, provider_sub, user_id, email, last_login_at "
+            "FROM auth_identities ORDER BY created_at"
+        ).fetchall()
+        acct_rows = [
+            {"user_id": r[0], "primary_email": r[1], "created_at": str(r[2]) if r[2] else None,
+             "claimed": r[3] > 0}
+            for r in accounts
+        ]
+        return {
+            "total_accounts": len(acct_rows),
+            "claimed": sum(1 for a in acct_rows if a["claimed"]),
+            "unclaimed": [a for a in acct_rows if not a["claimed"]],
+            "accounts": acct_rows,
+            "identities": [
+                {"provider": r[0], "provider_sub": r[1], "user_id": r[2],
+                 "email": r[3], "last_login_at": str(r[4]) if r[4] else None}
+                for r in identities
+            ],
+        }
+
+    def admin_relink_identity(
+        self, *, provider: str, provider_sub: str, target_user_id: str,
+        actor: str,
+    ) -> Dict[str, Any]:
+        """Operator safety net: bind (provider, provider_sub) to target_user_id,
+        moving it off any wrong account and deleting that account IF it is empty
+        (no data beyond the account/identity/refresh rows). Used when an
+        automatic legacy claim failed (expired token / fresh install) and a
+        founder's real Apple/Google identity landed on a fresh empty account.
+
+        Returns {"relinked": bool, "moved_from": <old_user_id|None>,
+                 "deleted_empty_account": <user_id|None>}.
+        """
+        result: Dict[str, Any] = {"relinked": False, "moved_from": None,
+                                  "deleted_empty_account": None}
+        with self._con.transaction():
+            # Ensure the target account exists.
+            self.get_or_create_account(target_user_id)
+            existing = self._con.execute(
+                "SELECT user_id FROM auth_identities WHERE provider = ? AND provider_sub = ?",
+                [provider, provider_sub],
+            ).fetchone()
+            old_user_id = existing[0] if existing else None
+
+            if old_user_id == target_user_id:
+                return result  # already correct; no-op
+
+            if existing is not None:
+                self._con.execute(
+                    "UPDATE auth_identities SET user_id = ?, last_login_at = now() "
+                    "WHERE provider = ? AND provider_sub = ?",
+                    [target_user_id, provider, provider_sub],
+                )
+                result["moved_from"] = old_user_id
+                # Delete the vacated account only if it holds NO family data.
+                if old_user_id and self._account_is_empty(old_user_id):
+                    self._con.execute("DELETE FROM refresh_tokens WHERE user_id = ?", [old_user_id])
+                    self._con.execute("DELETE FROM auth_identities WHERE user_id = ?", [old_user_id])
+                    self._con.execute("DELETE FROM user_accounts WHERE user_id = ?", [old_user_id])
+                    result["deleted_empty_account"] = old_user_id
+            else:
+                import uuid
+                self._con.execute(
+                    "INSERT INTO auth_identities (id, user_id, provider, provider_sub, "
+                    "created_at, last_login_at) VALUES (?, ?, ?, ?, now(), now())",
+                    [uuid.uuid4().hex, target_user_id, provider, provider_sub],
+                )
+            self.write_audit_event(
+                user_id=target_user_id, actor=actor, action="auth.admin_relink",
+                details={"provider": provider, "moved_from": old_user_id,
+                         "deleted_empty_account": result["deleted_empty_account"]},
+            )
+            result["relinked"] = True
+        return result
+
+    def _account_is_empty(self, user_id: str) -> bool:
+        """True if user_id has no family data (profile, kids, activities, chats).
+        Only the account/identity/refresh/analytics scaffolding may exist."""
+        for table in ("user_data", "kid_agent_configs", "tracked_activities",
+                      "cos_messages", "consent_records", "research_runs"):
+            row = self._con.execute(
+                f"SELECT 1 FROM {table} WHERE user_id = ? LIMIT 1", [user_id],
+            ).fetchone()
+            if row is not None:
+                return False
+        return True
+
     # ── Push device tokens (crisis-lock notifications) ───────────────
 
     def save_push_token(self, *, user_id: str, token: str, platform: str = "ios") -> None:
@@ -1658,6 +2012,9 @@ class DuckDBStorage(StorageBackend):
                 "kid_credentials",
                 "moderation_events",
                 "auth_tokens",
+                "refresh_tokens",
+                "auth_identities",
+                "user_accounts",
                 "push_device_tokens",
                 "share_tokens",
                 "daily_summaries",
@@ -2371,6 +2728,12 @@ class DuckDBStorage(StorageBackend):
                 )
         return len(candidates)
 
+    def get_candidate_category(self, candidate_id: str) -> Optional[str]:
+        row = self._con.execute(
+            "SELECT category FROM activity_candidates WHERE id = ?", [candidate_id]
+        ).fetchone()
+        return row[0] if row else None
+
     def list_candidates(
         self,
         *,
@@ -2495,7 +2858,8 @@ class DuckDBStorage(StorageBackend):
 
     _TRACKED_COLS = (
         "id", "user_id", "kid_name", "candidate_id", "name", "provider",
-        "week_start", "status", "pending_reason", "price_amount", "price_status",
+        "activity_type", "week_start", "status", "pending_reason",
+        "price_amount", "price_status",
         "signup_url", "contact_json", "carpool_with", "details_json", "notes",
         "decision_rationale", "created_at", "updated_at",
     )
@@ -2508,6 +2872,7 @@ class DuckDBStorage(StorageBackend):
         kid_name: Optional[str] = None,
         candidate_id: Optional[str] = None,
         provider: Optional[str] = None,
+        activity_type: Optional[str] = None,
         week_start: Optional[str] = None,
         status: str = "exploring",
         pending_reason: Optional[str] = None,
@@ -2521,18 +2886,35 @@ class DuckDBStorage(StorageBackend):
         decision_rationale: Optional[str] = None,
     ) -> str:
         import uuid
+
+        from app.cos.verticals import (
+            ACTIVITY_TYPES, derive_from_category, normalize_activity_type,
+        )
+
+        # Explicit valid type wins; otherwise a pinned candidate's category
+        # decides (the LLM-facing default must not override what the candidate
+        # already tells us); otherwise the camp default.
+        atype = (activity_type or "").strip().lower()
+        if atype not in ACTIVITY_TYPES:
+            if candidate_id:
+                atype = derive_from_category(self.get_candidate_category(candidate_id))
+            else:
+                atype = normalize_activity_type(activity_type)
+
         activity_id = str(uuid.uuid4())
         self._con.execute(
             """
             INSERT INTO tracked_activities (
-                id, user_id, kid_name, candidate_id, name, provider, week_start,
+                id, user_id, kid_name, candidate_id, name, provider,
+                activity_type, week_start,
                 status, pending_reason, price_amount, price_status, signup_url,
                 contact_json, carpool_with, details_json, notes, decision_rationale,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
             """,
             [
                 activity_id, user_id, kid_name, candidate_id, name, provider,
+                atype,
                 week_start, status, pending_reason, price_amount, price_status,
                 signup_url,
                 json.dumps(contact, ensure_ascii=False) if contact else None,
@@ -2582,7 +2964,7 @@ class DuckDBStorage(StorageBackend):
         allowed = {
             "status", "pending_reason", "price_amount", "price_status",
             "signup_url", "week_start", "notes", "decision_rationale",
-            "carpool_with", "contact", "details",
+            "carpool_with", "contact", "details", "activity_type",
         }
         patch: Dict[str, Any] = {}
         for key, value in fields.items():

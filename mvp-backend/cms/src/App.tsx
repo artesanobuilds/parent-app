@@ -9,6 +9,7 @@ import { CategoryList } from './pages/CategoryList'
 import { CategoryEditor } from './pages/CategoryEditor'
 import { EmailSync } from './pages/EmailSync'
 import { CalendarSync } from './pages/CalendarSync'
+import { Login } from './pages/Login'
 import { Toaster } from './components/shared/Toast'
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
     <>
       <Toaster />
       <Routes>
+        <Route path="login" element={<Login />} />
         <Route element={<CMSLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="articles" element={<ArticleList />} />

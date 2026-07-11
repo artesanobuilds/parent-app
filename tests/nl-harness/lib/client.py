@@ -53,6 +53,10 @@ class HttpClient:
         self._enforce_readonly("PUT", path)
         return self._client.put(path, json=json, headers=self._headers(as_))
 
+    def patch(self, path: str, *, json: dict | None = None, as_: Any = ANONYMOUS) -> httpx.Response:
+        self._enforce_readonly("PATCH", path)
+        return self._client.patch(path, json=json, headers=self._headers(as_))
+
     def delete(self, path: str, *, as_: Any = ANONYMOUS) -> httpx.Response:
         self._enforce_readonly("DELETE", path)
         return self._client.delete(path, headers=self._headers(as_))

@@ -60,6 +60,7 @@ struct ReportProblemView: View {
             }
             .scrollContentBackground(.hidden)
             .background(Color.bgCanvas.ignoresSafeArea())
+            .trackScreen("report_problem")
             .navigationTitle("Report a problem")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

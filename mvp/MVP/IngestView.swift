@@ -53,6 +53,7 @@ struct IngestView: View {
                 .padding(.bottom, .hearth900)
             }
             .background(Color.bgCanvas.ignoresSafeArea())
+            .trackScreen("ingest")
             .navigationTitle("Add to plan")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

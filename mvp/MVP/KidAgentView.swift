@@ -19,6 +19,9 @@ struct KidAgentView: View {
 
     @StateObject private var coordinator: KidCompanionCoordinator
     @State private var showExitConfirm = false
+    /// Set when the live-voice surface first appears; nil for text-only sessions
+    /// so we only emit a voice-duration event when voice actually happened.
+    @State private var voiceStart: Date?
 
     init(userID: String, baseURL: URL, kid: KidAgentConfig, onExit: @escaping () -> Void) {
         self.userID = userID
@@ -53,6 +56,7 @@ struct KidAgentView: View {
                             Task { await coordinator.toggleMute() }
                         }
                     )
+                    .onAppear { if voiceStart == nil { voiceStart = Date() } }
                 case .textFallback:
                     TextChatSurface(
                         vm: coordinator.vm,
@@ -64,10 +68,17 @@ struct KidAgentView: View {
                 }
             }
         }
+        .trackScreen("kid_companion")
         .task {
+            Analytics.capture("chat_opened", ["agent_kind": "companion"])
             await coordinator.start()
         }
         .onDisappear {
+            if let start = voiceStart {
+                Analytics.capture("voice_session_ended",
+                                  ["surface": "kid",
+                                   "duration_s": Int(Date().timeIntervalSince(start))])
+            }
             // Idempotent; the exit-confirm path already awaited a full teardown.
             Task { await coordinator.exit() }
         }

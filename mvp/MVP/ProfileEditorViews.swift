@@ -192,6 +192,7 @@ struct ParentProfileEditor: View {
         .background(Color.bgCanvas.ignoresSafeArea())
         .navigationTitle("You")
         .navigationBarTitleDisplayMode(.inline)
+        .trackScreen("parent_profile_edit")
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button(saving ? "Saving…" : "Save") { save() }.disabled(saving)
@@ -285,6 +286,7 @@ struct KidProfileEditor: View {
         }
         .scrollContentBackground(.hidden)
         .background(Color.bgCanvas.ignoresSafeArea())
+        .trackScreen("kid_profile_edit")
         .navigationTitle(draft.name ?? kidKey)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -378,6 +380,7 @@ struct AddKidSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Color.bgCanvas.ignoresSafeArea())
+            .trackScreen("add_kid")
             .navigationTitle("Add a kid")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -459,6 +462,7 @@ struct LearnedProfileView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Color.bgCanvas.ignoresSafeArea())
+        .trackScreen("learned_profile")
         .navigationTitle("What we've learned")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

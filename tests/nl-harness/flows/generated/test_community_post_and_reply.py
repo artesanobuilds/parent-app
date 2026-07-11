@@ -77,18 +77,10 @@ def test_post_and_reply_roundtrip(flow_ctx, existing_parent):
         "newly-created reply not in /replies list"
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Spec says POST /content/community/new should require auth, but the "
-        "backend currently does not gate it (iOS+TestFlight migration is "
-        "pending). When the gate lands, this test should pass — at which "
-        "point remove the xfail and update the spec's `as: anonymous` "
-        "contract to be the canonical assertion."
-    ),
-    strict=False,
-)
-def test_anonymous_community_post_should_be_rejected(flow_ctx):
-    resp = flow_ctx.post(
+def test_anonymous_community_writes_are_rejected(flow_ctx):
+    """The auth gate landed 2026-07: unauthenticated community writes 401
+    (previously an impersonation + spam vector — caller chose user_id/author)."""
+    post_resp = flow_ctx.post(
         "/content/community/new",
         json={
             "category": "parenting-stress",
@@ -98,6 +90,12 @@ def test_anonymous_community_post_should_be_rejected(flow_ctx):
             "author_name": "Anon",
         },
     )
-    # When the auth gate lands this should be 401.
-    assert resp.status_code == 401, \
-        f"expected 401 for unauthenticated community post; got {resp.status_code}"
+    assert post_resp.status_code == 401, \
+        f"expected 401 for unauthenticated community post; got {post_resp.status_code}"
+
+    reply_resp = flow_ctx.post(
+        "/content/community/cp-does-not-matter/replies",
+        json={"user_id": "anon-no-token", "author_name": "Anon", "body": "nope"},
+    )
+    assert reply_resp.status_code == 401, \
+        f"expected 401 for unauthenticated reply; got {reply_resp.status_code}"

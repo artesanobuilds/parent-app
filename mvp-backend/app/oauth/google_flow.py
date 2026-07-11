@@ -13,6 +13,14 @@ import secrets
 from dataclasses import dataclass
 from typing import List, Optional
 
+# Google returns granted scopes in a canonical form/order that often differs
+# from what was requested (it always echoes `openid` and may reorder), which
+# makes oauthlib's fetch_token raise "Scope has changed". Relaxing this is the
+# standard, safe setting for google-auth-oauthlib apps — it only suppresses the
+# scope-mismatch exception, not any validation that matters. setdefault so a
+# deliberate override still wins.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
+
 logger = logging.getLogger(__name__)
 
 # SECURITY: these libraries log the full access/refresh token at DEBUG. Pin them
@@ -29,6 +37,15 @@ SCOPE_FOR_KIND = {
 # Always request identity so we can record which account was connected.
 BASE_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 
+# Sign-in-only scopes (Phase 2 login). No Gmail/Calendar, no offline access —
+# we just need a verifiable id_token (sub + email) to establish identity. Match
+# the proven integration BASE_SCOPES (openid + email); `profile` isn't needed
+# and isn't necessarily on the OAuth consent screen's configured scope list.
+LOGIN_SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+]
+
 _AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
 
@@ -38,6 +55,7 @@ class ExchangeResult:
     refresh_token: Optional[str]
     scopes: List[str]
     email: Optional[str]
+    id_token: Optional[str] = None   # raw Google-signed JWT (login flow verifies it)
 
 
 def is_configured() -> bool:
@@ -69,7 +87,9 @@ def _client_config(redirect_uri: str) -> dict:
 
 
 def build_authorization_url(
-    *, scopes: List[str], redirect_uri: str, state: str, code_verifier: str
+    *, scopes: List[str], redirect_uri: str, state: str, code_verifier: str,
+    include_granted_scopes: bool = True, access_type: str = "offline",
+    prompt: str = "consent",
 ) -> str:
     from google_auth_oauthlib.flow import Flow  # lazy
 
@@ -78,9 +98,15 @@ def build_authorization_url(
     )
     flow.code_verifier = code_verifier  # PKCE — must match the one used at exchange
     url, _ = flow.authorization_url(
-        access_type="offline",      # required to receive a refresh token
-        include_granted_scopes="true",
-        prompt="consent",           # force a refresh token even on re-consent
+        # LOGIN passes access_type="online" + include_granted_scopes=False +
+        # prompt="select_account" so the consent asks for ONLY openid+email — not
+        # the Gmail/Calendar scopes the user may have granted this same OAuth
+        # client for the integration flow (incremental auth + prompt=consent
+        # would otherwise re-bundle them into a login consent). Integration keeps
+        # the defaults (offline + granted + consent) to force a refresh token.
+        access_type=access_type,
+        include_granted_scopes=("true" if include_granted_scopes else "false"),
+        prompt=prompt,
         state=state,
     )
     return url
@@ -101,6 +127,7 @@ def exchange_code(
         refresh_token=getattr(creds, "refresh_token", None),
         scopes=list(getattr(creds, "scopes", None) or scopes),
         email=_email_from_credentials(creds),
+        id_token=getattr(creds, "id_token", None),
     )
 
 

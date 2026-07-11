@@ -8,6 +8,10 @@ struct HomeView: View {
     // Set by KidsHomeSection's task hook after /kid-agent/list resolves.
     // Drives whether the greeting's Hand-to-kid CTA renders.
     @AppStorage("has_kid_companions") private var hasKidCompanions: Bool = false
+    // The parent's display name for the greeting + avatar. `username` is now an
+    // opaque account id (a UUID for sign-in accounts), so it must NOT be shown.
+    // Cached across launches; set at onboarding and refreshed from the profile.
+    @AppStorage("parent_display_name") private var parentDisplayName: String = ""
     @State private var isShowingSettings = false
     // Bumped when the Settings sheet closes so the Companions list re-fetches —
     // otherwise edits/adds/deletes made in Settings → Profile don't show on Home
@@ -55,6 +59,17 @@ struct HomeView: View {
             // The toolbar(.hidden) modifier fully collapses it.
             .toolbar(.hidden, for: .navigationBar)
             .withContentNavigationDestinations()
+            .task(id: homeRefreshToken) {
+                // Resolve the parent's display name from the profile (source of
+                // truth). Covers returning users who skipped onboarding, and
+                // refreshes after a Settings edit (homeRefreshToken bump).
+                guard let baseURL = configuration.baseURL, !username.isEmpty else { return }
+                if let profile = try? await ProfileService.getProfile(baseURL: baseURL, userID: username),
+                   let name = profile.parent?.name?.trimmingCharacters(in: .whitespaces),
+                   !name.isEmpty {
+                    parentDisplayName = name
+                }
+            }
             .sheet(isPresented: $isShowingSettings, onDismiss: { homeRefreshToken += 1 }) {
                 NavigationStack {
                     SettingsView(configuration: configuration, userID: username)
@@ -102,7 +117,7 @@ struct HomeView: View {
                             .fill(Color.white.opacity(0.9))
                             .frame(width: 36, height: 36)
                             .overlay(
-                                Text(username.isEmpty ? "?" : String(username.prefix(1)).uppercased())
+                                Text(parentDisplayName.isEmpty ? "?" : String(parentDisplayName.prefix(1)).uppercased())
                                     .font(.hearthLabel)
                                     .foregroundColor(.accentDefault)
                             )
@@ -118,7 +133,7 @@ struct HomeView: View {
                         Text(greeting)
                             .font(.hearthCaptionMono)
                             .foregroundColor(.white.opacity(0.85))
-                        Text(username.isEmpty ? "Welcome" : username)
+                        Text(parentDisplayName.isEmpty ? "Welcome" : parentDisplayName)
                             .font(.hearthDisplayMD)
                             .foregroundColor(.white)
                             .shadow(color: .black.opacity(0.6), radius: 3, x: 0, y: 1)
@@ -286,6 +301,7 @@ struct CategoryDetailView: View {
             .padding(.top, .hearth300)
         }
         .background(Color.bgCanvas.ignoresSafeArea())
+        .trackScreen("category_detail")
         .navigationTitle(category.map { "\($0.emoji) \($0.name)" } ?? "Category")
         .navigationBarTitleDisplayMode(.large)
         .toolbarBackground(Color.bgCanvas, for: .navigationBar)

@@ -8,6 +8,15 @@ RUN npm run build
 
 # Stage 1b: Build parent dashboard frontend (Vite SPA, base=/dashboard/)
 FROM node:20-slim AS dashboard-build
+# PostHog analytics is baked at build time (Vite inlines VITE_*). The project
+# key is public-by-design (write-only, "safe to use in public apps") — same key
+# shipped in the iOS Info.plist — so a committed default here is fine and makes
+# prod deterministic without relying on build-arg plumbing. Override via a
+# Railway build variable if the key ever rotates.
+ARG VITE_POSTHOG_KEY=phc_xdDZCBbTyJQ6RpD4CkSoemGqjmFGtFzfYiCSecRt4abz
+ARG VITE_POSTHOG_HOST=https://us.i.posthog.com
+ENV VITE_POSTHOG_KEY=$VITE_POSTHOG_KEY
+ENV VITE_POSTHOG_HOST=$VITE_POSTHOG_HOST
 WORKDIR /dashboard
 COPY parent-dashboard/package.json parent-dashboard/package-lock.json ./
 RUN npm install --legacy-peer-deps

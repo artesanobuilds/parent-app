@@ -7,6 +7,10 @@ struct MVPApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage("onboarding_completed") private var onboardingCompleted = false
     @AppStorage("user_name") private var userName = ""
+    // Parent's display name for the greeting. `userName` is now an opaque
+    // account id (UUID), so the name is stored separately. Set at onboarding;
+    // HomeView also refreshes it from the profile.
+    @AppStorage("parent_display_name") private var parentDisplayName = ""
 
     // A pending onboarding seed that hasn't been confirmed by the backend yet.
     // Persisted so a transient failure (no network, token race, a base-URL that
@@ -17,29 +21,73 @@ struct MVPApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if onboardingCompleted && !userName.isEmpty {
-                MainTabView(username: userName)
-                    .task {
-                        await ensureAuthToken(for: userName)
-                        // Re-seed if a prior attempt never confirmed. No-op when
-                        // there's nothing pending. This is what makes the seed
-                        // durable across app restarts.
-                        await flushPendingSeed()
-                        // Ask for notification permission + register for APNs so a
-                        // crisis-lock push can reach the parent. Post-onboarding so
-                        // the prompt lands in context, not on a cold first launch.
-                        PushRegistration.requestAndRegister()
-                    }
+            #if DEBUG
+            // DEBUG-only sign-in harness, reached via `TEST_SIGNIN=1` in the
+            // launch environment. Lets us exercise SignInView end-to-end without
+            // touching the real onboarding/gate cutover. Never present in release.
+            if ProcessInfo.processInfo.environment["TEST_SIGNIN"] == "1" {
+                SignInTestHarness()
             } else {
-                OnboardingView { data in
-                    userName = data.parentName
-                    onboardingCompleted = true
-                    // Stash the seed payload BEFORE attempting it, so even if this
-                    // first POST fails (or the app is killed mid-request) the next
-                    // launch retries it. Then attempt it now.
-                    stashPendingSeed(data)
-                    Task { await flushPendingSeed() }
+                mainContent
+            }
+            #else
+            mainContent
+            #endif
+        }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
+        if onboardingCompleted && !userName.isEmpty {
+            MainTabView(username: userName)
+                .task {
+                    await ensureAuthToken(for: userName)
+                    // Re-seed if a prior attempt never confirmed. No-op when
+                    // there's nothing pending. This is what makes the seed
+                    // durable across app restarts.
+                    await flushPendingSeed()
+                    // Product analytics — started only here (past onboarding +
+                    // consent), never on the sign-in/onboarding screens.
+                    // identify on the OPAQUE analytics id, never the user_id.
+                    Analytics.startIfConsented()
+                    Analytics.identify(AuthService.shared.credential(for: userName)?.analyticsId)
+                    // Ask for notification permission + register for APNs so a
+                    // crisis-lock push can reach the parent. Post-onboarding so
+                    // the prompt lands in context, not on a cold first launch.
+                    PushRegistration.requestAndRegister()
                 }
+        } else if userName.isEmpty {
+            // New user: sign in FIRST (native Apple / Google), which resolves a
+            // durable server account id. Replaces the old anonymous
+            // /auth/issue-token path, where the user_id was just the typed parent
+            // name (guessable, unauthenticated). EXISTING onboarded users never
+            // reach here — they go straight to MainTabView on their legacy token
+            // and migrate whenever they choose to sign in (dual-accept keeps the
+            // legacy token valid meanwhile).
+            //
+            // The BACKEND decides new-vs-returning: `hasProfile` means this
+            // account already has data (e.g. same user on a new device / after
+            // reinstall) → skip onboarding straight to the app. A fresh account
+            // has no profile → onboarding.
+            SignInView { outcome in
+                userName = outcome.userId
+                if outcome.hasProfile {
+                    onboardingCompleted = true
+                }
+            }
+        } else {
+            // Signed in (userName is the server-resolved id) but not onboarded.
+            OnboardingView { data in
+                onboardingCompleted = true
+                // Remember the parent's display name for the greeting (userName
+                // is the opaque account id now).
+                parentDisplayName = data.parentName
+                // Stash the seed payload BEFORE attempting it, so even if this
+                // first POST fails (or the app is killed mid-request) the next
+                // launch retries it. Seeds under the signed-in userName, NOT the
+                // display name. Then attempt it now.
+                stashPendingSeed(data)
+                Task { await flushPendingSeed() }
             }
         }
     }
@@ -68,9 +116,11 @@ struct MVPApp: App {
     }
 
     /// Build the /profile/seed request body from the collected onboarding data.
-    private func seedBody(from data: OnboardingData) -> [String: Any] {
+    /// `userId` is the resolved (signed-in) account id — the parent name is only
+    /// a display field, never the key.
+    private func seedBody(userId: String, from data: OnboardingData) -> [String: Any] {
         var body: [String: Any] = [
-            "user_id": data.parentName,
+            "user_id": userId,
             "parent_name": data.parentName,
             "kids": data.kids.map {
                 [
@@ -104,13 +154,16 @@ struct MVPApp: App {
     /// Persist the seed payload so it survives a failed attempt / app restart.
     @MainActor
     private func stashPendingSeed(_ data: OnboardingData) {
-        guard let payload = try? JSONSerialization.data(withJSONObject: seedBody(from: data)) else {
-            print("[profile/seed] failed to encode body for \(data.parentName)")
+        // Seed under the resolved (signed-in) account id, never the display name.
+        let userId = userName
+        guard !userId.isEmpty,
+              let payload = try? JSONSerialization.data(withJSONObject: seedBody(userId: userId, from: data)) else {
+            print("[profile/seed] failed to encode seed body for \(userId.isEmpty ? "<no user>" : userId)")
             return
         }
         let defaults = UserDefaults.standard
         defaults.set(payload, forKey: Self.pendingSeedBodyKey)
-        defaults.set(data.parentName, forKey: Self.pendingSeedUserKey)
+        defaults.set(userId, forKey: Self.pendingSeedUserKey)
     }
 
     /// POST any pending seed; clear it only on a confirmed 200. Retries a few

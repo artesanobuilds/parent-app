@@ -110,6 +110,7 @@ struct ConsentView: View {
             .padding(.hearth600)
         }
         .background(Color.bgSober.ignoresSafeArea())
+        .trackScreen("consent")
     }
 
     private var canSubmit: Bool {

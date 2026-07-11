@@ -1,0 +1,41 @@
+spec:
+  name: auth-pairing-code
+  tier: 1
+  modules: [auth]
+  intent: >
+    Phase 2 pairing-code flow (phone → web dashboard). An authenticated parent
+    (from the mobile app) mints a short pairing code; the dashboard redeems it
+    for a full v1 session (access JWT + rotating refresh token) bound to the
+    SAME user_id. The code is single-use and its access token authenticates a
+    protected endpoint. This is the one auth-v2 path that is black-box testable
+    without a real provider id_token, so it lives here; login/refresh/exchange
+    are covered by the hermetic suites (which can mock provider verification).
+
+  personas:
+    parent:
+      preset: existing-parent
+
+  preconditions: []
+
+  invariants:
+    - "Authenticated POST /auth/pairing-code returns a short code + expires_in"
+    - "Unauthenticated POST /auth/pairing-code returns 401"
+    - "POST /auth/pairing-login with the code returns a session for the SAME user_id"
+    - "The session's access_token authenticates GET /profile"
+    - "The pairing code is single-use: a second /auth/pairing-login returns 401"
+    - "POST /auth/pairing-login with a bogus code returns 401"
+
+  boundary_contracts:
+    - endpoint: POST /auth/pairing-code
+      as: parent
+      status: 200
+      response_includes: [code, expires_in]
+
+    - endpoint: POST /auth/pairing-code
+      as: anonymous
+      status: 401
+
+    - endpoint: POST /auth/pairing-login
+      as: anonymous
+      status: 200
+      response_includes: [access_token, refresh_token, user_id]

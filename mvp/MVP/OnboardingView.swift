@@ -405,6 +405,7 @@ struct OnboardingView: View {
             }
             .ignoresSafeArea(edges: .top)
         }
+        .trackScreen("onboarding")
     }
 
     // MARK: - Screen 1: Name

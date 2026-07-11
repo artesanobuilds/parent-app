@@ -17,7 +17,9 @@ from fastapi import HTTPException
 CHAT_RATE_PER_MIN = int(os.getenv("RATE_LIMIT_CHAT_PER_MIN", "60"))
 CONFIG_RATE_PER_MIN = int(os.getenv("RATE_LIMIT_CONFIG_PER_MIN", "30"))
 # Token issuance is unauthenticated and a token-flooding amplifier; cap hard.
-AUTH_RATE_PER_HOUR = int(os.getenv("RATE_LIMIT_AUTH_PER_HOUR", "5"))
+# Default aligned to the documented prod value (60/IP/hr, see root CLAUDE.md)
+# so code and docs don't drift; tests bump it higher via conftest.
+AUTH_RATE_PER_HOUR = int(os.getenv("RATE_LIMIT_AUTH_PER_HOUR", "60"))
 # A research run fans out web searches + LLM calls and is expensive; cap per-hour.
 RESEARCH_RATE_PER_HOUR = int(os.getenv("RATE_LIMIT_RESEARCH_PER_HOUR", "20"))
 

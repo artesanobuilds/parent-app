@@ -120,6 +120,7 @@ struct IntegrationsSettingsView: View {
             .padding(.bottom, .hearth900)
         }
         .background(Color.bgCanvas.ignoresSafeArea())
+        .trackScreen("integrations_settings")
         .task { await viewModel.load() }
         .refreshable { await viewModel.load() }
     }

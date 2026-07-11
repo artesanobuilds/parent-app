@@ -51,7 +51,8 @@ export default function Chat() {
       <div className="flex-1 overflow-auto p-700 flex flex-col gap-500 max-w-3xl w-full">
         {messages.length === 0 && (
           <p className="text-ink-secondary">
-            Ask me to track an activity, sort out coverage gaps, or help decide between camps.
+            Ask me what to do this weekend, track an activity, sort out coverage gaps, or help
+            decide between camps.
           </p>
         )}
         {messages.map((m, i) => (

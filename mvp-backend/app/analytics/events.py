@@ -1,0 +1,65 @@
+"""Product-analytics event taxonomy — a STRICT allowlist.
+
+Two hard rules for a kids/family app:
+  1. Only events named here are sent; only their listed property keys survive.
+  2. A denylist of PII-ish keys must NEVER appear in any event (belt-and-braces
+     against a future call site passing chat content / a kid's name).
+
+Event names seed from cost_logging.py's `feature` vocabulary (research, cos,
+kid_chat, parent_chat, parent_voice, onboarding) plus the auth surface. Values
+are opaque/coarse only — counts, statuses, providers, enums. Never free text.
+"""
+from __future__ import annotations
+
+# event name → allowed property keys
+EVENTS: dict[str, set[str]] = {
+    # Auth
+    "signup_completed": {"provider", "platform"},
+    "login_succeeded": {"provider", "platform", "is_new_account", "linked_legacy"},
+    "legacy_account_claimed": {"provider"},
+    # Onboarding / activation
+    "onboarding_completed": {"kid_count", "path"},
+    "companion_created": set(),                      # kid companion set up (activation milestone)
+    # Conversational agents (COUNTS + LIFECYCLE — never content)
+    "chat_opened": {"agent_kind"},                   # opened coach / a companion (engagement)
+    "parent_chat_message_sent": {"thread_kind"},
+    "kid_chat_message_sent": {"agent_id"},
+    "voice_session_ended": {"surface", "duration_s"},  # pairs with voice_session_started → duration
+    # Research / activity planning
+    "research_run_started": set(),
+    "research_run_completed": {"status", "duration_s", "candidate_count"},
+    "activity_tracked": {"status"},
+    "plan_exported": {"format"},
+    # Voice
+    "voice_session_started": {"surface"},
+    # Integrations
+    "integration_connected": {"provider", "kind"},
+    # Content + navigation engagement (client)
+    "content_opened": {"type"},                      # library article / community post
+    "screen_viewed": {"screen"},                     # every screen (tabs + pushed/presented)
+    # Safety
+    "crisis_lock_triggered": {"category"},
+    "companion_reactivated": set(),
+    # Lifecycle
+    "family_deleted": set(),
+}
+
+# Property keys that must never be captured, whatever the event. If a call site
+# ever tries to pass one, it's dropped (and the guard test fails loudly so it's
+# caught before shipping).
+DENYLIST: frozenset[str] = frozenset({
+    "message", "content", "text", "transcript", "body", "name", "kid_name",
+    "child_name", "parent_name", "email", "pin", "token", "custody", "address",
+})
+
+
+def sanitize(event: str, properties: dict | None) -> dict:
+    """Return the property subset allowed for `event` (denylisted keys removed).
+    Unknown props are dropped silently in prod; unknown EVENTS are the caller's
+    concern (see capture())."""
+    allowed = EVENTS.get(event, set())
+    props = properties or {}
+    return {
+        k: v for k, v in props.items()
+        if k in allowed and k not in DENYLIST
+    }

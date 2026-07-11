@@ -31,6 +31,7 @@ struct ArticleDetailView: View {
             }
         }
         .task {
+            Analytics.capture("content_opened", ["type": "article"])
             if let url = configuration.baseURL {
                 article = await contentVM.fetchArticleDetail(baseURL: url, id: articleId)
             }

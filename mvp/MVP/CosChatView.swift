@@ -20,6 +20,8 @@ struct CosChatView: View {
             messageList
             inputArea
         }
+        .trackScreen("planning_chat")
+        .onAppear { Analytics.capture("chat_opened", ["agent_kind": "planning"]) }
         // Lift the pinned input bar clear of MainTabView's floating tab bar — as
         // the Plan hub's Chat segment this view fills to the bottom of the tab
         // content, so without this the field sits flush against the tab bar.
@@ -261,6 +263,7 @@ struct CosChatView: View {
     }
 
     private static let starterPrompts: [StarterPrompt] = [
+        .init(icon: "sun.max", text: "What can we do this weekend?"),
         .init(icon: "magnifyingglass", text: "What camps did we find for my kids?"),
         .init(icon: "exclamationmark.triangle", text: "Where are my coverage gaps this summer?"),
         .init(icon: "checklist", text: "What's still pending or needs confirming?"),

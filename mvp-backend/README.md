@@ -64,7 +64,7 @@ cd mvp-backend
 railway login
 railway init
 railway service mvp-backend
-railway variables set OPENAI_API_KEY=xxx OPENAI_MODEL_NAME=gpt-5.1 TAVILY_API_KEY=xxx
+railway variables set OPENAI_API_KEY=xxx OPENAI_MODEL_NAME=gpt-5.5-2026-04-23 TAVILY_API_KEY=xxx
 railway volume add --mount-path /app/data
 
 # Deploy
@@ -81,10 +81,13 @@ railway domain
 ```
 
 ### Environment variables (set via `railway variables set`)
+`env.example` is the **canonical, exhaustive catalog** (auth v2, PostHog, observability, APNs,
+Google OAuth, rate limits, …). The core three:
+
 | Variable | Description |
 |---|---|
 | `OPENAI_API_KEY` | OpenAI API key |
-| `OPENAI_MODEL_NAME` | Model name (e.g. `gpt-5.1`) |
+| `OPENAI_MODEL_NAME` | Runtime model (e.g. `gpt-5.5-2026-04-23`) |
 | `TAVILY_API_KEY` | Tavily search API key |
 
 ### Data persistence
@@ -112,6 +115,11 @@ MVP_REMOTE_URL=https://your-url.railway.app ./tools/sync-data.sh
 ```
 
 ## API usage
+> **Auth:** most endpoints require a Bearer token via `current_user` (auth v2 — JWT from Apple/Google
+> Sign-In, dual-accepting a legacy opaque token until T2). CMS/`/data/*` use admin cookie-session /
+> `X-Admin-Token`. This list is a non-exhaustive sampler; the full surface (incl. `/auth/*`, `/cos/*`
+> planning + lifecycle board, `/ingest/*`, Google-OAuth, crisis push) lives in the Swagger docs below.
+
 - **Health check:** `GET /health`
 - **Chat (SSE stream):** `POST /chat` with `{"message": "...", "thread_id": "...", "user_id": "..."}`
 - **Onboarding chat:** `POST /onboarding-chat` (same body as chat)

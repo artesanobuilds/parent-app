@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator, Dict, List, Any, Optional
 
-import hmac
 from fastapi import FastAPI, Request, Depends, Header, HTTPException, Query, Body
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -49,6 +48,18 @@ from app.observability import init_sentry
 init_sentry()
 from app.push import init_push
 init_push()
+# Product analytics + feature flags (gated on POSTHOG_API_KEY — no-op if unset).
+from app.analytics import init_analytics, capture as _analytics_capture
+init_analytics()
+
+
+def _track(event: str, user_id: str, props: dict | None = None) -> None:
+    """Fire-and-forget product-analytics capture. Never lets an analytics error
+    (or an unset PostHog) affect a user flow."""
+    try:
+        _analytics_capture(event, user_id, props or {})
+    except Exception:
+        pass
 
 storage_backend = DuckDBStorage()
 content_service.init(storage_backend)
@@ -101,6 +112,11 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("[calendar-sync] worker failed to stop cleanly")
     persist_state()
+    try:
+        from app.analytics import shutdown as analytics_shutdown
+        analytics_shutdown()   # flush queued events (no-op if disabled)
+    except Exception:
+        pass
     storage_backend.close()
 
 
@@ -147,6 +163,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Security response headers (nosniff/frame/referrer/permissions everywhere,
+# HSTS behind ENABLE_HSTS, CSP on the served SPAs). See app/security_headers.py.
+from app.security_headers import SecurityHeadersMiddleware
+app.add_middleware(SecurityHeadersMiddleware)
+
 
 # When behind a trusted reverse proxy (Railway), request.client.host is the
 # proxy IP, so per-IP rate limiting collapses to one shared bucket. Read the
@@ -165,18 +186,13 @@ def client_ip_for(http_request: Request) -> str:
     return http_request.client.host if http_request.client else "unknown"
 
 
-def require_admin_token(x_admin_token: Optional[str] = Header(default=None)) -> None:
-    """
-    Operator-only gate for data export / CMS mutation endpoints. These serve or
-    mutate the FULL dataset, so per-user auth (current_user) is insufficient —
-    any client can mint a user token via /auth/issue-token. Requires a shared
-    ADMIN_TOKEN secret instead. Fails closed when ADMIN_TOKEN is unset.
-    """
-    expected = os.getenv("ADMIN_TOKEN")
-    if not expected:
-        raise HTTPException(status_code=503, detail="admin endpoints disabled (ADMIN_TOKEN not set)")
-    if not x_admin_token or not hmac.compare_digest(x_admin_token, expected):
-        raise HTTPException(status_code=401, detail="invalid or missing admin token")
+# Operator gate + CMS cookie-session endpoints live in app.admin_auth (shared
+# with the email-sync/calendar-sync routers; accepts X-Admin-Token or cookie).
+from app.admin_auth import require_admin_token, router as admin_auth_router
+app.include_router(admin_auth_router)
+# Phase 2 auth: native Apple/Google sign-in, refresh rotation, logout.
+from app.auth_router import router as auth_router
+app.include_router(auth_router)
 
 
 class ChatRequest(BaseModel):
@@ -474,14 +490,26 @@ async def generate_onboarding_stream(message: str, thread_id: str, user_id: str)
 @app.post("/auth/issue-token")
 def auth_issue_token_endpoint(request: AuthIssueRequest, http_request: Request):
     """
-    Issue a Bearer token bound to user_id. v0 closed-beta: any client can
-    claim a user_id (the existing app generates a UUID at first run). v1
-    public launch tightens this with Apple Sign-In + server-side validation.
+    LEGACY closed-beta token issuance. Being retired by the Phase 2 auth
+    migration (native Apple/Google sign-in via /auth/login):
 
-    Rate-limited per source IP to slow token-issuance flooding (the only
-    closed-beta-safe knob until App Attest / Sign-In lands).
+    - Disabled entirely once AUTH_ISSUE_TOKEN_ENABLED=0 (returns 410 Gone) —
+      the T2 rollout step after every family has claimed their account.
+    - Refuses a user_id that has ALREADY claimed a real identity (403): once a
+      family signs in, nobody can mint a legacy token for their name again.
+      This closes the "guess a parent's name → mint their token" hole
+      family-by-family as sign-in adoption progresses.
+
+    Rate-limited per source IP.
     """
+    if os.getenv("AUTH_ISSUE_TOKEN_ENABLED", "1").lower() not in ("1", "true", "yes"):
+        raise HTTPException(status_code=410, detail="legacy token issuance retired; sign in instead")
     rate_limit_enforce(client_ip_for(http_request), "auth")
+    if storage_backend.user_has_any_identity(request.user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="this account has sign-in enabled; use Sign in with Apple/Google",
+        )
     token = auth_issue_token(request.user_id)
     return {"token": token, "user_id": request.user_id}
 
@@ -734,6 +762,7 @@ async def debug_report(req: DebugReportRequest, http_request: Request):
 async def chat_endpoint(request: ChatRequest, user_id: str = Depends(current_user)):
     authorize_user_match(authenticated=user_id, claimed=request.user_id)
     rate_limit_enforce(user_id, "chat")
+    _track("parent_chat_message_sent", user_id, {"thread_kind": "coach"})
     return StreamingResponse(
         generate_stream(request.message, request.thread_id, request.user_id),
         media_type="text/event-stream"
@@ -792,8 +821,12 @@ def get_article(article_id: str):
 
 
 @app.post("/content/community/new")
-def create_user_community_post(req: UserPostCreateRequest):
-    """Create a community post from the mobile app."""
+def create_user_community_post(req: UserPostCreateRequest, user_id: str = Depends(current_user)):
+    """Create a community post from the mobile app. Authenticated: an
+    unauthenticated write with a caller-chosen user_id/author_name is an
+    impersonation + spam vector (found by tests/test_bola_sweep.py's class
+    of audit; iOS has always sent the bearer token here)."""
+    authorize_user_match(authenticated=user_id, claimed=req.user_id)
     import uuid
     words = req.author_name.strip().split()
     initials = "".join(w[0].upper() for w in words[:2]) if words else "?"
@@ -830,8 +863,10 @@ def get_post_replies(post_id: str, limit: int = 100):
 
 
 @app.post("/content/community/{post_id}/replies")
-def create_post_reply(post_id: str, req: ReplyCreateRequest):
-    """Create a reply on a community post."""
+def create_post_reply(post_id: str, req: ReplyCreateRequest, user_id: str = Depends(current_user)):
+    """Create a reply on a community post. Authenticated — see
+    create_user_community_post."""
+    authorize_user_match(authenticated=user_id, claimed=req.user_id)
     post = content_service.get_community_post(post_id)
     if post is None:
         from fastapi.responses import JSONResponse
@@ -942,6 +977,11 @@ def seed_profile(request: OnboardingSeedRequest, user_id: str = Depends(current_
     persist_state(request.user_id)
 
     logger.info(f"[profile/seed] seeded profile for user_id={request.user_id}")
+    try:
+        from app.analytics import capture as _capture
+        _capture("onboarding_completed", request.user_id, {"kid_count": len(request.kids)})
+    except Exception:
+        pass
     return profiling_service.get_family_profile(request.user_id)
 
 
@@ -1117,6 +1157,9 @@ def kid_agent_upsert(req: KidAgentConfigRequest, user_id: str = Depends(current_
             expected_version=req.expected_version,
             enable=req.enable,
         )
+        # Activation milestone: first version = a companion was just created.
+        if (config or {}).get("version") == 1:
+            _track("companion_created", user_id)
         return config
     except ValueError as exc:
         from fastapi.responses import JSONResponse
@@ -1315,6 +1358,7 @@ async def generate_kid_stream(
                 category=pre.category, severity="crisis", reason=pre.reason,
             )
             moderation.kill_agent(agent_id)  # in-process for the current request
+            _track("crisis_lock_triggered", user_id, {"category": pre.category})
             storage_backend.log_moderation_event(
                 user_id=user_id, kid_name=kid_name, severity="crisis",
                 category=pre.category, action="crisis_routed",
@@ -1389,6 +1433,7 @@ async def generate_kid_stream(
                 reason=f"output: {sm.block_reason.reason}",
             )
             moderation.kill_agent(agent_id)
+            _track("crisis_lock_triggered", user_id, {"category": sm.block_reason.category})
             storage_backend.log_moderation_event(
                 user_id=user_id, kid_name=kid_name, severity="crisis",
                 category=sm.block_reason.category, action="crisis_routed",
@@ -1479,6 +1524,7 @@ async def kid_chat_endpoint(request: KidChatRequest, user_id: str = Depends(curr
     if not _verify_kid_pin(request.user_id, request.kid_name, request.kid_pin):
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=401, content={"error": "PIN check failed"})
+    _track("kid_chat_message_sent", user_id)
     return StreamingResponse(
         generate_kid_stream(
             user_id=request.user_id,
@@ -1524,6 +1570,7 @@ async def voice_convai_token(
     if config is None:
         raise HTTPException(status_code=404, detail="agent not found")
     agent_id = config["id"]
+    _track("voice_session_started", user_id, {"surface": "kid"})
 
     if not _verify_kid_pin(user_id, kid_name, x_kid_pin):
         raise HTTPException(status_code=401, detail="PIN check failed")
@@ -1626,6 +1673,7 @@ async def voice_parent_convai_token(user_id: str = Depends(current_user)):
     elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
     if not elevenlabs_agent_id or not elevenlabs_api_key:
         raise HTTPException(status_code=503, detail="parent ConvAI not configured")
+    _track("voice_session_started", user_id, {"surface": "parent"})
 
     # Voice directive: the spoken output must be clean (no markdown/headers/lists),
     # but the agent MUST keep emitting [Title](mvp://...) links — the Custom-LLM
@@ -1700,14 +1748,35 @@ def delete_family(user_id: str, authenticated_user: str = Depends(current_user))
     delete (including row counts per table). The audit event is the only
     thing that survives.
 
-    Note: this does NOT touch parquet snapshots in /app/data/*.parquet — they
-    will regenerate on next export and forget the deleted rows. It also does
-    NOT touch the in-memory LangGraph MemorySaver checkpointer (process-local;
-    will be discarded next restart). Both are documented in the audit details.
+    Parquet snapshots in /app/data/*.parquet are re-exported immediately after
+    the cascade so they forget the family NOW, not "on next export" (they are
+    the durability path on Railway and would otherwise retain deleted kid data
+    until some later export ran). The in-memory LangGraph MemorySaver
+    checkpointer is NOT touched (process-local; discarded next restart).
     """
     authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    # Grab the analytics id BEFORE the cascade deletes the account row, so we can
+    # purge the PostHog person too (part of the "delete my data" promise).
+    _analytics_id = storage_backend.analytics_id_for(user_id)
+    try:
+        from app.analytics import capture as _capture
+        _capture("family_deleted", user_id)
+    except Exception:
+        pass
     result = storage_backend.delete_family(user_id=user_id, actor=authenticated_user)
     counts = result.get("counts", {})
+    if _analytics_id:
+        try:
+            from app.analytics.deletion import delete_person
+            delete_person(_analytics_id)   # no-op unless PostHog is configured
+        except Exception:
+            logger.warning("[delete-family] PostHog person deletion failed (non-fatal)")
+    try:
+        storage_backend.export_all_parquet()
+    except Exception:
+        # The DB rows are gone (the delete stands); a failed snapshot refresh
+        # must be visible, not silent — the stale snapshot still holds PII.
+        logger.exception("[delete-family] parquet re-export failed after delete of %s", user_id)
     # Abort any in-flight kid streams for the deleted agents (H-5): the kill
     # flag is checked by the moderation gate, so a streaming response can't
     # keep serving a family that no longer exists.
@@ -1741,7 +1810,8 @@ def kid_agent_revive(agent_id: str, authenticated_user: str = Depends(current_us
     if lock is None:
         raise HTTPException(status_code=404, detail="agent has no active crisis lock")
     if lock["user_id"] != authenticated_user:
-        raise HTTPException(status_code=403, detail="only the owning parent can revive")
+        # 404, not 403: a non-owner must not learn the agent_id exists/is locked.
+        raise HTTPException(status_code=404, detail="agent has no active crisis lock")
     _require_consent(authenticated_user)
     cleared = storage_backend.revive_kid_agent_from_crisis(
         agent_id=agent_id, by=authenticated_user,
@@ -1751,6 +1821,7 @@ def kid_agent_revive(agent_id: str, authenticated_user: str = Depends(current_us
     # enabled=True as a side effect of a no-op revive.
     if cleared:
         storage_backend.set_kid_agent_enabled(agent_id, True)
+        _track("companion_reactivated", authenticated_user)
     # Safety-relevant parent action — always audit it.
     storage_backend.write_audit_event(
         user_id=lock["user_id"], actor=authenticated_user,
@@ -1817,7 +1888,7 @@ def cms_delete_article(article_id: str, _: None = Depends(require_admin_token)):
 
 
 @app.get("/cms/community-posts/{post_id}")
-def cms_get_community_post(post_id: str):
+def cms_get_community_post(post_id: str, _: None = Depends(require_admin_token)):
     post = content_service.get_community_post(post_id)
     if post is None:
         from fastapi.responses import JSONResponse
@@ -1877,7 +1948,7 @@ def cms_delete_category(category_id: str, _: None = Depends(require_admin_token)
 
 
 @app.get("/cms/stats")
-def cms_stats():
+def cms_stats(_: None = Depends(require_admin_token)):
     return content_service.get_content_stats()
 
 

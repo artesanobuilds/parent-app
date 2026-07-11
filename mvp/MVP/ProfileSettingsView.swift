@@ -14,6 +14,11 @@ struct ProfileSettingsView: View {
     @State private var showAddKid = false
     @State private var pendingDeleteKey: String?
     @State private var errorMessage: String?
+    // Legacy users (issued a token before sign-in existed) have no v1 credential.
+    // We nudge them to claim their account with Apple/Google so they don't lose
+    // access when legacy tokens are retired. Nil = unknown/loading.
+    @State private var isLegacyAccount: Bool?
+    @State private var showSecureAccount = false
 
     var body: some View {
         List {
@@ -23,6 +28,26 @@ struct ProfileSettingsView: View {
                         .foregroundColor(.inkMuted)
                 }
             } else {
+                if isLegacyAccount == true {
+                    Section {
+                        Button { showSecureAccount = true } label: {
+                            HStack(spacing: .hearth400) {
+                                Image(systemName: "lock.shield.fill")
+                                    .foregroundColor(.accentDefault)
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Secure your account")
+                                        .font(.hearthBodyMD.weight(.semibold))
+                                        .foregroundColor(.accentDefault)
+                                    Text("Sign in with Apple or Google so you keep access on every device.")
+                                        .font(.hearthBodySM)
+                                        .foregroundColor(.inkMuted)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Section("You") {
                     NavigationLink {
                         ParentProfileEditor(
@@ -77,6 +102,15 @@ struct ProfileSettingsView: View {
         .sheet(isPresented: $showAddKid) {
             AddKidSheet(baseURL: configuration.baseURL, userID: userID) { apply($0) }
         }
+        .sheet(isPresented: $showSecureAccount) {
+            // SignInView auto-forwards the legacy user_id + token, so a
+            // successful sign-in CLAIMS this existing account (same user_id,
+            // data intact) and binds an Apple/Google identity to it.
+            SignInView { _ in
+                showSecureAccount = false
+                isLegacyAccount = AuthService.shared.credential(for: userID) == nil
+            }
+        }
         .confirmationDialog(
             pendingDeleteKey.map { "Delete \(family.children?[$0]?.name ?? $0)'s profile?" } ?? "",
             isPresented: Binding(
@@ -92,7 +126,12 @@ struct ProfileSettingsView: View {
         } message: {
             Text("This permanently removes this child and everything saved about them. This can't be undone.")
         }
+        .trackScreen("profile_settings")
         .task { await load() }
+        .task {
+            // Legacy = authenticated today but with no stored v1 credential.
+            isLegacyAccount = !userID.isEmpty && AuthService.shared.credential(for: userID) == nil
+        }
     }
 
     // MARK: - Rows

@@ -42,5 +42,6 @@ struct SettingsView: View {
             }
         }
         .background(Color.bgCanvas.ignoresSafeArea())
+        .trackScreen("settings")
     }
 }

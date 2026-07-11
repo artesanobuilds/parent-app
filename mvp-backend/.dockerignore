@@ -28,6 +28,10 @@ data/kid_agent_crisis_locks.parquet
 data/daily_summaries.parquet
 data/tts_usage_daily.parquet
 data/audit_events.parquet
+# Auth v1 (Phase 2) — account/identity/refresh state; never seed prod from local.
+data/user_accounts.parquet
+data/auth_identities.parquet
+data/refresh_tokens.parquet
 # Activity planning + Chief-of-Staff (all user state — never seed prod from local)
 data/research_runs.parquet
 data/activity_candidates.parquet

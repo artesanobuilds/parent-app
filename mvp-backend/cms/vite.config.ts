@@ -9,6 +9,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/content': 'http://localhost:8904',
+      '/admin/session': 'http://localhost:8904',
       '/cms/articles': 'http://localhost:8904',
       '/cms/community-posts': 'http://localhost:8904',
       '/cms/categories': 'http://localhost:8904',

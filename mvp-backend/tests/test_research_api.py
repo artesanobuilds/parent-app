@@ -93,8 +93,10 @@ def test_research_api_end_to_end_and_auth():
         assert any(run["id"] == run_id for run in r.json()["runs"])
 
         # ── another user's bearer can't read this run ────────────────
+        # 404, not 403: a non-owner must not even learn the run_id exists
+        # (authorize_user_match resource=True).
         other_token = _issue_token(client, "nl-harness-other-user")
         r = client.get(
             f"/research/runs/{run_id}", headers={"Authorization": f"Bearer {other_token}"}
         )
-        assert r.status_code == 403
+        assert r.status_code == 404

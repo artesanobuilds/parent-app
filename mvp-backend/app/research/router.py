@@ -59,7 +59,7 @@ def _require_owned_run(storage, run_id: str, user_id: str) -> Dict[str, Any]:
     run = storage.get_research_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="research run not found")
-    authorize_user_match(authenticated=user_id, claimed=run["user_id"])
+    authorize_user_match(authenticated=user_id, claimed=run["user_id"], resource=True)
     return run
 
 
@@ -88,6 +88,11 @@ def create_run(req: ResearchRunRequest, user_id: str = Depends(current_user)):
     if research_worker is not None:
         research_worker.notify()
 
+    try:
+        from app.analytics import capture
+        capture("research_run_started", user_id)
+    except Exception:
+        pass
     return {"run_id": result["run_id"], "status": "queued"}
 
 

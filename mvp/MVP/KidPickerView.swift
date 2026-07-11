@@ -56,6 +56,7 @@ struct KidPickerView: View {
             }
             .padding(.hearth500)
         }
+        .trackScreen("kid_picker")
         .task { await vm.load() }
     }
 

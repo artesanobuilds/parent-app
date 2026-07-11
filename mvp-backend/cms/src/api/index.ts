@@ -2,31 +2,28 @@ import type { Article, Category, CommunityPost, ContentStats } from '../types';
 
 const API = '';
 
-// Admin token for /cms/* writes. Read once at module load.
-const ADMIN_TOKEN: string = (() => {
-  const t = import.meta.env.VITE_ADMIN_TOKEN as string | undefined;
-  if (!t) {
-    console.warn(
-      '[cms/api] VITE_ADMIN_TOKEN is not set; /cms/* requests will be sent with an empty X-Admin-Token and will fail with 401.',
-    );
-    return '';
-  }
-  return t;
-})();
-
+// Admin auth: an HttpOnly session cookie minted by POST /admin/session (see
+// pages/Login.tsx). The old scheme baked VITE_ADMIN_TOKEN into this bundle at
+// build time — i.e. shipped the operator secret to every visitor's browser.
+// The cookie is invisible to JS; we just send credentials + the CSRF marker.
 function withAdminHeaders(init?: RequestInit): RequestInit {
   const headers = new Headers(init?.headers ?? {});
-  headers.set('X-Admin-Token', ADMIN_TOKEN);
+  headers.set('X-Requested-With', 'cms');
   if (init?.body !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  return { ...init, headers };
+  return { ...init, headers, credentials: 'same-origin' };
+}
+
+function redirectToLogin(): void {
+  // basename is /cms (see main.tsx); preserve where the user was.
+  const here = window.location.pathname + window.location.search;
+  window.location.assign(`/cms/login?from=${encodeURIComponent(here)}`);
 }
 
 async function fetchJSON<T>(url: string, init?: RequestInit, retries = 3): Promise<T> {
-  const finalInit = url.startsWith('/cms/') || url.includes(`${API}/cms/`)
-    ? withAdminHeaders(init)
-    : init;
+  const isAdmin = url.startsWith('/cms/') || url.includes(`${API}/cms/`);
+  const finalInit = isAdmin ? withAdminHeaders(init) : init;
   let lastError: Error = new Error('Request failed');
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) {
@@ -42,6 +39,9 @@ async function fetchJSON<T>(url: string, init?: RequestInit, retries = 3): Promi
     if (res.ok) {
       return res.json();
     }
+    if (res.status === 401 && isAdmin && !window.location.pathname.endsWith('/login')) {
+      redirectToLogin();
+    }
     const body = await res.text();
     lastError = new Error(`${res.status}: ${body}`);
     if (res.status < 500 && res.status !== 429) {
@@ -50,6 +50,23 @@ async function fetchJSON<T>(url: string, init?: RequestInit, retries = 3): Promi
   }
   throw lastError;
 }
+
+// Session (CMS login/logout)
+export async function createSession(token: string): Promise<void> {
+  const res = await fetch(`${API}/admin/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(res.status === 401 ? 'Invalid admin token' : `${res.status}: ${body}`);
+  }
+}
+
+export const destroySession = () =>
+  fetch(`${API}/admin/session`, { method: 'DELETE', credentials: 'same-origin' }).then(() => undefined);
 
 // Categories
 export const getCategories = () => fetchJSON<Category[]>(`${API}/content/categories`);

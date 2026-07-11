@@ -106,6 +106,7 @@ struct ServerSettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Color.bgCanvas.ignoresSafeArea())
+        .trackScreen("server_settings")
         .onAppear {
             draftBaseURL = configuration.baseURLString
             draftThreadID = configuration.threadID

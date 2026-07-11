@@ -22,6 +22,7 @@ struct AgentView: View {
                 messageList
                 inputArea
             }
+            .onAppear { Analytics.capture("chat_opened", ["agent_kind": "coach"]) }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {

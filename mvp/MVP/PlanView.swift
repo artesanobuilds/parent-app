@@ -1487,6 +1487,7 @@ struct CandidateDetailView: View {
         .background(Color.bgCanvas.ignoresSafeArea())
         .navigationTitle("Activity")
         .navigationBarTitleDisplayMode(.inline)
+        .trackScreen("candidate_detail")
     }
 
     private var detailRows: some View {

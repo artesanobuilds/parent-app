@@ -1,13 +1,15 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   FileText,
   Users,
   FolderOpen,
   Download,
+  LogOut,
   Mailbox,
   CalendarSync as CalendarSyncIcon,
 } from "lucide-react";
+import { destroySession, exportParquet } from "../../api";
 import { toast } from "../shared/Toast";
 
 const navItems = [
@@ -20,15 +22,21 @@ const navItems = [
 ];
 
 export default function CMSLayout() {
+  const navigate = useNavigate();
+
   const handleExportParquet = async () => {
     try {
-      const res = await fetch("/cms/export-parquet", { method: "POST" });
-      if (!res.ok) throw new Error("Export failed");
+      await exportParquet();
       toast.success("Parquet exported successfully");
     } catch (err) {
       console.error("Parquet export failed:", err);
       toast.error("Parquet export failed");
     }
+  };
+
+  const handleLogout = async () => {
+    await destroySession();
+    navigate("/login");
   };
 
   return (
@@ -68,6 +76,13 @@ export default function CMSLayout() {
           >
             <Download size={18} />
             Export Parquet
+          </button>
+          <button
+            onClick={handleLogout}
+            className="flex w-full items-center gap-400 rounded-md px-400 py-300 text-body-md font-medium text-ink-muted transition-colors duration-fast hover:bg-sober hover:text-ink-primary"
+          >
+            <LogOut size={18} />
+            Sign out
           </button>
         </div>
       </aside>

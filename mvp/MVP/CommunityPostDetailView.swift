@@ -36,6 +36,7 @@ struct CommunityPostDetailView: View {
                 .toolbarBackground(Color.bgCanvas, for: .navigationBar)
                 .toolbarBackground(.visible, for: .navigationBar)
                 .task {
+                    Analytics.capture("content_opened", ["type": "community_post"])
                     if let url = contentVM.baseURL {
                         await contentVM.loadReplies(baseURL: url, postId: postId)
                     }

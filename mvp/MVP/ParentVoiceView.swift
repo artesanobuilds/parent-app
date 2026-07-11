@@ -14,6 +14,7 @@ struct ParentVoiceView: View {
 
     @StateObject private var coordinator: ParentCompanionCoordinator
     @State private var showingReport = false
+    @State private var voiceStart = Date()
 
     init(userID: String, baseURL: URL, onClose: @escaping ([ChatMessage]) -> Void) {
         self.userID = userID
@@ -45,8 +46,13 @@ struct ParentVoiceView: View {
             }
             .withContentNavigationDestinations()
         }
-        .task { await coordinator.start() }
-        .onDisappear { Task { await coordinator.exit() } }
+        .trackScreen("parent_voice")
+        .task { voiceStart = Date(); await coordinator.start() }
+        .onDisappear {
+            Analytics.capture("voice_session_ended",
+                              ["surface": "parent", "duration_s": Int(Date().timeIntervalSince(voiceStart))])
+            Task { await coordinator.exit() }
+        }
     }
 
     private func header(onEnd: @escaping () -> Void) -> some View {

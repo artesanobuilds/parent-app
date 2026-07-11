@@ -4,6 +4,10 @@
 <dict>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>POSTHOG_API_KEY</key>
+	<string>phc_xdDZCBbTyJQ6RpD4CkSoemGqjmFGtFzfYiCSecRt4abz</string>
+	<key>POSTHOG_HOST</key>
+	<string>https://us.i.posthog.com</string>
 	<key>NSCameraUsageDescription</key>
 	<string>MVP never uses the camera. This permission key is required by the real-time voice framework, which also supports video calls; the app will never ask for camera access.</string>
 	<key>NSLocalNetworkUsageDescription</key>
