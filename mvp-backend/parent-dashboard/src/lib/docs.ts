@@ -50,7 +50,14 @@ export const DOCS: DocPage[] = Object.entries(raw)
   .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
 
 // Section display order (sections not listed sort last, alphabetically).
-const SECTION_ORDER = ['Getting started', 'Your plan', 'Activities', 'Connections', 'Trust'];
+const SECTION_ORDER = [
+  'Getting started',
+  'Your plan',
+  'Activities',
+  'Coach & companions',
+  'Connections',
+  'Trust',
+];
 
 export const SECTIONS: { name: string; pages: DocPage[] }[] = [
   ...new Set(DOCS.map((d) => d.section)),

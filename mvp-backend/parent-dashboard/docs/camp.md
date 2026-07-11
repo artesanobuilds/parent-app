@@ -10,6 +10,8 @@ draft: false
 Camps are the anchor: every school break is a set of weeks that need a plan,
 and MVP works the whole problem week by week.
 
+![Every plan starts at a door — camps, classes, outings, trips.](/dashboard/docs-assets/plan-doors.png)
+
 ## The flow
 
 1. **Find.** Ask the assistant to go looking ("find art camps near 95448 for

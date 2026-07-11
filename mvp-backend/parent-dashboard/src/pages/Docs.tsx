@@ -71,6 +71,23 @@ const mdComponents = {
   ),
   td: (p: object) => <td className="border-b border-subtle px-300 py-200 align-top" {...p} />,
   code: (p: object) => <code className="bg-canvas rounded px-100 text-sm" {...p} />,
+  // Screenshots/diagrams render as captioned figures: the alt text IS the
+  // caption. Portrait phone shots (ios-*) get a narrower column so they read
+  // like a phone, not a poster. Spans (block-styled), not <figure> — markdown
+  // images arrive inside <p>, where a figure would be invalid nesting.
+  img: ({ src, alt }: { src?: string; alt?: string }) => (
+    <span className={`block my-500 ${src?.includes('/ios-') ? 'max-w-[340px]' : ''}`}>
+      <img
+        src={src}
+        alt={alt ?? ''}
+        loading="lazy"
+        className="w-full rounded-lg border border-hairline shadow-sm"
+      />
+      {alt ? (
+        <span className="block text-ink-muted text-xs mt-200 text-center">{alt}</span>
+      ) : null}
+    </span>
+  ),
 };
 
 export default function Docs() {

@@ -21,6 +21,8 @@ Two extra buckets appear only when needed: **Waiting / blocked** (something
 needs confirming first — eligibility, a waitlist) and **Not doing** (things
 you passed on — restorable anytime).
 
+![The lifecycle at a glance — cards only ever move toward All set, and Pass is available from any stage.](/dashboard/docs-assets/lifecycle-stages.svg)
+
 ## What happens when you register
 
 Marking an activity **registered** is the moment MVP starts working for you:
@@ -30,6 +32,8 @@ Marking an activity **registered** is the moment MVP starts working for you:
   line so you know it's on.
 - It seeds the obvious to-dos: a **payment** to-do when the price is known,
   and a "forward the confirmation email" to-do when Gmail isn't connected.
+
+![A registered weekly class: its schedule line, the payment to-do as the next step, and the rest of its checklist.](/dashboard/docs-assets/card-class.png)
 
 ## Passing and starting over
 
@@ -42,5 +46,6 @@ Marking an activity **registered** is the moment MVP starts working for you:
 ## Dates on cards
 
 Each card shows its schedule the way you'd say it — "Week of Jul 13" for a
-camp week, "Tuesdays 4:00 PM" for a weekly class. Weeks with no camp and no
+camp week, "Tuesdays 4:00 PM" for a weekly class. A family trip shows its
+real range ("Aug 14 – Aug 18") and counts as covered days for the kids. Weeks with no camp and no
 adult covering a kid show up as **coverage gaps** in the plan summary.

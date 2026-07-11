@@ -123,7 +123,14 @@ export default function Plan() {
           <Stat label="Confirmed" value={`$${Math.round(cost.confirmed_total)}`} accent />
           <Stat label="Cost TBD" value={String(cost.tbd_count)} />
           <Stat label="Tracked" value={String(cost.item_count)} />
-          <Stat label="Kids" value={String(Object.keys(cost.by_kid ?? {}).length)} />
+          {/* Family-level items (a trip has no kid) serialize under a "null"
+              bucket — they're not a kid. */}
+          <Stat
+            label="Kids"
+            value={String(
+              Object.keys(cost.by_kid ?? {}).filter((k) => k && k !== 'null').length,
+            )}
+          />
         </div>
       )}
 

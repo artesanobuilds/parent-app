@@ -27,6 +27,10 @@ Every reminder arrives as a push notification *and* a to-do on your board —
 so even with notifications off, the board catches it. Cards with a watched
 window show it plainly: *"Registration opens Aug 12 · watching."*
 
+![The promise on a card: the date you gave, visibly watched.](/dashboard/docs-assets/card-watching.png)
+
+![What "watching" means: a heads-up seven days before, and a nudge before it opens — never after.](/dashboard/docs-assets/watchlist-timeline.svg)
+
 ## Dates we found vs. dates you told us
 
 - A date **you** gave us (or one from a confirmation email) is a promise we

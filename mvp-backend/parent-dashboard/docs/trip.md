@@ -22,6 +22,8 @@ That lands on the board as one card with its real range ("Jun 14 – Jun 18").
 Those days count as covered — a trip week will never show up in your
 coverage gaps as if the kids had nowhere to be.
 
+![A booked trip: the real dates, and the prep to-dos that appear on their own.](/dashboard/docs-assets/card-trip.png)
+
 ## Both calendars
 
 The assistant adds an all-day calendar entry for each kid across the trip's

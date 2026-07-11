@@ -10,6 +10,8 @@ draft: false
 The assistant can do everything the buttons can do, plus the parts that need
 judgment. Talk to it the way you'd brief a very organized friend.
 
+![A fresh chat opens with the four doors — camps, classes, outings, trips — each a one-tap way in.](/dashboard/docs-assets/chat-fresh.png)
+
 ## Things it's good at
 
 **Keeping the picture.**
@@ -30,6 +32,8 @@ judgment. Talk to it the way you'd brief a very organized friend.
 **Saving what you already did.**
 - "I signed up for Camp Galileo last night." It looks the camp up, saves it
   as registered, and starts tracking what follows.
+
+![One sentence in, and the class is on the board with a registration to-do — the assistant tells you what it did and what's still open.](/dashboard/docs-assets/chat-conversation.png)
 
 **The follow-through.**
 - "Add a to-do to call the dentist." · "Grandma can do pickups on Fridays." ·

@@ -23,6 +23,8 @@ week or an appointment collides with practice, you hear about it before it
 happens. Change the schedule ("practice moved to Thursdays") and the
 calendar reconciles itself.
 
+![A weekly class on the board — the rrule becomes a plain-language schedule line.](/dashboard/docs-assets/card-class.png)
+
 ## Registration is seasonal
 
 Fall and spring sign-up windows open, fill, and close fast. When you mention

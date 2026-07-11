@@ -35,4 +35,14 @@ There are two ways to use it:
 3. **Chat** is the assistant itself. Anything you can do with buttons you can
    also just say.
 
+![The plan board — four stages, and every card carries its own next step.](/dashboard/docs-assets/plan-board.png)
+
 A good first ask: *"What can you actually do for me?"*
+
+## And on the phone
+
+The iPhone app carries the same plan, plus the parts that live best in your
+pocket: the [parenting coach](coach) and your kids'
+[companions](companions).
+
+![Home in the iPhone app — your day, the kids' companions, and the community.](/dashboard/docs-assets/ios-home.png)
