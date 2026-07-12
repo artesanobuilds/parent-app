@@ -169,7 +169,19 @@ verify post-deploy with `list_prometheus_metric_names(regex="cos_.*")`):
 `cos_dates_write_total{date_model}` · `cos_dates_rrule_rejected_total{edge}` ·
 `cos_lookup_path_total{path}` · `cos_type_degraded_total`.
 
-**Alert rules to add** (Alerting → Alert rules; reuse the Slack contact point):
+**Alert rules to add** (Alerting → Alert rules; reuse the Slack contact
+point). ALL FOUR share one evaluation group — folder `mvp-backend alerts`,
+group `cos-health`, **interval 1m** (the interval belongs to the GROUP, so
+rules 2–4 just select the existing group and inherit it; only the per-rule
+pending period differs). 1m evaluation is cheap — the pending periods below
+do the de-noising:
+
+| # | Rule | Pending period ("for") |
+|---|---|---|
+| 1 | COS lifecycle hook errors | 0s |
+| 2 | Doors failing open | 15m |
+| 3 | Watchlist missed a window | 0s |
+| 4 | Watchlist worker stalled | 5m |
 
 1. **COS lifecycle hook errors** — the swallow-safe hooks fail INVISIBLY (users
    see nothing; to-dos/email-watching silently don't happen):
