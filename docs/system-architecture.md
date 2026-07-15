@@ -234,13 +234,47 @@ flowchart LR
     SPAWN --> DRAFT
 ```
 
+### 3d. 🟢 Verticals + registration watchlist (2026-07-11, `docs/history/009.md`)
+
+The COS spans **five verticals behind one agent** — camps, extracurriculars, outings,
+school events, trips. Architecture rules (critic-hardened, binding):
+
+- **Verticals are DATA, not agents/navigation.** `app/cos/verticals.py` holds a frozen
+  `VerticalProfile` registry (date model, capability booleans, to-do wording, door copy,
+  research focus). ONE static sectioned system prompt in `agent.py`; conditionals stay in
+  code (`lifecycle.py`); a vertical is a card attribute + chip filter on both clients.
+- **Feature flags touch verticals in exactly one place:** `GET /cos/verticals` filters
+  DOOR visibility (fail-open to unflagged doors; clients cache last-good). The
+  lifecycle/planning/agent engine never branches on a flag.
+- **Dates:** `storage.set_activity_dates` is the single write path — week_block derives
+  `week_start`, RFC-5545 `rrule` is the source of truth for recurring (the derived
+  `recurring_appointments` row regenerates, never hand-edited), single_date/date_range
+  for school events/trips. `lifecycle.format_when` renders the ONE `when` string both
+  clients show verbatim.
+- **Registration watchlist** (`app/watchlist/`) is engineered as a notification SLO:
+  `registration_windows` + an append-only `window_notifications` delivery log (the
+  `(window_id, kind, opens_at_snapshot)` NOT-EXISTS due-check gives idempotency,
+  re-arm-on-date-change, and an audit trail in one mechanism); tz-aware
+  notify-before-never-after due rules; a catch-up sweep worker (repairs downtime within
+  one poll); durable-first delivery (log row + fallback to-do in one txn → blocking APNs
+  `push.send_push` → recorded outcome). Miss detector + heartbeat gauges feed the
+  Grafana "Watchlist SLO" row and its alert rules.
+- **Prompt-diff gate:** any change to the COS prompt or a tool docstring must re-run the
+  golden set (`tests/goldens/`, live tool-selection eval vs gpt-5.5) and hold baseline.
+- **Public docs** ship in the dashboard bundle at `/dashboard/docs` (outside the auth
+  guard), one page per vertical, enforced by `tests/test_public_docs.py`.
+
 ---
 
 ## 4. Data model (DuckDB)
 
 All tables bootstrap from parquet snapshots on startup and export back on writes/shutdown.
-Schema migrations run `v1→v9` on boot (guarded column-adds — see `app/migrations.py`).
-User-state parquets are excluded from the Docker build context (prod keeps its own volume copy).
+Schema migrations run in order on boot, each body + version stamp in one transaction
+(`app/migrations.py`, v19 as of 2026-07-11 — note: an index on a backfilled column must
+live in its OWN migration; DuckDB can't CREATE INDEX in a transaction that UPDATEd the
+table, and only a populated DB exposes it). User-state parquets are excluded from the
+Docker build context (guarded by `tests/test_dockerignore_guard.py`; prod keeps its own
+volume copy).
 
 ```mermaid
 erDiagram
@@ -260,7 +294,8 @@ erDiagram
 | Content | `categories`, `articles`, `community_posts`, `post_replies` |
 | Kid companion | `kid_agent_configs`, `kid_messages`, `kid_credentials`, `moderation_events`, `kid_agent_crisis_locks`, `daily_summaries` |
 | 🟢 Discovery | `research_runs`, `activity_candidates` (+ `city`, `region`, `distance_mi` — v8/v9) |
-| 🟢 Coordination | `tracked_activities`, `calendar_entries`, `recurring_appointments`, `caregivers`, `logistics_assignments`, `todo_items`, `cos_messages` |
+| 🟢 Coordination | `tracked_activities` (+ `activity_type` v16, dates/rrule v17), `calendar_entries`, `recurring_appointments`, `caregivers`, `logistics_assignments`, `todo_items`, `cos_messages` |
+| 🟢 Watchlist | `registration_windows`, `window_notifications` (append-only delivery log) |
 | 🟢 Ingestion | `ingest_artifacts` |
 | 🟢 Integrations / sync | `integration_accounts` (was `google_oauth_tokens` — generalized in R5), `email_sync_runs`, `calendar_sync_runs`, `agent_config` |
 

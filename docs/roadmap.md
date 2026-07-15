@@ -2,6 +2,17 @@
 
 Living list of next-up work. Order is a rough priority, not a commitment. Items move to `docs/history/NNN.md` when shipped.
 
+## Vertical Expansion — One Agent, Five Doors + Watchlist + Public Docs (2026-07-11, SHIPPED — see `docs/history/009.md`)
+
+All phases (V1–V5 verticals, registration-window watchlist, illustrated public docs, full telemetry + 4 Grafana alert rules) are **LIVE in prod**. Ship record: `docs/history/009.md`. What remains:
+
+- **TestFlight the iOS 1.66/80 build** — prod backend already serves the five-doors contract; the beta group is still on the pre-doors build.
+- **School door flag decision.** `FLAG_VERTICAL_V4_SCHOOL` is deliberately unset (door dark; organic school_event items + ingest still work). Light it when the school-life episode is ready — fall (Aug–Sep) is the natural moment.
+- **PostHog console flags** for the verticals (`vertical-v2-extracurriculars`, `vertical-v5-trips`, later v4) to replace the `FLAG_*` env overrides — enables gradual rollout/experiments; env kill-switch keeps working regardless.
+- **Watchlist GA gate (binding, from the plan):** beyond pilot metros only after the miss-detector alert (`watchlist_windows_missed_ratio > 0`, live) runs clean through one real registration season — judged from the Watchlist-SLO dashboard row.
+- **Kid PIN: wire up or remove.** Found during docs screenshots: the PIN system is server-complete but iOS-orphaned (`setKidPin` + the picker's PIN prompt exist with zero callers, nothing sends `kid_pin`) — and the server check is default-closed, so a kid WITH a pin set gets a generic error on every message. Harmless today (no UI can set a pin); decide before any UI can. Subsumes the older "kid PIN brute-force lockout" item if the answer is "remove".
+- **Deferred from the plan (small):** Gmail school-domain allowlist opt-in for ingest; board-card chain-progress slot ("2 of 3 done"); multi-turn golden cases; tool-docstring token trim (goldens-gated).
+
 ## Architectural Infra — Auth + Analytics/Flags + Security Hardening (2026-07, plan CLOSED)
 
 The infra buildout plan (`~/.claude/plans/i-want-to-start-humble-floyd.md`) is **closed** — Phases 1–3 shipped and are LIVE in prod. Setup docs: `setup/auth-setup.md`, `setup/security-hardening-setup.md`, `setup/analytics-posthog-setup.md`. Remaining items below folded into this roadmap so the plan can rest.
@@ -43,7 +54,7 @@ Adopted the NL-Harness Playbook's §4.8 fault-injection model for parent-app —
 - **Deferred from this phase:** `voice-elevenlabs-outage` — EL is connected from the *iOS app* (ConvAI), not the backend, so "EL down" isn't backend-black-box-testable; needs a client-side or a backend EL-proxy seam first. Tavily mock (research never calls Tavily once the canned completion has no tool calls, so it's unneeded for these flows). A stale-run **reaper** + per-run execution-timeout (see Reliability below) are now directly testable on this seam.
 
 ### Reliability (next)
-- **✅ Error tracking + alerting — SHIPPED + LIVE (2026-07).** The June-24 incident had to be reconstructed by scraping Railway's log buffer + the durable tables; that gap is closed. Sentry captures unhandled errors; OpenTelemetry → Grafana Cloud carries metrics + alerting; the Grafana MCP gives read-only PromQL from Claude Code. Gated on env vars in `app/observability/`. (See the ✅ Observability subsection below.) **Still extend** the alert set — run failure rate, p95 queue wait, worker stall, 5xx, LLM 429 — as the metric surface fills in.
+- **✅ Error tracking + alerting — SHIPPED + LIVE (2026-07).** The June-24 incident had to be reconstructed by scraping Railway's log buffer + the durable tables; that gap is closed. Sentry captures unhandled errors; OpenTelemetry → Grafana Cloud carries metrics + alerting; the Grafana MCP gives read-only PromQL from Claude Code. Gated on env vars in `app/observability/`. (See the ✅ Observability subsection below.) **First 4 domain alert rules LIVE (2026-07-12):** COS hook errors, doors fail-open, watchlist missed-window, watchlist worker stall (group `cos-health` @1m → Slack; no-data=OK on all — the series don't exist until first event). **Still extend** — research run failure rate, p95 queue wait, 5xx, LLM 429 — as the metric surface fills in.
 - **Worker stall / liveness.** A single stuck `process_run` silently burns a pool slot. **Partial mitigation shipped** (2026-06-27): a per-call `RESEARCH_LLM_TIMEOUT_S` (60s) so a *hung* upstream call can't pin a slot for the SDK's ~10-min default. **Still TODO:** a per-run *wall-clock* cap (a multi-call run that's slow-but-not-hung can still exceed budget) + a stale-run reaper + a worker heartbeat. The load+chaos driver (`tests/nl-harness/tools/load_and_chaos.py`, E3) demonstrates the gap on demand.
 - **`cancel` was ineffective + clobbered terminal state — FOUND & FIXED (2026-06-27).** The load+chaos hunt (E2) caught it: cancelling a *running* run returned `canceled`, then the finishing worker overwrote it to `done` (cancel did nothing, OpenAI spend wasted, terminal state regressed). Fixed with `finalize_run_if_running` (conditional terminal write) + candidate discard; regression-locked in `tests/reliability/test_cancel_during_run.py`. This is the first bug the test infra *hunted* rather than guarded.
 - **Apply the thread-pool + backoff pattern to the other single-threaded workers** (`email_sync`, `calendar_sync`) before they carry real load.
@@ -169,7 +180,7 @@ Surgical fixes shipped in `7e33828` (HomeView config, streamTask cancel, Content
 
 ## iOS
 
-- **✅ Build environment — resolved.** CLI `xcodebuild` builds run cleanly against the iOS Simulator SDK (iOS ships via TestFlight at 1.61/build 75). No longer Xcode-only.
+- **✅ Build environment — resolved.** CLI `xcodebuild` builds run cleanly against the iOS Simulator SDK; iOS ships via TestFlight (repo currently at 1.66/build 80 — the five-doors build, TestFlight upload pending). No longer Xcode-only.
 - **Returning-user path.** `OnboardingView` welcome screen has a "Welcome back" branch that bypasses every demographic step. Decide whether returning users should be re-prompted for fields that didn't exist when they first onboarded (e.g., zip), or whether we surface a "Complete your profile" nudge in Settings instead.
 - **✅ Profile editing — SHIPPED.** Settings → **Profile** hub lets users edit structured parent/kid fields directly (Basics editors, Add-a-kid, family-wide "What we've learned", delete-a-kid), backed by `PATCH /profile` / `PATCH /profile/kids/{name}` / `DELETE /profile/kids/{name}` with `replace_lists` semantics. Replaces the old re-onboard / chat-only path.
 
