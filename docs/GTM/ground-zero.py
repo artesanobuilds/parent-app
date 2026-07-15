@@ -128,7 +128,7 @@ def create_doc():
 
     meta = doc.add_paragraph()
     meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = meta.add_run('June 2026 · revised July 2026\nMiguel Alvarado, Heather Hannan-Kramer, Greg Harris')
+    run = meta.add_run('June 2026 · revised July 12, 2026\nMiguel Alvarado, Heather Hannan-Kramer, Greg Harris')
     run.font.name = 'Georgia'
     run.font.size = Pt(11)
     run.font.color.rgb = INK_MUTED
@@ -378,7 +378,8 @@ def create_doc():
          'A curtain covers the parent UI. Child interacts only with their companion.'),
         ('The Plan tab', 'A fifth tab, chat-first: the home of the family chief of staff '
          '(detailed below)—Chat, Discover, Shortlist, and Calendar in one place, plus '
-         '"add from a message or photo" ingestion.'),
+         '"add from a message or photo" ingestion and a "Plan something" menu of entry '
+         'doors (camps, classes & sports, weekend outings, family trips).'),
         ('Settings & profile control', 'A full settings hub: edit everything the system '
          'knows about you and each kid, review the family-wide "what we\'ve learned" '
          'profile, add or delete a kid profile (with complete data cleanup), and connect '
@@ -431,33 +432,63 @@ def create_doc():
         'centerpiece of our go-to-market. What exists today:'
     )
     cos_items = [
+        ('All five verticals, live (July 11)', 'The "one agent, five entry doors" '
+         'architecture from Section 12 is no longer a plan—it is deployed. One chief of '
+         'staff handles camps & school breaks, weekly classes & sports (with real '
+         'recurring schedules: "Tuesdays 4:00 PM through Dec 15"), school life (picture '
+         'day, permission slips, fees), weekend outings, and family trips (dates, both '
+         'calendars, packing lists—never bookings). Each is a door into the same agent '
+         'and a filter chip on the same board, exactly as the strategy demands.'),
+        ('The registration-window watchlist, live', 'Design commitment #2 from the '
+         'adversarial review is shipped: tell the assistant when a registration opens '
+         '("rec soccer signup opens August 12") and the app watches it—a push '
+         'notification seven days ahead and again before it opens, never after. Dates '
+         'the agent researched itself are labeled as estimates and the parent confirms '
+         'them with one tap; dates you give us are a promise we keep at 100%. Every '
+         'watched window is visible on its card ("Registration opens Aug 12 · '
+         'watching"), and a miss-detector alarm watches the watcher.'),
         ('Activity discovery agent', 'A background research agent that finds real camps and '
          'activities near you—filtered by radius and a free-form focus ("art camps only"), '
          'scored against each kid\'s age and interests, with a live progress feed while it '
          'searches. Asks for the top N but reviews a much larger pool behind the scenes.'),
-        ('Chief-of-staff chat', 'A conversational agent with 19 working tools: it compares '
+        ('Chief-of-staff chat', 'A conversational agent with 20 working tools: it compares '
          'shortlisted options ("help me decide"—cost, age eligibility, schedule conflicts, '
          'coverage gaps across kids and weeks), tracks decisions with rationale, manages '
-         'to-dos, drafts emails to camp directors (never sends), looks up and saves camps '
-         'you already registered for, and can kick off new discovery runs mid-conversation.'),
-        ('Flyer and message ingestion', 'Paste a text message or snap a photo of a paper '
-         'flyer; the vision pipeline extracts the activity, tracks it, adds calendar entries, '
-         'and spawns the follow-up to-dos (confirm eligibility, pay the fee).'),
+         'to-dos, watches registration windows, drafts emails to camp directors (never '
+         'sends), looks up and saves activities you already registered for, and can kick '
+         'off new discovery runs mid-conversation.'),
+        ('School-mail and flyer ingestion', 'Paste a newsletter or snap a photo of a paper '
+         'flyer; the vision pipeline extracts EVERY item in it (a single PTA newsletter '
+         'can carry picture day, a fundraiser, and a permission slip), spawns the right '
+         'kind of to-do for each (form to sign, fee to pay), and shows every extracted '
+         'deadline next to the exact sentence it came from—so a parent can verify at a '
+         'glance instead of trusting a black box.'),
         ('Gmail agent', 'With permission (Google OAuth, shipped end-to-end), a daily agent '
          'reads camp-related email for registered activities and turns it into calendar '
          'entries and tasks.'),
         ('Two-way Google Calendar sync', 'The family plan lives where parents already look. '
-         'Pulls external events in; pushes plan entries out.'),
+         'Pulls external events in; pushes plan entries out—including a trip\'s all-day '
+         'entries for each kid, so a co-parent sees the dates without anyone sending a text.'),
         ('The Plan hub', 'A chat-first iOS tab—Chat, Discover, Shortlist, Calendar—plus a '
          'full parent web dashboard (login, discovery, week-by-kid calendar with cost and '
          'coverage callouts, to-dos, chat) served from the same backend.'),
+        ('Public product docs', 'A "How MVP works" site (no login required) ships with the '
+         'dashboard: thirteen illustrated pages—real product screenshots, not mockups—'
+         'covering every vertical plus the parenting coach and the kids\' companions '
+         '(consent, moderation, crisis lock, parent-visible transcripts, in plain '
+         'language). This is the first brick of the trust kit Section 12 calls for, and '
+         'the page the validation funnel can link to.'),
         ('Profile editing everywhere', 'Parents can view and edit everything the system '
          'knows—about themselves, each kid, and the family-wide "what we\'ve learned" '
          'profile—on iOS and web, including adding and deleting kid profiles with full '
          'data cleanup.'),
-        ('Production hardening', 'Error tracking (Sentry), metrics dashboards (Grafana), '
-         'cost logging per AI call, concurrency fixes proven under fault injection, and '
-         'guardrail tests for the bug classes our beta families actually hit.'),
+        ('Production hardening', 'Error tracking (Sentry), metrics dashboards with live '
+         'alerting to Slack (Grafana—including a dedicated watchlist reliability panel), '
+         'cost logging per AI call, concurrency fixes proven under fault injection, '
+         'guardrail tests for the bug classes our beta families actually hit, and a '
+         'live-model evaluation gate: every change to the agent\'s instructions must '
+         'pass a 27-scenario tool-selection exam and a 12-flyer extraction exam before '
+         'it ships.'),
     ]
     for title, desc in cos_items:
         p = doc.add_paragraph()
@@ -477,6 +508,14 @@ def create_doc():
         'options stream in scored to each kid\'s age, save a shortlist, ask the chief of staff '
         'to compare them, snap a photo of a flyer from the school backpack, and see all of it '
         'land on a calendar that syncs with Google—live in production today.'
+    )
+    doc.add_paragraph(
+        'As of July 11, the same is true across the whole activity year: "Mar is doing '
+        'soccer this fall, every Tuesday at 4"—tracked with its real weekly schedule. '
+        '"Rec soccer signup opens August 12"—watched, with reminders before it opens. '
+        '"Picture day is October 9"—on the radar with the form and fee to-dos. "We\'re at '
+        'grandma\'s August 14 to 18"—on both calendars, packing list started, and those '
+        'days never show up as a childcare gap. One agent, five doors, one board.'
     )
     doc.add_paragraph(
         'None of this is demo-ware: real beta families use the production system today, and '
@@ -627,22 +666,26 @@ def create_doc():
         'Prioritized by what moves us toward a beta-ready product by fall 2026.'
     )
 
-    doc.add_heading('Must-ship for beta', level=2)
+    doc.add_heading('Must-ship for beta — status', level=2)
     must_ship = [
-        ('Real user identity', 'Replace the current name-based login with Apple Sign-In or '
-         'a real account system. Two parents named "Miguel" must not collide. This is the '
-         'single biggest blocker for putting real families on the app.'),
-        ('TestFlight release of the new experience', 'The chat-first Plan hub, the profile '
-         'editor, calendar sync, and the Connect-Gmail flow are built and verified—they ship '
-         'to beta families with the next TestFlight build.'),
-        ('Crisis parent notification', 'When a kid companion detects a crisis, the parent '
-         'currently gets a Slack alert (internal). Before beta, this must be a real push '
-         'notification to the parent\'s device.'),
-        ('Onboarding polish', 'Low-friction, drip-style information collection. Don\'t ask '
-         'for everything upfront. Let the app learn the family over time. Greg\'s WeTransfer '
-         'insight: one simple action to start.'),
-        ('Design review & dead ends', 'Greg will map the current user journeys in Figma, '
-         'identify "dead ends" where the user gets stuck, and propose solutions.'),
+        ('Real user identity — SHIPPED', 'Native Apple and Google Sign-In with real '
+         'accounts (rotating secure tokens) replaced the name-based login. Existing '
+         'families were migrated without losing data. The "two Miguels collide" '
+         'blocker is closed.'),
+        ('Crisis parent notification — SHIPPED', 'A crisis in a kid companion now fires a '
+         'real push notification to the parent\'s phone (verified on a physical device), '
+         'locks the conversation, and stays locked until the parent reviews and '
+         'reactivates.'),
+        ('TestFlight release of the new experience — the one pending ship', 'The '
+         'five-doors experience (all verticals, the watchlist, the illustrated docs) is '
+         'live on the production backend and web dashboard; the iOS build that surfaces '
+         'it (1.66) is built and verified and ships with the next TestFlight upload. '
+         'Beta phones run the previous build until then—nothing breaks meanwhile.'),
+        ('Onboarding polish — open', 'Low-friction, drip-style information collection. '
+         'Don\'t ask for everything upfront. Let the app learn the family over time. '
+         'Greg\'s WeTransfer insight: one simple action to start.'),
+        ('Design review & dead ends — open', 'Greg will map the current user journeys in '
+         'Figma, identify "dead ends" where the user gets stuck, and propose solutions.'),
     ]
     for title, desc in must_ship:
         p = doc.add_paragraph()
@@ -1047,6 +1090,17 @@ def create_doc():
         'This also strengthens pricing: the subscription is roughly 3% of the $3,000–5,000+ '
         'a two-kid activity family already spends on the things it coordinates.'
     )
+    status = doc.add_paragraph()
+    run = status.add_run('Status, July 11: this table is no longer a roadmap. ')
+    run.bold = True
+    status.add_run(
+        'All five verticals are live in production behind one agent, built in a single '
+        'week-long push and hardened by an adversarial three-critic design review, '
+        'live-model evaluation gates, and end-to-end tests against real AI on every '
+        'vertical. The engine was activity-type-agnostic as promised: the fifth vertical '
+        '(trips) required zero new instrumentation and zero client changes. When fall '
+        'registration season arrives, the product the ads describe already exists.'
+    )
 
     doc.add_heading('Three design commitments from the adversarial review', level=2)
     doc.add_paragraph(
@@ -1065,14 +1119,17 @@ def create_doc():
          'does frictionless inclusion (their "solo modes" mean documenting unilaterally '
          'for court). The positioning line: "the logistics work even when only one of '
          'you does."'),
-        ('2. The registration-window watchlist (the "spot-getter").', 'The sharpest camp '
-         'pain is not choosing—it\'s getting a SPOT: popular registrations sell out in '
-         'minutes, parents set alarms and trade dates in group chats, and no national '
-         'parent-side product watches registration-open windows (the only entrant is a '
-         'manual, single-metro database). "We watch the registration dates near you, '
+        ('2. The registration-window watchlist (the "spot-getter") — SHIPPED July 11.', 'The '
+         'sharpest camp pain is not choosing—it\'s getting a SPOT: popular registrations '
+         'sell out in minutes, parents set alarms and trade dates in group chats, and no '
+         'national parent-side product watches registration-open windows (the only entrant '
+         'is a manual, single-metro database). "We watch the registration dates near you, '
          'alert you before they open, and have your details ready" turns our discovery '
          'agent from list-maker into spot-getter—and re-arms the product every season, '
-         'which is the honest retention engine.'),
+         'which is the honest retention engine. This is now LIVE: reminders 7 days ahead '
+         'and before the window opens (never after), researched dates labeled as estimates '
+         'until the parent confirms, and an internal alarm that fires if we ever miss one—'
+         'because the promise is only worth making if we can keep it at 100%.'),
         ('3. Split data model: durable logistics, zero-retention coach.', 'Co-parenting '
          'incumbents SELL discoverability (court-certified records; published subpoena '
          'fee schedules), and family-law attorneys now warn divorcing clients that AI '
@@ -1203,9 +1260,12 @@ def create_doc():
         'Trust is also a moat we can buy cheaply: one named clinical/child-development '
         'advisor, a public evidence-and-methodology page, and a plain-language safety and '
         'data page—which now also states the split data model from design commitment #3 '
-        '(durable, exportable logistics data; zero-retention coach). Social proof is never '
-        'fabricated—until real testimonials exist (with consent), we borrow authority '
-        'from cited research and the founder story.'
+        '(durable, exportable logistics data; zero-retention coach). The first brick is '
+        'laid: a public, no-login "How MVP works" docs site now ships with the product—'
+        'thirteen illustrated pages including plain-language pages on the coach and the '
+        'kids\' companions (consent, moderation, crisis lock, parent-visible transcripts). '
+        'Social proof is never fabricated—until real testimonials exist (with consent), '
+        'we borrow authority from cited research and the founder story.'
     )
 
     doc.add_heading('Honest ceiling and what raises it', level=2)
@@ -1230,8 +1290,9 @@ def create_doc():
         ('Weeks 3–6 — run both engines.', 'Meta ads at $20/day; daily founder content in '
          'two voices (Miguel and Heather, alternating); drive toward the 200-email bar and '
          'the WTP read; recruit the founding-family cohort from the warmest leads. In '
-         'parallel, small funnel-informed product work: the zero-friction parent-#2 flow '
-         'and a first registration-window watchlist for one or two pilot metros.'),
+         'parallel, small funnel-informed product work: the zero-friction parent-#2 flow. '
+         '(The registration-window watchlist, originally slotted here, shipped ahead of '
+         'schedule on July 11 and is live in production.)'),
         ('Weeks 7–12 — convert and decide.', 'Founding-family lifetime deal with daily '
          'feedback; hard-paywall trial plus the September-1 risk reversal; first real '
          'testimonials; pilot outreach to 3–5 family-law mediators/therapists. Then the '
@@ -1258,7 +1319,7 @@ def create_doc():
     doc.add_paragraph()
     footer = doc.add_paragraph()
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = footer.add_run('MVP — June 2026, rev. July 2026')
+    run = footer.add_run('MVP — June 2026, rev. July 12, 2026')
     run.font.size = Pt(10)
     run.font.color.rgb = INK_MUTED
 
