@@ -78,3 +78,33 @@ def test_doc_frontmatter_parses():
         assert meta.get("draft", "false").lower() in ("true", "false"), (
             f"{page.name}: draft must be true/false"
         )
+
+
+# ── Legal pages (CMS-published, API-served — NOT bundled markdown) ─────────
+
+
+def test_legal_pages_are_not_shadowed_by_bundled_markdown():
+    """privacy-policy/terms render from /content/legal/{slug} (CMS-published,
+    versioned). A markdown file under parent-dashboard/docs/ with the same slug
+    would be silently bundled and shadow the published text — forbid it."""
+    for slug in ("privacy-policy", "terms"):
+        page = DOCS_DIR / f"{slug}.md"
+        assert not page.exists(), (
+            f"{page} exists — legal pages must come from the CMS-published "
+            "API (/content/legal), never bundled markdown (edit "
+            "mvp-backend/legal/*.md for the SEED text instead)"
+        )
+
+
+def test_docs_page_renders_legal_from_the_api():
+    docs_tsx = BACKEND_ROOT / "parent-dashboard" / "src" / "pages" / "Docs.tsx"
+    legal_lib = BACKEND_ROOT / "parent-dashboard" / "src" / "lib" / "legalDocs.ts"
+    assert legal_lib.is_file(), "lib/legalDocs.ts missing"
+    assert "/content/legal" in legal_lib.read_text(), (
+        "legalDocs.ts no longer fetches /content/legal — the legal pages "
+        "would render nothing"
+    )
+    src = docs_tsx.read_text()
+    assert "isLegalSlug" in src and "LegalDoc" in src, (
+        "Docs.tsx no longer routes legal slugs to the API-backed renderer"
+    )

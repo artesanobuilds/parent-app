@@ -136,6 +136,10 @@ struct OnboardingView: View {
     @State private var employment: String = ""
     @State private var culturalBackground: String = ""
     @State private var pronouns: String = ""
+    // Legal agreement gate on the final step. Tapping "Let's go" with this
+    // checked stashes a durable legal_accept_pending flag; SwayApp's launch
+    // task POSTs the acceptance (and retries next launch if it fails offline).
+    @State private var agreedToLegal: Bool = false
 
     private let totalSteps = 9  // 0=welcome, 1=name, 2=aboutYou, 3=kids, 4=world, 5=energy, 6=challenges, 7=goals, 8=preview
 
@@ -908,6 +912,34 @@ struct OnboardingView: View {
         }
     }
 
+    /// Blocking agree-checkbox on the final step. The doc links open the
+    /// CMS-published pages on the dashboard; the base URL resolves through the
+    /// same chain as the seed (never a hardcoded host).
+    private var legalAgreementRow: some View {
+        let base = UserDefaults.standard.string(forKey: "chat.base_url") ?? ServerConfiguration.defaultURL
+        return HStack(alignment: .top, spacing: 12) {
+            Button {
+                agreedToLegal.toggle()
+            } label: {
+                Image(systemName: agreedToLegal ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundColor(agreedToLegal ? .accentDefault : .inkMuted)
+            }
+            .accessibilityLabel(agreedToLegal ? "Agreed to terms" : "Agree to terms")
+
+            if let agreement = try? AttributedString(
+                markdown: "I agree to the [Privacy Policy](\(base)/dashboard/docs/privacy-policy) "
+                    + "and [Terms of Service](\(base)/dashboard/docs/terms)"
+            ) {
+                Text(agreement)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+                    .tint(.accentDefault)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private var previewScreen: some View {
         let features: [(String, String)] = [
             ("\u{1F9E0}", "AI coach that knows your family"),
@@ -952,7 +984,11 @@ struct OnboardingView: View {
             }
 
             let displayName = parentName.trimmed
-            brandButton(label: "Let's go, \(displayName)!") {
+            legalAgreementRow
+                .padding(.horizontal, .hearth700)
+                .padding(.bottom, .hearth400)
+            brandButton(label: "Let's go, \(displayName)!", disabled: !agreedToLegal) {
+                UserDefaults.standard.set(true, forKey: LegalService.acceptPendingKey)
                 let kidData = kids
                     .filter { !$0.name.trimmed.isEmpty }
                     .map { (

@@ -5,7 +5,6 @@ struct AgentView: View {
     @ObservedObject var viewModel: ChatViewModel
     @ObservedObject var configuration: ServerConfiguration
     @State private var messageText: String = ""
-    @State private var isShowingSettings: Bool = false
     @State private var isShowingVoice: Bool = false
 
     @EnvironmentObject private var contentVM: ContentViewModel
@@ -25,17 +24,6 @@ struct AgentView: View {
             .onAppear { Analytics.capture("chat_opened", ["agent_kind": "coach"]) }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        isShowingSettings = true
-                    } label: {
-                        Image(systemName: "line.3.horizontal")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundColor(.inkPrimary)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                }
                 ToolbarItem(placement: .principal) {
                     Text("MVP")
                         .font(.hearthTitleLG)
@@ -77,17 +65,6 @@ struct AgentView: View {
             }
             .toolbarBackground(Color.bgCanvas, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .sheet(isPresented: $isShowingSettings) {
-                NavigationStack {
-                    ServerSettingsView(configuration: configuration)
-                        .navigationTitle("Server Settings")
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button("Done") { isShowingSettings = false }
-                            }
-                        }
-                }
-            }
             .fullScreenCover(isPresented: $isShowingVoice) {
                 if let baseURL = configuration.baseURL {
                     ParentVoiceView(

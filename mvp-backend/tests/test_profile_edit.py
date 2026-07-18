@@ -146,3 +146,35 @@ def test_patch_profile_and_add_kid_round_trip():
             assert "Ceiba" not in client.get("/profile", headers=auth).json()["children"]
     finally:
         _reconnect_shared_storage(server)
+
+
+def test_delete_family_evicts_in_memory_profile():
+    """DELETE /family must forget the family from the in-memory profiling_service,
+    not only the DB. Regression: GET /profile reads the process-local singleton,
+    so before the fix a deleted family kept being served (and fed to agents)
+    until a restart, silently breaking the "delete my data" promise."""
+    from fastapi.testclient import TestClient
+    import app.server as server
+
+    try:
+        with TestClient(server.app) as client:
+            user_id = "delete-family-evict-user"
+            tok = client.post("/auth/issue-token", json={"user_id": user_id}).json()["token"]
+            auth = {"Authorization": f"Bearer {tok}"}
+
+            # Seed something into the in-memory profile.
+            r = client.patch("/profile", json={"name": "Casey"}, headers=auth)
+            assert r.status_code == 200, r.text
+            assert client.get("/profile", headers=auth).json()["parent"]["name"] == "Casey"
+
+            # Delete the whole family.
+            r = client.delete(f"/family/{user_id}", headers=auth)
+            assert r.status_code == 200, r.text
+
+            # A fresh token for the same id must see an EMPTY profile — the
+            # in-memory family was evicted, not just the DB rows.
+            tok2 = client.post("/auth/issue-token", json={"user_id": user_id}).json()["token"]
+            got = client.get("/profile", headers={"Authorization": f"Bearer {tok2}"}).json()
+            assert not got["parent"].get("name"), got
+    finally:
+        _reconnect_shared_storage(server)

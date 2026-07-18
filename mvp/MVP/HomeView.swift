@@ -4,6 +4,7 @@ struct HomeView: View {
     let username: String
     @EnvironmentObject private var contentVM: ContentViewModel
     @EnvironmentObject private var configuration: ServerConfiguration
+    @EnvironmentObject private var session: AppSession
     @Environment(\.triggerKidHandoff) private var triggerKidHandoff
     // Set by KidsHomeSection's task hook after /kid-agent/list resolves.
     // Drives whether the greeting's Hand-to-kid CTA renders.
@@ -27,9 +28,15 @@ struct HomeView: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: .hearth800) {
+                            if session.needsLegalAcceptance {
+                                legalReacceptBanner
+                                    .padding(.horizontal, .hearth700)
+                                    .padding(.top, .hearth300)
+                            }
+
                             greetingHeader
                                 .padding(.horizontal, .hearth700)
-                                .padding(.top, .hearth300)
+                                .padding(.top, session.needsLegalAcceptance ? 0 : .hearth300)
 
                             featuredCard
                                 .padding(.horizontal, .hearth700)
@@ -85,6 +92,53 @@ struct HomeView: View {
         }
     }
 
+    // MARK: - Legal re-accept banner
+
+    /// Non-blocking, non-dismissable prompt shown when a published legal
+    /// version requires re-acceptance. One tap agrees to the current versions
+    /// (LegalService echoes exactly what /legal/status reported).
+    private var legalReacceptBanner: some View {
+        let base = configuration.baseURLString
+        let updatedTitles = session.legalStatus?.documents
+            .filter { !$0.accepted }
+            .map(\.title)
+            .joined(separator: " and ") ?? "our terms"
+        return VStack(alignment: .leading, spacing: .hearth300) {
+            Text("We've updated \(updatedTitles)")
+                .font(.hearthTitleMD)
+                .foregroundColor(.inkPrimary)
+            if let links = try? AttributedString(
+                markdown: "Read the [Privacy Policy](\(base)/dashboard/docs/privacy-policy) "
+                    + "or [Terms of Service](\(base)/dashboard/docs/terms), then agree to keep going."
+            ) {
+                Text(links)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+                    .tint(.accentDefault)
+            }
+            Button {
+                Task { await session.acceptLegal(userID: username, baseURL: configuration.baseURL) }
+            } label: {
+                Text("Agree")
+                    .font(.hearthTitleMD)
+                    .foregroundColor(.inkOnPhotoLight)
+                    .padding(.horizontal, .hearth600)
+                    .padding(.vertical, .hearth300)
+                    .background(Color.accentDefault)
+                    .clipShape(Capsule())
+            }
+        }
+        .padding(.hearth500)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.bgElevated)
+        .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                .stroke(Color.borderHairline, lineWidth: 1)
+        )
+        .onAppear { Analytics.capture("legal_reaccept_shown", [:]) }
+    }
+
     // MARK: - Greeting Header
 
     private var greetingHeader: some View {
@@ -109,7 +163,7 @@ struct HomeView: View {
                     if !username.isEmpty && hasKidCompanions {
                         HandoffEntryButton { triggerKidHandoff() }
                     }
-                    // Tap the initial to open Server Settings.
+                    // Tap the initial to open Settings.
                     Button {
                         isShowingSettings = true
                     } label: {

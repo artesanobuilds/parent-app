@@ -226,6 +226,28 @@ class ConsentSubmitRequest(BaseModel):
     agreement_version: str  # must match CONSENT_AGREEMENT_VERSION
 
 
+LEGAL_SLUGS = ("privacy-policy", "terms")
+
+
+class LegalAcceptRequest(BaseModel):
+    # Client echoes the versions it displayed: {"privacy-policy": "1.0", ...}.
+    # A mismatch with the current published version 409s so a stale client
+    # re-fetches before recording acceptance of text the user never saw.
+    versions: Dict[str, str]
+    platform: Optional[str] = None
+
+
+class LegalDraftRequest(BaseModel):
+    title: str
+    body_md: str
+
+
+class LegalPublishRequest(BaseModel):
+    version: str
+    effective_date: Optional[str] = None
+    requires_reacceptance: bool = False
+
+
 class FeedbackRequest(BaseModel):
     message_id: str
     thread_id: str
@@ -702,6 +724,153 @@ def _require_consent(user_id: str) -> None:
                 "required_version": CONSENT_AGREEMENT_VERSION,
             },
         )
+
+
+# ── Legal documents (versioned; CMS-published; NOT the kid-consent gate) ──
+#
+# Deliberately separate from consent_records/_require_consent: latest_consent
+# is kind-blind, so legal rows there would silently satisfy the kid-companion
+# gate. The required version is the is_current published row — no env var —
+# so a CMS publish (no deploy) can require re-acceptance.
+
+@app.get("/content/legal")
+def list_legal_docs():
+    """Public: the current published legal docs (metadata, no body)."""
+    docs = storage_backend.get_current_legal_docs()
+    return {
+        "documents": [
+            {k: d[k] for k in ("slug", "title", "version", "effective_date", "published_at")}
+            for d in docs
+        ]
+    }
+
+
+@app.get("/content/legal/{slug}")
+def get_legal_doc(slug: str):
+    """Public: the current published version of one legal doc, incl. body."""
+    doc = storage_backend.get_legal_doc(slug)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Unknown legal document")
+    return doc
+
+
+@app.get("/legal/status")
+def legal_status(user_id: str = Depends(current_user)):
+    """Per-doc acceptance state for the signed-in parent. `accepted` is true
+    when the latest acceptance matches the current version OR the current
+    version doesn't require re-acceptance (typo-fix publishes don't nag)."""
+    docs = storage_backend.get_current_legal_docs()
+    out, needs = [], []
+    for doc in docs:
+        latest = storage_backend.latest_legal_acceptance(user_id, doc["slug"])
+        accepted = bool(latest) and (
+            latest["version"] == doc["version"] or not doc["requires_reacceptance"]
+        )
+        if not accepted:
+            needs.append(doc["slug"])
+        out.append({
+            "slug": doc["slug"],
+            "title": doc["title"],
+            "required_version": doc["version"],
+            "requires_reacceptance": doc["requires_reacceptance"],
+            "accepted_version": latest["version"] if latest else None,
+            "accepted_at": latest["accepted_at"] if latest else None,
+            "accepted": accepted,
+        })
+    return {"documents": out, "accepted_all": not needs, "needs": needs}
+
+
+@app.post("/legal/accept")
+def legal_accept(req: LegalAcceptRequest, request: Request,
+                 user_id: str = Depends(current_user)):
+    """Record acceptance of the CURRENT versions. The client echoes the
+    versions it showed; a stale echo 409s so it re-fetches /legal/status."""
+    current = {d["slug"]: d for d in storage_backend.get_current_legal_docs()}
+    to_record = []
+    for slug, version in req.versions.items():
+        doc = current.get(slug)
+        if not doc:
+            raise HTTPException(status_code=400, detail=f"Unknown legal document: {slug}")
+        if version != doc["version"]:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "version_mismatch",
+                    "required": {s: d["version"] for s, d in current.items()},
+                },
+            )
+        to_record.append({"document_id": doc["id"], "slug": slug, "version": version})
+    if not to_record:
+        raise HTTPException(status_code=400, detail="No documents to accept")
+    saved = storage_backend.record_legal_acceptance(
+        user_id=user_id,
+        docs=to_record,
+        ip_address=(request.client.host if request.client else None),
+        user_agent=request.headers.get("user-agent"),
+        platform=req.platform,
+    )
+    return {"ok": True, "accepted": saved}
+
+
+@app.get("/cms/legal")
+def cms_legal_overview(_: None = Depends(require_admin_token)):
+    overview = []
+    for slug in LEGAL_SLUGS:
+        current = storage_backend.get_legal_doc(slug)
+        draft = storage_backend.get_legal_draft(slug)
+        overview.append({
+            "slug": slug,
+            "current": current,
+            "draft": draft,
+            "version_count": len(storage_backend.list_legal_versions(slug)),
+        })
+    return {"documents": overview}
+
+
+@app.get("/cms/legal/{slug}/versions")
+def cms_legal_versions(slug: str, _: None = Depends(require_admin_token)):
+    return {"versions": storage_backend.list_legal_versions(slug)}
+
+
+@app.get("/cms/legal/{slug}/draft")
+def cms_legal_get_draft(slug: str, _: None = Depends(require_admin_token)):
+    draft = storage_backend.get_legal_draft(slug)
+    if not draft:
+        raise HTTPException(status_code=404, detail="No draft")
+    return draft
+
+
+@app.put("/cms/legal/{slug}/draft")
+def cms_legal_put_draft(slug: str, req: LegalDraftRequest,
+                        _: None = Depends(require_admin_token)):
+    if slug not in LEGAL_SLUGS:
+        raise HTTPException(status_code=400, detail="Unknown legal slug")
+    return storage_backend.upsert_legal_draft(slug, title=req.title, body_md=req.body_md)
+
+
+@app.delete("/cms/legal/{slug}/draft")
+def cms_legal_delete_draft(slug: str, _: None = Depends(require_admin_token)):
+    return {"deleted": storage_backend.delete_legal_draft(slug)}
+
+
+@app.post("/cms/legal/{slug}/publish")
+def cms_legal_publish(slug: str, req: LegalPublishRequest,
+                      _: None = Depends(require_admin_token)):
+    if slug not in LEGAL_SLUGS:
+        raise HTTPException(status_code=400, detail="Unknown legal slug")
+    try:
+        return storage_backend.publish_legal_draft(
+            slug, version=req.version, effective_date=req.effective_date,
+            requires_reacceptance=req.requires_reacceptance,
+        )
+    except ValueError as exc:
+        if str(exc) == "no_draft":
+            raise HTTPException(status_code=409, detail="No draft to publish")
+        if str(exc) == "duplicate_version":
+            raise HTTPException(status_code=409,
+                                detail=f"Version {req.version} already published for {slug}")
+        raise
 
 
 # ── Debug reports (test-user diagnostics → email) ───────────────────
@@ -1779,6 +1948,12 @@ def delete_family(user_id: str, authenticated_user: str = Depends(current_user))
         pass
     result = storage_backend.delete_family(user_id=user_id, actor=authenticated_user)
     counts = result.get("counts", {})
+    # Evict the in-memory family profile BEFORE the parquet re-export below. The
+    # storage cascade drops the DB rows, but `profiling_service` is a separate
+    # process-local singleton that `GET /profile` and the agents read from — and
+    # `export_all_parquet` can flush it back into `user_data`. Popping it here
+    # makes the delete visible immediately and stops a re-export resurrecting it.
+    profiling_service.remove_family(user_id)
     if _analytics_id:
         try:
             from app.analytics.deletion import delete_person

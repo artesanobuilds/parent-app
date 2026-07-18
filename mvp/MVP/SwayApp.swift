@@ -19,6 +19,10 @@ struct MVPApp: App {
     private static let pendingSeedBodyKey = "pending_seed_body"   // JSON Data
     private static let pendingSeedUserKey = "pending_seed_user"   // String
 
+    // Owns log-out / delete-account, which must reach the launch-gate keys above.
+    // Injected into the tab tree so a Settings screen can flip the gate.
+    @StateObject private var session = AppSession()
+
     var body: some Scene {
         WindowGroup {
             #if DEBUG
@@ -40,12 +44,19 @@ struct MVPApp: App {
     private var mainContent: some View {
         if onboardingCompleted && !userName.isEmpty {
             MainTabView(username: userName)
+                .environmentObject(session)
                 .task {
                     await ensureAuthToken(for: userName)
                     // Re-seed if a prior attempt never confirmed. No-op when
                     // there's nothing pending. This is what makes the seed
                     // durable across app restarts.
                     await flushPendingSeed()
+                    // Flush a pending legal agreement + refresh the status
+                    // that drives the Home re-accept banner.
+                    await session.refreshLegal(
+                        userID: userName,
+                        baseURL: URL(string: resolvedBaseURLString())
+                    )
                     // Product analytics — started only here (past onboarding +
                     // consent), never on the sign-in/onboarding screens.
                     // identify on the OPAQUE analytics id, never the user_id.

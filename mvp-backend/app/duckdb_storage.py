@@ -17,6 +17,22 @@ from typing import Any, Dict, Iterable, List, Optional
 import duckdb
 
 
+def _parse_legal_frontmatter(text: str) -> tuple:
+    """Parse the simple `--- key: value ---` frontmatter used by the legal
+    markdown seeds (same convention as parent-dashboard/docs). Returns
+    (meta dict, body). Tolerates a missing block: everything becomes body."""
+    meta: Dict[str, str] = {}
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            for line in text[3:end].strip().splitlines():
+                if ":" in line:
+                    key, _, value = line.partition(":")
+                    meta[key.strip()] = value.strip()
+            return meta, text[end + 4 :].lstrip("\n")
+    return meta, text
+
+
 class _BufferedResult:
     """Holds eagerly-fetched rows so callers can chain .fetchone()/.fetchall()
     after the connection lock has been released."""
@@ -158,6 +174,49 @@ class DuckDBStorage(StorageBackend):
         body        TEXT NOT NULL DEFAULT '',
         created_at  TIMESTAMPTZ DEFAULT now()
     );
+    """
+
+    # Versioned legal documents (privacy policy, terms) + per-user acceptance.
+    # legal_documents is APPEND-ONLY for published rows -- publishing promotes
+    # the single mutable draft row (published_at IS NULL) inside a transaction
+    # and never mutates a published row. The is_current row per slug is the
+    # required version (no env var). One draft per slug is enforced in
+    # upsert_legal_draft, not by a constraint (DuckDB lacks partial unique
+    # indexes). legal_acceptances is user-keyed audit state -- cascade on
+    # delete_family. legal_documents survives account deletion (not user data).
+    LEGAL_DDL = """
+    CREATE TABLE IF NOT EXISTS legal_documents (
+        id                     TEXT PRIMARY KEY,
+        slug                   TEXT NOT NULL,
+        version                TEXT NOT NULL DEFAULT '',
+        title                  TEXT NOT NULL DEFAULT '',
+        body_md                TEXT NOT NULL DEFAULT '',
+        effective_date         DATE,
+        requires_reacceptance  BOOLEAN DEFAULT false,
+        published_at           TIMESTAMPTZ,
+        published_by           TEXT,
+        is_current             BOOLEAN DEFAULT false,
+        created_at             TIMESTAMPTZ DEFAULT now(),
+        updated_at             TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_legal_documents_slug
+        ON legal_documents (slug, is_current);
+
+    CREATE TABLE IF NOT EXISTS legal_acceptances (
+        id           TEXT PRIMARY KEY,
+        user_id      TEXT NOT NULL,
+        document_id  TEXT NOT NULL,
+        slug         TEXT NOT NULL,
+        version      TEXT NOT NULL,
+        accepted_at  TIMESTAMPTZ DEFAULT now(),
+        ip_address   TEXT,
+        user_agent   TEXT,
+        platform     TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_legal_acceptances_user
+        ON legal_acceptances (user_id, slug, accepted_at);
     """
 
     # Family Companion (kid agent + handoff). Real tables, not blobs:
@@ -792,6 +851,10 @@ class DuckDBStorage(StorageBackend):
         # them like every other user-state table.
         ("registration_windows", "registration_windows.parquet"),
         ("window_notifications", "window_notifications.parquet"),
+        # Legal docs (CMS-published state, NOT git-restorable) + acceptances
+        # (user audit state). Both excluded from the image in .dockerignore.
+        ("legal_documents", "legal_documents.parquet"),
+        ("legal_acceptances", "legal_acceptances.parquet"),
     ]
 
     def __init__(self, db_path: Path | str | None = None) -> None:
@@ -820,6 +883,10 @@ class DuckDBStorage(StorageBackend):
             if stmt:
                 self._con.execute(stmt + ";")
         for stmt in self.ACTIVITY_DDL.strip().split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                self._con.execute(stmt + ";")
+        for stmt in self.LEGAL_DDL.strip().split(";"):
             stmt = stmt.strip()
             if stmt:
                 self._con.execute(stmt + ";")
@@ -889,7 +956,47 @@ class DuckDBStorage(StorageBackend):
                 # restart is "the last committed state").
                 logger.warning(f"[duckdb] bootstrap of {table} from {pq_name} skipped: {exc}")
 
+        # Seed legal documents from repo markdown AFTER the bootstrap merge, so
+        # a slug that already has a published row (restored from parquet, or
+        # CMS-published) is never re-seeded — otherwise a redeploy would
+        # resurrect v1 alongside a CMS-published v2.
+        try:
+            self._seed_legal_documents()
+        except Exception as exc:
+            logger.warning(f"[duckdb] legal-docs seed skipped: {exc}")
+
         logger.info(f"[duckdb] opened {self.db_path}")
+
+    def _seed_legal_documents(self) -> None:
+        """Insert each mvp-backend/legal/*.md as published v1 for slugs that
+        have NO published row yet (slug-presence check, never row-count)."""
+        import uuid
+        legal_dir = Path(__file__).resolve().parent.parent / "legal"
+        if not legal_dir.is_dir():
+            return
+        for md_path in sorted(legal_dir.glob("*.md")):
+            slug = md_path.stem
+            existing = self._con.execute(
+                "SELECT count(*) FROM legal_documents WHERE slug = ? AND published_at IS NOT NULL",
+                [slug],
+            ).fetchone()
+            if existing and existing[0] > 0:
+                continue
+            meta, body = _parse_legal_frontmatter(md_path.read_text(encoding="utf-8"))
+            self._con.execute(
+                """
+                INSERT INTO legal_documents (
+                    id, slug, version, title, body_md, effective_date,
+                    requires_reacceptance, published_at, published_by, is_current
+                ) VALUES (?, ?, ?, ?, ?, ?, false, now(), 'seed', true)
+                """,
+                [
+                    f"legal-{uuid.uuid4().hex[:12]}", slug,
+                    meta.get("version", "1.0"), meta.get("title", slug),
+                    body, meta.get("effective_date"),
+                ],
+            )
+            logger.info(f"[duckdb] seeded legal doc '{slug}' v{meta.get('version', '1.0')}")
 
     # ── StorageBackend interface ──────────────────────────────────────
 
@@ -2104,6 +2211,9 @@ class DuckDBStorage(StorageBackend):
                 "email_sync_runs",
                 "calendar_sync_runs",
                 "registration_windows",  # window_notifications cascade above
+                # Legal ACCEPTANCES are user audit state and go with the family.
+                # legal_documents (the policies themselves) deliberately survive.
+                "legal_acceptances",
             ]:
                 pre = self._con.execute(
                     f"SELECT count(*) FROM {table} WHERE user_id = ?",
@@ -2315,6 +2425,167 @@ class DuckDBStorage(StorageBackend):
             "parent_name": row[3],
             "parent_email": row[4],
             "kid_age_band": row[5],
+        }
+
+    # ── Legal documents (versioned) + acceptances ────────────────────
+
+    _LEGAL_COLS = (
+        "id, slug, version, title, body_md, effective_date, "
+        "requires_reacceptance, published_at, published_by, is_current"
+    )
+
+    @staticmethod
+    def _legal_row_to_dict(row) -> Dict[str, Any]:
+        return {
+            "id": row[0],
+            "slug": row[1],
+            "version": row[2],
+            "title": row[3],
+            "body_md": row[4],
+            "effective_date": row[5].isoformat() if row[5] else None,
+            "requires_reacceptance": bool(row[6]),
+            "published_at": row[7].isoformat() if row[7] else None,
+            "published_by": row[8],
+            "is_current": bool(row[9]),
+        }
+
+    def get_current_legal_docs(self) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            f"SELECT {self._LEGAL_COLS} FROM legal_documents "
+            "WHERE is_current ORDER BY slug"
+        ).fetchall()
+        return [self._legal_row_to_dict(r) for r in rows]
+
+    def get_legal_doc(self, slug: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {self._LEGAL_COLS} FROM legal_documents "
+            "WHERE slug = ? AND is_current LIMIT 1",
+            [slug],
+        ).fetchone()
+        return self._legal_row_to_dict(row) if row else None
+
+    def list_legal_versions(self, slug: str) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            f"SELECT {self._LEGAL_COLS} FROM legal_documents "
+            "WHERE slug = ? AND published_at IS NOT NULL "
+            "ORDER BY published_at DESC",
+            [slug],
+        ).fetchall()
+        return [self._legal_row_to_dict(r) for r in rows]
+
+    def get_legal_draft(self, slug: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {self._LEGAL_COLS} FROM legal_documents "
+            "WHERE slug = ? AND published_at IS NULL LIMIT 1",
+            [slug],
+        ).fetchone()
+        return self._legal_row_to_dict(row) if row else None
+
+    def upsert_legal_draft(self, slug: str, *, title: str, body_md: str) -> Dict[str, Any]:
+        """Create or overwrite THE draft row for a slug (at most one — enforced
+        here, since DuckDB has no partial unique index). Last write wins."""
+        import uuid
+        existing = self.get_legal_draft(slug)
+        if existing:
+            self._con.execute(
+                "UPDATE legal_documents SET title = ?, body_md = ?, updated_at = now() "
+                "WHERE id = ?",
+                [title, body_md, existing["id"]],
+            )
+            return self.get_legal_draft(slug)  # type: ignore[return-value]
+        doc_id = f"legal-{uuid.uuid4().hex[:12]}"
+        self._con.execute(
+            """
+            INSERT INTO legal_documents (id, slug, title, body_md, is_current)
+            VALUES (?, ?, ?, ?, false)
+            """,
+            [doc_id, slug, title, body_md],
+        )
+        return self.get_legal_draft(slug)  # type: ignore[return-value]
+
+    def delete_legal_draft(self, slug: str) -> bool:
+        existing = self.get_legal_draft(slug)
+        if not existing:
+            return False
+        self._con.execute("DELETE FROM legal_documents WHERE id = ?", [existing["id"]])
+        return True
+
+    def publish_legal_draft(
+        self, slug: str, *, version: str, effective_date: Optional[str],
+        requires_reacceptance: bool,
+    ) -> Dict[str, Any]:
+        """Promote the draft to the current published version atomically.
+        Raises ValueError('no_draft') / ValueError('duplicate_version')."""
+        with self._con.transaction():
+            draft = self.get_legal_draft(slug)
+            if not draft:
+                raise ValueError("no_draft")
+            dup = self._con.execute(
+                "SELECT count(*) FROM legal_documents "
+                "WHERE slug = ? AND version = ? AND published_at IS NOT NULL",
+                [slug, version],
+            ).fetchone()
+            if dup and dup[0] > 0:
+                raise ValueError("duplicate_version")
+            self._con.execute(
+                "UPDATE legal_documents SET is_current = false "
+                "WHERE slug = ? AND is_current",
+                [slug],
+            )
+            self._con.execute(
+                """
+                UPDATE legal_documents
+                SET version = ?, effective_date = ?, requires_reacceptance = ?,
+                    published_at = now(), published_by = 'admin',
+                    is_current = true, updated_at = now()
+                WHERE id = ?
+                """,
+                [version, effective_date, requires_reacceptance, draft["id"]],
+            )
+        return self.get_legal_doc(slug)  # type: ignore[return-value]
+
+    def record_legal_acceptance(
+        self, *, user_id: str, docs: List[Dict[str, str]],
+        ip_address: Optional[str] = None, user_agent: Optional[str] = None,
+        platform: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """One acceptance row per doc, in one transaction. Each entry in `docs`
+        is {document_id, slug, version} (already validated by the caller)."""
+        import uuid
+        saved = []
+        with self._con.transaction():
+            for doc in docs:
+                record_id = str(uuid.uuid4())
+                self._con.execute(
+                    """
+                    INSERT INTO legal_acceptances (
+                        id, user_id, document_id, slug, version,
+                        accepted_at, ip_address, user_agent, platform
+                    ) VALUES (?, ?, ?, ?, ?, now(), ?, ?, ?)
+                    """,
+                    [
+                        record_id, user_id, doc["document_id"], doc["slug"],
+                        doc["version"], ip_address, user_agent, platform,
+                    ],
+                )
+                saved.append({"id": record_id, "slug": doc["slug"], "version": doc["version"]})
+        return saved
+
+    def latest_legal_acceptance(self, user_id: str, slug: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            """
+            SELECT version, accepted_at FROM legal_acceptances
+            WHERE user_id = ? AND slug = ?
+            ORDER BY accepted_at DESC
+            LIMIT 1
+            """,
+            [user_id, slug],
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "version": row[0],
+            "accepted_at": row[1].isoformat() if row[1] else None,
         }
 
     # ── Daily summaries ──────────────────────────────────────────────

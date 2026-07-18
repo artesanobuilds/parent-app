@@ -106,6 +106,19 @@ struct ConsentView: View {
                     .font(.hearthCaptionMono)
                     .foregroundColor(.inkMuted)
                     .padding(.top, .hearth300)
+
+                // This kid-companion consent is separate from the app-wide
+                // legal docs, but link them here so a parent deciding about a
+                // companion can read both without leaving the flow.
+                if let legalLinks = try? AttributedString(
+                    markdown: "[Privacy Policy](\(baseURL.absoluteString)/dashboard/docs/privacy-policy) · "
+                        + "[Terms of Service](\(baseURL.absoluteString)/dashboard/docs/terms)"
+                ) {
+                    Text(legalLinks)
+                        .font(.hearthCaptionMono)
+                        .foregroundColor(.inkMuted)
+                        .tint(.accentDefault)
+                }
             }
             .padding(.hearth600)
         }

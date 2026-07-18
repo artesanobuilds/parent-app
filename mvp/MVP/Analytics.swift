@@ -24,6 +24,8 @@ enum Analytics {
         "chat_opened": ["agent_kind"],
         "activity_tracked": ["status"],
         "plan_exported": ["format"],
+        "legal_accepted": ["surface"],
+        "legal_reaccept_shown": [],
         // Client-only engagement events.
         "screen_viewed": ["screen"],
         "content_opened": ["type"],

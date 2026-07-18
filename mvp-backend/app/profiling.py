@@ -178,6 +178,15 @@ class ProfilingService:
         family.children.pop(child_name, None)
         return existed
 
+    def remove_family(self, user_id: str) -> bool:
+        """Evict a whole family from the in-memory store. Called after a durable
+        delete (DELETE /family) so the live in-memory view — which GET /profile
+        and every agent's context builder read — forgets the family immediately,
+        not only on the next process restart. Without this, a deleted family's
+        profile keeps being served (and fed to agents) until a redeploy."""
+        with self._lock:
+            return self._profiles.pop(user_id, None) is not None
+
     def get_family_profile(self, user_id: str) -> Dict[str, Any]:
         family = self._get_or_create_family(user_id)
         return family.snapshot()

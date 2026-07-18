@@ -250,6 +250,32 @@ final class AuthService {
         Keychain.delete(credentialAccount(userID: userID))
     }
 
+    /// Sign out: best-effort server-side revocation, then always clear locally.
+    ///
+    /// A parent who can't reach the server must STILL be able to log out — the
+    /// refresh token expires on its own — so a network/HTTP failure here is
+    /// non-fatal and the local `clear(for:)` runs regardless. The refresh token
+    /// (when present) is sent so the server can revoke that specific session;
+    /// legacy v0 accounts have none and the server revokes nothing, which is fine.
+    func logout(for userID: String, baseURL: URL?) async {
+        if let baseURL {
+            var body: [String: Any] = [:]
+            if let refresh = credential(for: userID)?.refreshToken {
+                body["refresh_token"] = refresh
+            }
+            var request = URLRequest(url: baseURL.appendingPathComponent("auth/logout"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.timeoutInterval = 10
+            for (k, v) in header(for: userID) {
+                request.setValue(v, forHTTPHeaderField: k)
+            }
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            _ = try? await URLSession.shared.data(for: request)
+        }
+        clear(for: userID)
+    }
+
     // MARK: - Internals
 
     private func store(_ cred: AuthCredential) {

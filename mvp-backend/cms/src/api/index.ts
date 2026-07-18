@@ -209,3 +209,49 @@ export const runCalendarSyncNow = () =>
 
 export const getCalendarSyncRuns = () =>
   fetchJSON<{ runs: CalendarSyncRun[] }>(`${API}/cms/calendar-sync/runs`).then((r) => r.runs);
+
+// ── Legal documents (versioned publish; see /cms/legal endpoints) ──────────
+
+export interface LegalDoc {
+  id: string;
+  slug: string;
+  version: string;
+  title: string;
+  body_md: string;
+  effective_date: string | null;
+  requires_reacceptance: boolean;
+  published_at: string | null;
+  published_by: string | null;
+  is_current: boolean;
+}
+
+export interface LegalOverviewEntry {
+  slug: string;
+  current: LegalDoc | null;
+  draft: LegalDoc | null;
+  version_count: number;
+}
+
+export const getLegalOverview = () =>
+  fetchJSON<{ documents: LegalOverviewEntry[] }>(`${API}/cms/legal`).then((r) => r.documents);
+
+export const getLegalVersions = (slug: string) =>
+  fetchJSON<{ versions: LegalDoc[] }>(`${API}/cms/legal/${slug}/versions`).then((r) => r.versions);
+
+export const putLegalDraft = (slug: string, title: string, body_md: string) =>
+  fetchJSON<LegalDoc>(`${API}/cms/legal/${slug}/draft`, {
+    method: 'PUT',
+    body: JSON.stringify({ title, body_md }),
+  });
+
+export const deleteLegalDraft = (slug: string) =>
+  fetchJSON<{ deleted: boolean }>(`${API}/cms/legal/${slug}/draft`, { method: 'DELETE' });
+
+export const publishLegal = (
+  slug: string,
+  payload: { version: string; effective_date?: string; requires_reacceptance: boolean },
+) =>
+  fetchJSON<LegalDoc>(`${API}/cms/legal/${slug}/publish`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });

@@ -1,12 +1,17 @@
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { DOCS, SECTIONS, getDoc } from '../lib/docs';
+import { LEGAL_PAGES, isLegalSlug, fetchLegalDoc, type LegalDocPayload } from '../lib/legalDocs';
 
 // PUBLIC product docs — this page (and its /docs routes) lives OUTSIDE the
 // auth guard on purpose: it's the GTM funnel's "read the docs" landing.
 // Locked by tests/test_public_docs.py (guard exclusion + registry coverage).
-// Everything renders from markdown bundled at build time; no API calls.
+// Product pages render from markdown bundled at build time; the two LEGAL
+// pages (privacy-policy, terms) are the exception — they fetch the current
+// CMS-published version from /content/legal/{slug} so a publish is live here
+// with no deploy (see lib/legalDocs.ts).
 
 function DocsHeader() {
   return (
@@ -44,7 +49,64 @@ function DocsNav({ current }: { current?: string }) {
           </div>
         </div>
       ))}
+      <div>
+        <div className="text-ink-muted text-xs uppercase tracking-wide mb-200">Legal</div>
+        <div className="flex flex-col gap-100">
+          {LEGAL_PAGES.map((p) => (
+            <Link
+              key={p.slug}
+              to={`/docs/${p.slug}`}
+              className={
+                p.slug === current
+                  ? 'text-ink-primary font-medium text-sm'
+                  : 'text-ink-secondary text-sm hover:text-ink-primary'
+              }
+            >
+              {p.title}
+            </Link>
+          ))}
+        </div>
+      </div>
     </nav>
+  );
+}
+
+// The two legal slugs render the CMS-published current version from the API.
+function LegalDoc({ slug }: { slug: string }) {
+  const [doc, setDoc] = useState<LegalDocPayload | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDoc(null);
+    setError(false);
+    fetchLegalDoc(slug)
+      .then((d) => { if (!cancelled) setDoc(d); })
+      .catch(() => { if (!cancelled) setError(true); });
+    return () => { cancelled = true; };
+  }, [slug]);
+
+  if (error) {
+    return (
+      <div className="text-ink-secondary">
+        We couldn&apos;t load this page right now — please try again in a moment.
+      </div>
+    );
+  }
+  if (!doc) {
+    return <div className="text-ink-muted">Loading…</div>;
+  }
+  return (
+    <>
+      <h1 className="text-2xl font-semibold text-ink-primary mb-400">{doc.title}</h1>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+        {doc.body_md}
+      </ReactMarkdown>
+      <div className="text-ink-muted text-xs mt-700 border-t border-subtle pt-300">
+        Version {doc.version}
+        {doc.effective_date ? ` · effective ${doc.effective_date}` : null}
+      </div>
+    </>
   );
 }
 
@@ -98,7 +160,14 @@ export default function Docs() {
     <div className="min-h-screen bg-surface">
       <div className="max-w-4xl mx-auto px-500 py-600">
         <DocsHeader />
-        {slug && !doc ? (
+        {isLegalSlug(slug) ? (
+          <div className="flex flex-col md:flex-row gap-700">
+            <DocsNav current={slug} />
+            <article className="min-w-0 flex-1">
+              <LegalDoc slug={slug!} />
+            </article>
+          </div>
+        ) : slug && !doc ? (
           <div className="text-ink-secondary">
             That page doesn&apos;t exist. <Link to="/docs" className="text-accent underline">Back to the docs.</Link>
           </div>
@@ -135,6 +204,20 @@ export default function Docs() {
                   </div>
                 </div>
               ))}
+              <div className="md:w-64">
+                <div className="text-ink-muted text-xs uppercase tracking-wide mb-300">Legal</div>
+                <div className="flex flex-col gap-300">
+                  {LEGAL_PAGES.map((p) => (
+                    <Link
+                      key={p.slug}
+                      to={`/docs/${p.slug}`}
+                      className="text-ink-primary hover:text-accent font-medium"
+                    >
+                      {p.title}
+                    </Link>
+                  ))}
+                </div>
+              </div>
             </div>
             <div className="text-ink-muted text-xs mt-700">
               {DOCS.length} pages · updated with every release

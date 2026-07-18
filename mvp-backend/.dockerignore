@@ -50,3 +50,5 @@ data/agent_config.parquet
 data/registration_windows.parquet
 data/window_notifications.parquet
 data/eval_reports/
+data/legal_documents.parquet
+data/legal_acceptances.parquet

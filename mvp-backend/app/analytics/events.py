@@ -41,6 +41,9 @@ EVENTS: dict[str, set[str]] = {
     # Content + navigation engagement (client)
     "content_opened": {"type"},                      # library article / community post
     "screen_viewed": {"screen"},                     # every screen (tabs + pushed/presented)
+    # Legal acceptance (client) — surface = onboarding | banner. Never content.
+    "legal_accepted": {"surface"},
+    "legal_reaccept_shown": set(),
     # Ingest flywheel (Phase 5): every confirm/correct on an extracted item is
     # a labeled example — the corrected/confirmed ratio IS the corpus metric.
     "ingest_uploaded": {"kind"},                     # text | image

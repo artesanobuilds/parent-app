@@ -75,7 +75,7 @@ struct ReportProblemView: View {
         switch status {
         case .sent:    return "Sent"
         case .sending: return "Sending…"
-        default:       return "Send to Miguel"
+        default:       return "Send report"
         }
     }
 
