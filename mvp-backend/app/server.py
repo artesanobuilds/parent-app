@@ -1089,8 +1089,88 @@ def relevant_content(topic: str, limit: int = 5):
 @app.get("/profile")
 def get_profile(user_id: str = Depends(current_user)):
     """Return the family profile (parent + kids) for the authenticated user, so
-    surfaces like the Settings → Profile screen can prefill an edit form."""
-    return profiling_service.get_family_profile(user_id) or {"parent": {}, "children": {}}
+    surfaces like the Settings → Profile screen can prefill an edit form.
+    Avatar keys are turned into FRESHLY presigned URLs at read time — the key
+    is stored, never a URL (a stored URL bakes in an expiry and leaks a
+    capability into the parquet snapshots)."""
+    family = profiling_service.get_family_profile(user_id) or {"parent": {}, "children": {}}
+    from app import blobs
+    if blobs.is_configured():
+        parent = family.get("parent") or {}
+        if parent.get("avatar_key"):
+            parent["avatar_url"] = blobs.presign_get(parent["avatar_key"])
+        for kid in (family.get("children") or {}).values():
+            if kid.get("avatar_key"):
+                kid["avatar_url"] = blobs.presign_get(kid["avatar_key"])
+    return family
+
+
+# ── Blob storage (profile photos; Railway Storage Buckets) ───────────
+
+class BlobUploadUrlRequest(BaseModel):
+    kind: str                      # avatar (ingest reserved for later)
+    content_type: str
+    byte_size: int
+
+
+class AvatarAttachRequest(BaseModel):
+    key: str
+
+
+@app.post("/blobs/upload-url")
+def blob_upload_url(req: BlobUploadUrlRequest, user_id: str = Depends(current_user)):
+    """Mint a presigned PUT. The key is SERVER-derived from the authenticated
+    user — a client-supplied key would be a cross-family write primitive."""
+    from app import blobs
+    if not blobs.is_configured():
+        raise HTTPException(status_code=503, detail="blob storage is not configured")
+    if req.kind not in ("avatar",):
+        raise HTTPException(status_code=400, detail="unsupported blob kind")
+    if req.content_type not in blobs.ALLOWED_IMAGE_MIME:
+        raise HTTPException(status_code=400, detail="unsupported image type")
+    if not (0 < req.byte_size <= blobs.MAX_IMAGE_BYTES):
+        raise HTTPException(status_code=400, detail="image too large (8 MB max)")
+    key = blobs.new_key(user_id=user_id, kind=req.kind, content_type=req.content_type)
+    url = blobs.presign_put(key, req.content_type)
+    return {"key": key, "url": url, "expires_in_s": int(os.getenv("BLOB_PRESIGN_TTL_S", "900"))}
+
+
+def _attach_avatar(user_id: str, key: str, *, kid_name: Optional[str]) -> Dict[str, Any]:
+    from app import blobs
+    if not blobs.is_configured():
+        raise HTTPException(status_code=503, detail="blob storage is not configured")
+    # Ownership boundary: the key's u/{user_id}/ prefix must be the caller's.
+    if not blobs.key_belongs_to(key, user_id):
+        raise HTTPException(status_code=403, detail="key does not belong to this account")
+    if blobs.head(key) is None:
+        raise HTTPException(status_code=404, detail="no uploaded object at that key")
+    family = profiling_service.get_family_profile(user_id)
+    if kid_name is not None:
+        # Attach must not CREATE a kid (update_child_profile would) — a typo'd
+        # name minting a ghost kid is the name-as-key trap.
+        if kid_name not in (family.get("children") or {}):
+            raise HTTPException(status_code=404, detail="unknown kid")
+        old = (family["children"][kid_name] or {}).get("avatar_key")
+        profiling_service.update_child_profile(user_id, kid_name, {"avatar_key": key})
+    else:
+        old = (family.get("parent") or {}).get("avatar_key")
+        profiling_service.update_parent_profile(user_id, {"avatar_key": key})
+    persist_state(user_id)
+    # Replacing a photo deletes the old object — no orphan accumulation.
+    if old and old != key:
+        blobs.delete(old)
+    return get_profile(user_id)
+
+
+@app.post("/profile/avatar")
+def attach_parent_avatar(req: AvatarAttachRequest, user_id: str = Depends(current_user)):
+    return _attach_avatar(user_id, req.key, kid_name=None)
+
+
+@app.post("/profile/kids/{kid_name}/avatar")
+def attach_kid_avatar(kid_name: str, req: AvatarAttachRequest,
+                      user_id: str = Depends(current_user)):
+    return _attach_avatar(user_id, req.key, kid_name=kid_name)
 
 
 @app.post("/profile/seed")
@@ -1176,8 +1256,12 @@ def seed_profile(request: OnboardingSeedRequest, user_id: str = Depends(current_
 
 from dataclasses import fields as _dc_fields
 
-_PARENT_FIELDS = {f.name for f in _dc_fields(ParentProfile)}
-_CHILD_FIELDS = {f.name for f in _dc_fields(ChildProfile)}
+# The PATCH whitelists are auto-derived from the dataclasses — avatar_key must
+# be subtracted or it becomes client-writable and one family can PATCH in
+# another family's key and presign their kid's photo. Only the dedicated
+# avatar endpoints (which verify key ownership) may set it.
+_PARENT_FIELDS = {f.name for f in _dc_fields(ParentProfile)} - {"avatar_key"}
+_CHILD_FIELDS = {f.name for f in _dc_fields(ChildProfile)} - {"avatar_key"}
 _INT_FIELDS = {"adults_in_household"}
 _FLOAT_FIELDS = {"age"}
 
@@ -1248,6 +1332,13 @@ def delete_kid(
     Also cascades the kid's agent data (config/messages/credentials/etc.) so the
     delete is complete — otherwise an orphan kid-agent lingers and can resurface
     the kid."""
+    # The kid's photo goes with the kid — dropping only the JSON reference
+    # would leave an orphan object holding the most sensitive data type.
+    _family = profiling_service.get_family_profile(user_id)
+    _avatar = ((_family.get("children") or {}).get(kid_name) or {}).get("avatar_key")
+    if _avatar:
+        from app import blobs
+        blobs.delete(_avatar)
     profiling_service.remove_child_profile(user_id, kid_name)
     try:
         storage_backend.delete_kid_data(user_id=user_id, kid_name=kid_name)
@@ -1954,6 +2045,12 @@ def delete_family(user_id: str, authenticated_user: str = Depends(current_user))
     # `export_all_parquet` can flush it back into `user_data`. Popping it here
     # makes the delete visible immediately and stops a re-export resurrecting it.
     profiling_service.remove_family(user_id)
+    # Photos live outside the DB entirely — sweep the family's whole blob
+    # prefix so "delete my data" covers them too (no-op when unconfigured).
+    from app import blobs as _blobs
+    _blobs_deleted = _blobs.delete_all(f"u/{user_id}/")
+    if _blobs_deleted:
+        counts["blobs"] = _blobs_deleted
     if _analytics_id:
         try:
             from app.analytics.deletion import delete_person

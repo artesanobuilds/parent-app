@@ -59,6 +59,11 @@ class ParentProfile:
     mental_health_notes: Optional[str] = None  # non-clinical, self-reported
     co_parenting: Optional[str] = None  # notes about coordination/boundaries
     guidance_style: Optional[str] = None  # concise scripts vs. explanations
+    # Blob-storage key for the profile photo. NOT client-writable: the PATCH
+    # whitelists in server.py subtract it, and only the dedicated avatar
+    # endpoints (which verify key ownership) may set it. A client-writable
+    # avatar_key would let one family presign another family's photo.
+    avatar_key: Optional[str] = None
 
     def apply_update(self, updates: Dict[str, Any], *, replace_lists: bool = False) -> None:
         """Merge partial updates into the parent profile.
@@ -101,6 +106,9 @@ class ChildProfile:
     repair_helpers: List[str] = field(default_factory=list)
     motivators: List[str] = field(default_factory=list)
     safety_flags: Optional[str] = None  # non-clinical concerns
+    # Blob key for the kid's photo — same NOT-client-writable rule as
+    # ParentProfile.avatar_key (see that field's comment).
+    avatar_key: Optional[str] = None
 
     def apply_update(self, updates: Dict[str, Any], *, replace_lists: bool = False) -> None:
         """Merge partial updates into the child profile. See

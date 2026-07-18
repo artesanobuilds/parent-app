@@ -138,9 +138,9 @@ struct ProfileSettingsView: View {
 
     private var parentRow: some View {
         HStack(spacing: .hearth400) {
-            Image(systemName: "person.fill")
-                .foregroundColor(.accentDefault)
-                .frame(width: 24)
+            AvatarCircleView(urlString: family.parent?.avatarUrl,
+                             fallbackSystemImage: "person.fill", size: 28)
+                .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(family.parent?.name?.isEmpty == false ? family.parent!.name! : "Add your name")
                     .font(.hearthBodyMD.weight(.semibold))
@@ -157,9 +157,9 @@ struct ProfileSettingsView: View {
     private func kidRow(_ key: String) -> some View {
         let kid = family.children?[key]
         return HStack(spacing: .hearth400) {
-            Image(systemName: "figure.child")
-                .foregroundColor(.accentDefault)
-                .frame(width: 24)
+            AvatarCircleView(urlString: kid?.avatarUrl,
+                             fallbackSystemImage: "figure.child", size: 28)
+                .frame(width: 28)
             Text(kid?.name ?? key)
                 .font(.hearthBodyMD)
                 .foregroundColor(.inkPrimary)

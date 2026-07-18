@@ -38,11 +38,17 @@ struct SignInView: View {
         return AuthService.shared.legacyToken(for: uid)
     }
 
+    // A returning user (post-logout) still has their display name cached —
+    // greet them by name instead of the generic new-install "Welcome".
+    @AppStorage("parent_display_name") private var parentDisplayName = ""
+
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
-            Text("Welcome")
+            Text(parentDisplayName.isEmpty ? "Welcome" : "Welcome back, \(parentDisplayName)")
                 .font(.largeTitle.bold())
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
             Text("Sign in to keep your family's plan in sync across your devices.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

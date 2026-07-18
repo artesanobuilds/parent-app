@@ -2,6 +2,40 @@
 
 Living list of next-up work. Order is a rough priority, not a commitment. Items move to `docs/history/NNN.md` when shipped.
 
+## Beta Readiness follow-ups (2026-07-18, from Heather's list — phases A/0/1–4/6 built)
+
+Shipped on `master` (not yet deployed): log out + delete account, parent-facing Settings (dev
+console behind 7-tap), CMS-versioned legal docs (privacy policy + terms, versioned publish w/
+re-acceptance), coach named "Coach" + working mvp:// citations, stranded-base-URL self-heal,
+profile photos on Railway Storage Buckets (env-gated; bucket not yet provisioned). Remaining:
+
+- **Provision the blob bucket (Miguel, Railway console):** create a Storage Bucket per environment,
+  attach the prod one to the prod service, map the injected vars to `BLOB_*` aliases
+  (`BLOB_BUCKET`, `BLOB_ACCESS_KEY_ID`, `BLOB_SECRET_ACCESS_KEY`, `BLOB_ENDPOINT`, `BLOB_REGION`).
+  Until then every photo surface is a silent no-op by design.
+- **Enable Railway CDN on the backend service** (free): edge-caches dashboard/CMS static assets;
+  API stays dynamic; presigned URLs unaffected (`storage.railway.app`). Keep "Purge HTML on deploy"
+  on so CMS legal publishes aren't masked by stale cache.
+- **Payments — what it takes to charge** (deferred from beta; GTM validates price out-of-app
+  first): StoreKit 2 auto-renewable subscription + paywall UI, server-side receipt validation,
+  entitlement state on `user_accounts` + gating, restore purchases, App Store Connect
+  subscription config + tax/banking agreements. Pair with the GTM pricing-validation read
+  (WTP funnel) before building.
+- **Chat invites / photo sharing between users** (deferred — contradicts solo-first): demand test
+  first (e.g. a "share this with your co-parent" intent CTA that logs a PostHog event), build only
+  if the signal is real. True multi-adult accounts = a data-model migration (every table keys on
+  one user_id).
+- **Per-family LLM cost cap** — still none; "one bored kid overnight = $4–11k". Hard ceiling
+  before the beta cohort grows.
+- **At-rest encryption phase now also covers blobs:** Railway Buckets have no SSE — photos are
+  plaintext at rest until this phase (adopt Railway SSE if shipped by then, else migrate blobs to
+  R2). Also: blob **orphan sweep** (no lifecycle rules on Railway Buckets — an uploaded-but-never-
+  attached object lingers until swept).
+- **Saved tab (Phase 5)** — held for the Heather meeting outcome; design locked in the plan file.
+- **Library+Circle merge** (IA follow-up once Saved ships — three content surfaces is one too many).
+- **Legal round-trip:** pull Heather/counsel edits back from the Drive drafts → CMS publish v1.1;
+  remove the "draft pending legal review" note when counsel signs off.
+
 ## Vertical Expansion — One Agent, Five Doors + Watchlist + Public Docs (2026-07-11, SHIPPED — see `docs/history/009.md`)
 
 All phases (V1–V5 verticals, registration-window watchlist, illustrated public docs, full telemetry + 4 Grafana alert rules) are **LIVE in prod**. Ship record: `docs/history/009.md`. What remains:

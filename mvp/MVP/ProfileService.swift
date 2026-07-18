@@ -31,9 +31,13 @@ struct ParentProfileDTO: Codable {
     var mentalHealthNotes: String? = nil
     var coParenting: String? = nil
     var guidanceStyle: String? = nil
+    // Freshly presigned by GET /profile when a photo exists (expires in ~15m —
+    // display-only, never persist).
+    var avatarUrl: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case name, pronouns, country, employment, stressors, goals
+        case avatarUrl = "avatar_url"
         case postalCode = "postal_code"
         case primaryLanguage = "primary_language"
         case parentAgeRange = "parent_age_range"
@@ -83,10 +87,12 @@ struct ChildProfileDTO: Codable {
     var repairHelpers: [String]? = nil
     var motivators: [String]? = nil
     var safetyFlags: String? = nil
+    var avatarUrl: String? = nil  // presigned, display-only (see ParentProfileDTO)
 
     enum CodingKeys: String, CodingKey {
         case name, pronouns, age, temperament, interests, strengths, challenges
         case triggers, motivators, neurodiversity
+        case avatarUrl = "avatar_url"
         case gradeBand = "grade_band"
         case academicStrengths = "academic_strengths"
         case emotionRegulation = "emotion_regulation"

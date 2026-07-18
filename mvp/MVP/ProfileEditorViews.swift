@@ -157,6 +157,16 @@ struct ParentProfileEditor: View {
 
     var body: some View {
         Form {
+            Section("Photo") {
+                AvatarPickerRow(
+                    avatarUrl: draft.avatarUrl, kidName: nil,
+                    userID: userID, baseURL: baseURL
+                ) { fam in
+                    draft.avatarUrl = fam.parent?.avatarUrl
+                    onSaved(fam)
+                }
+            }
+
             Section("Basics") {
                 TextField("Name", text: $draft.name.orEmpty)
                 TextField("Pronouns", text: $draft.pronouns.orEmpty)
@@ -259,6 +269,18 @@ struct KidProfileEditor: View {
 
     var body: some View {
         Form {
+            Section("Photo") {
+                // kidName = kidKey (the server's dictionary key), NOT the
+                // possibly-edited draft name — attach 404s unknown kids.
+                AvatarPickerRow(
+                    avatarUrl: draft.avatarUrl, kidName: kidKey,
+                    userID: userID, baseURL: baseURL
+                ) { fam in
+                    draft.avatarUrl = fam.children?[kidKey]?.avatarUrl
+                    onSaved(fam)
+                }
+            }
+
             Section("Basics") {
                 TextField("Name", text: $draft.name.orEmpty)
                 TextField("Pronouns", text: $draft.pronouns.orEmpty)

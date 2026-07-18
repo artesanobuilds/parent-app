@@ -18,6 +18,8 @@ struct HomeView: View {
     // otherwise edits/adds/deletes made in Settings → Profile don't show on Home
     // until the app is relaunched (the section's .task only runs on first appear).
     @State private var homeRefreshToken = 0
+    // Presigned parent photo from the profile fetch (display-only, short-lived).
+    @State private var parentAvatarURL: String?
 
     var body: some View {
         NavigationStack {
@@ -67,14 +69,17 @@ struct HomeView: View {
             .toolbar(.hidden, for: .navigationBar)
             .withContentNavigationDestinations()
             .task(id: homeRefreshToken) {
-                // Resolve the parent's display name from the profile (source of
-                // truth). Covers returning users who skipped onboarding, and
-                // refreshes after a Settings edit (homeRefreshToken bump).
+                // Resolve the parent's display name + photo from the profile
+                // (source of truth). Covers returning users who skipped
+                // onboarding, and refreshes after a Settings edit
+                // (homeRefreshToken bump).
                 guard let baseURL = configuration.baseURL, !username.isEmpty else { return }
-                if let profile = try? await ProfileService.getProfile(baseURL: baseURL, userID: username),
-                   let name = profile.parent?.name?.trimmingCharacters(in: .whitespaces),
-                   !name.isEmpty {
-                    parentDisplayName = name
+                if let profile = try? await ProfileService.getProfile(baseURL: baseURL, userID: username) {
+                    if let name = profile.parent?.name?.trimmingCharacters(in: .whitespaces),
+                       !name.isEmpty {
+                        parentDisplayName = name
+                    }
+                    parentAvatarURL = profile.parent?.avatarUrl
                 }
             }
             .sheet(isPresented: $isShowingSettings, onDismiss: { homeRefreshToken += 1 }) {
@@ -163,18 +168,23 @@ struct HomeView: View {
                     if !username.isEmpty && hasKidCompanions {
                         HandoffEntryButton { triggerKidHandoff() }
                     }
-                    // Tap the initial to open Settings.
+                    // Tap the avatar/initial to open Settings.
                     Button {
                         isShowingSettings = true
                     } label: {
-                        Circle()
-                            .fill(Color.white.opacity(0.9))
-                            .frame(width: 36, height: 36)
-                            .overlay(
-                                Text(parentDisplayName.isEmpty ? "?" : String(parentDisplayName.prefix(1)).uppercased())
-                                    .font(.hearthLabel)
-                                    .foregroundColor(.accentDefault)
-                            )
+                        if parentAvatarURL != nil {
+                            AvatarCircleView(urlString: parentAvatarURL,
+                                             fallbackSystemImage: "person.fill", size: 36)
+                        } else {
+                            Circle()
+                                .fill(Color.white.opacity(0.9))
+                                .frame(width: 36, height: 36)
+                                .overlay(
+                                    Text(parentDisplayName.isEmpty ? "?" : String(parentDisplayName.prefix(1)).uppercased())
+                                        .font(.hearthLabel)
+                                        .foregroundColor(.accentDefault)
+                                )
+                        }
                     }
                     .accessibilityLabel("Settings")
                 }

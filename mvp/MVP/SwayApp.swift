@@ -57,6 +57,11 @@ struct MVPApp: App {
                         userID: userName,
                         baseURL: URL(string: resolvedBaseURLString())
                     )
+                    // Re-attach an avatar whose upload succeeded but whose
+                    // attach never confirmed (offline / killed mid-flight).
+                    if let baseURL = URL(string: resolvedBaseURLString()) {
+                        await BlobService.flushPendingAttach(userID: userName, baseURL: baseURL)
+                    }
                     // Product analytics — started only here (past onboarding +
                     // consent), never on the sign-in/onboarding screens.
                     // identify on the OPAQUE analytics id, never the user_id.

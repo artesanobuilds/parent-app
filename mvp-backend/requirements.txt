@@ -54,3 +54,5 @@ sentry-sdk[fastapi]==2.63.0
 opentelemetry-distro==0.64b0
 opentelemetry-exporter-otlp==1.43.0
 opentelemetry-instrumentation-fastapi==0.64b0
+# Blob storage — Railway Storage Buckets are S3-compatible (app/blobs, env-gated no-op).
+boto3==1.43.51

@@ -81,12 +81,17 @@ final class AppSession: ObservableObject {
         // A pending legal agreement is THIS user's — the next account on this
         // device must never inherit it (it would silently auto-accept for them).
         defaults.removeObject(forKey: LegalService.acceptPendingKey)
+        // Same for a pending avatar attach (the key prefix guard would reject
+        // it anyway — the ownership boundary — but don't even carry it over).
+        defaults.removeObject(forKey: BlobService.pendingAttachKey)
         legalStatus = nil
 
         // Flip the gate LAST — this is what re-renders the app to SignInView.
+        // parent_display_name deliberately SURVIVES log-out: it powers the
+        // "Welcome back, {name}" greeting on SignInView. Delete-account (below)
+        // erases it — that's data deletion, not session end.
         defaults.set(false, forKey: Key.onboardingCompleted)
         defaults.set("", forKey: Key.userName)
-        defaults.set("", forKey: Key.parentDisplayName)
     }
 
     /// Permanently delete the family's account + data, then sign out locally.
@@ -120,7 +125,10 @@ final class AppSession: ObservableObject {
             throw AuthService.AuthError(status: http.statusCode, detail: detail)
         }
 
-        // Server data is gone — now clear this device.
+        // Server data is gone — now clear this device, including the cached
+        // display name (signOut keeps it for the welcome-back greeting; a
+        // deleted account must leave nothing behind).
         await signOut(userID: userID, baseURL: baseURL)
+        UserDefaults.standard.set("", forKey: Key.parentDisplayName)
     }
 }
