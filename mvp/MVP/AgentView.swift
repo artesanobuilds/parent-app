@@ -13,19 +13,51 @@ struct AgentView: View {
     /// Maps message ID -> (community posts, library items) so content is stable.
     @State private var contentCards: [UUID: ([APICommunityPost], [APIArticle])] = [:]
 
+    /// Programmatic pushes for the coach's inline mvp:// citations — the
+    /// OpenURLAction below appends routes here and the destinations registered
+    /// by withContentNavigationDestinations() render them.
+    @State private var navPath = NavigationPath()
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navPath) {
             VStack(spacing: 0) {
                 Divider()
                     .background(Color.borderHairline)
                 messageList
                 inputArea
             }
+            // The coach cites content as [Title](mvp://library/{id}) and
+            // [Title](mvp://community/{id}) (see agent.py + the content
+            // catalog). These links were DEAD until this handler: no mvp://
+            // scheme is registered anywhere, so taps did nothing. Route them
+            // in-app; the learn-more disclaimer opens the public coach doc;
+            // real web links (search citations) fall through to Safari.
+            .environment(\.openURL, OpenURLAction { url in
+                guard url.scheme == "mvp" else { return .systemAction }
+                let id = url.lastPathComponent
+                switch url.host {
+                case "library" where !id.isEmpty:
+                    navPath.append(ArticleRoute(id: id))
+                    return .handled
+                case "community" where !id.isEmpty:
+                    navPath.append(PostRoute(id: id))
+                    return .handled
+                case "learn-more":
+                    if let base = configuration.baseURL {
+                        return .systemAction(base.appendingPathComponent("dashboard/docs/coach"))
+                    }
+                    return .discarded
+                default:
+                    // An mvp:// link shape we don't know — swallow it rather
+                    // than bounce the parent to a "cannot open" system alert.
+                    return .discarded
+                }
+            })
             .onAppear { Analytics.capture("chat_opened", ["agent_kind": "coach"]) }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("MVP")
+                    Text("Coach")
                         .font(.hearthTitleLG)
                         .foregroundColor(.inkPrimary)
                 }
@@ -176,14 +208,13 @@ struct AgentView: View {
 
     private func assistantMessageRow(_ message: ChatMessage) -> some View {
         HStack(alignment: .top, spacing: .hearth400) {
-            // Accent-tinted avatar
+            // Coach avatar: the product's typographic mark (Fraunces "M"),
+            // not an ad-hoc label — one mark everywhere (see MVPLogoView).
             Circle()
                 .fill(Color.accentDefault)
                 .frame(width: 30, height: 30)
                 .overlay(
-                    Text("M")
-                        .font(.hearthLabel)
-                        .foregroundColor(.inkOnPhotoLight)
+                    HearthMark(size: 18, tint: .inkOnPhotoLight)
                 )
                 .padding(.top, 2)
 
@@ -270,9 +301,9 @@ struct AgentView: View {
             // Disclaimer — wrap, don't truncate. "Learn more" sits inline at
             // the end via Markdown so the whole disclaimer stays one logical
             // sentence that can break at the page gutter.
-            Text(try! AttributedString(
-                markdown: "AI can make mistakes and is not a crisis line. [Learn more](mvp://learn-more)"
-            ))
+            Text((try? AttributedString(
+                markdown: "Coach can make mistakes and is not a crisis line. [Learn more](mvp://learn-more)"
+            )) ?? AttributedString("Coach can make mistakes and is not a crisis line."))
                 .font(.hearthCaptionMono)
                 .foregroundColor(.inkMuted)
                 .tint(.inkMuted)

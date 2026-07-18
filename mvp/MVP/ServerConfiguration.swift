@@ -36,7 +36,18 @@ final class ServerConfiguration: ObservableObject {
         let stored = defaults.string(forKey: Self.baseURLKey) ?? Self.defaultURL
         // One-shot migration: rewrite legacy localhost dev URL → 127.0.0.1
         // so AVPlayer doesn't reach for IPv6 ::1.
-        let migrated = stored.hasPrefix("http://localhost") ? Self.localURL : stored
+        var migrated = stored.hasPrefix("http://localhost") ? Self.localURL : stored
+        #if !DEBUG
+        // Beta self-heal: the raw Server URL field used to be visible to every
+        // beta parent and is now hidden behind the 7-tap developer reveal — so
+        // a stranded custom URL (typo'd host, a Mac's old LAN IP, 127.0.0.1)
+        // could never be fixed by its user again. Unless developer mode was
+        // deliberately unlocked, a Release install has exactly one valid
+        // server: production. Snap anything else back.
+        if !defaults.bool(forKey: "developer_mode"), migrated != Self.productionURL {
+            migrated = Self.productionURL
+        }
+        #endif
         baseURLString = migrated
         threadID = defaults.string(forKey: Self.threadIDKey) ?? UUID().uuidString
         if migrated != stored {
