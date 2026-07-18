@@ -667,27 +667,111 @@ def create_doc():
     )
 
     doc.add_heading('Must-ship for beta — status', level=2)
-    must_ship = [
-        ('Real user identity — SHIPPED', 'Native Apple and Google Sign-In with real '
+    doc.add_paragraph(
+        'This is the consolidated beta-readiness checklist. It reconciles Heather\'s '
+        '"cleanup before beta" list against what the codebase actually has today, sorted '
+        'into three buckets: already shipped, to build before beta, and deliberately '
+        'deferred with a demand test. The two deferrals (payments and in-app chat invites) '
+        'are calls to confirm together in this meeting, not decisions already made.'
+    )
+
+    doc.add_heading('Already shipped', level=3)
+    shipped = [
+        ('Real user identity + sign-in', 'Native Apple and Google Sign-In with real '
          'accounts (rotating secure tokens) replaced the name-based login. Existing '
-         'families were migrated without losing data. The "two Miguels collide" '
-         'blocker is closed.'),
-        ('Crisis parent notification — SHIPPED', 'A crisis in a kid companion now fires a '
-         'real push notification to the parent\'s phone (verified on a physical device), '
-         'locks the conversation, and stays locked until the parent reviews and '
-         'reactivates.'),
-        ('TestFlight release of the new experience — the one pending ship', 'The '
-         'five-doors experience (all verticals, the watchlist, the illustrated docs) is '
-         'live on the production backend and web dashboard; the iOS build that surfaces '
-         'it (1.66) is built and verified and ships with the next TestFlight upload. '
-         'Beta phones run the previous build until then—nothing breaks meanwhile.'),
-        ('Onboarding polish — open', 'Low-friction, drip-style information collection. '
-         'Don\'t ask for everything upfront. Let the app learn the family over time. '
-         'Greg\'s WeTransfer insight: one simple action to start.'),
-        ('Design review & dead ends — open', 'Greg will map the current user journeys in '
-         'Figma, identify "dead ends" where the user gets stuck, and propose solutions.'),
+         'families were migrated without losing data. The "two Miguels collide" blocker '
+         'is closed.'),
+        ('Crisis parent notification', 'A crisis in a kid companion fires a real push '
+         'notification to the parent\'s phone (verified on a physical device), locks the '
+         'conversation, and stays locked until the parent reviews and reactivates.'),
+        ('Profile view + edit', 'Parents can edit their own profile and each child\'s '
+         '(name, pronouns, age, and the details the app has learned) from Settings. '
+         'Add-a-kid and delete-a-kid work, with delete cascading the child\'s data.'),
+        ('Screen-to-screen navigation', 'The five-tab bottom bar (Home, Library, Coach, '
+         'Circle, Plan) is always visible and switches instantly—Heather\'s "toggle '
+         'seamlessly" and "home base buttons always on bottom" are already how the app '
+         'is built.'),
     ]
-    for title, desc in must_ship:
+    for title, desc in shipped:
+        p = doc.add_paragraph()
+        run = p.add_run(title + '. ')
+        run.bold = True
+        p.add_run(desc)
+
+    doc.add_heading('To build before beta', level=3)
+    to_build = [
+        ('Log out — blocker', 'The app has no log-out today; the only sign-out lives in a '
+         'developer-only test screen. A beta user literally cannot leave their account. '
+         'This is the single most embarrassing gap and ships first. Self-serve '
+         '"delete my account and data" ships alongside it.'),
+        ('Settings a beta parent should see', 'The current Settings exposes a developer '
+         'console (server URL, environment switch, thread IDs). Beta parents get a clean '
+         'Settings—account, connections, help, legal, log out—with the developer tools '
+         'hidden behind a tap-to-reveal gesture the founders still use.'),
+        ('Get Help', 'The only support path today is a "Send debug data" button buried in '
+         'the developer screen. Promote it to a first-class "Report a problem" in Settings '
+         'so beta users have an obvious way to reach us.'),
+        ('Privacy statement + legal', 'Write a real privacy policy and terms of service, '
+         'publish them on the web dashboard, and link them from the app and the consent '
+         'screen. Add the self-serve delete control the privacy page already promises. '
+         'At-rest encryption and formal COPPA counsel are tracked as their own dated '
+         'phases (see Deferred).'),
+        ('Save / favorite / archive + a Saved tab', 'Nothing outside the activity planner '
+         'can be saved today. Add a sixth "Saved" tab that collects saved articles, coach '
+         'answers, community posts, and activities in one place. It doubles as a signal of '
+         'what each family actually cares about.'),
+        ('A name and symbol for the AI coach', 'The coach has no name and its screen is '
+         'titled with the literal product name "MVP." Give it a name and a consistent mark '
+         '(the kid companions each have a name already—it\'s why they feel like someone). '
+         'Also fixes the coach\'s in-chat article links, which are inert today.'),
+        ('Photo profiles + upload', 'Let parents add a photo for themselves and each child. '
+         'This needs new image storage (the app has none today) and ships behind the legal '
+         'work, since children\'s photos raise the stakes on privacy. Photo-library only '
+         'for beta, no camera.'),
+        ('Welcome-back sign-in', 'A returning user who logs out should be greeted by name '
+         'on the way back in, not the generic new-user welcome. Small copy change on the '
+         'existing sign-in.'),
+        ('Notifications — verify + settings', 'First verify crisis and watchlist pushes '
+         'actually deliver on TestFlight builds (a configuration risk we need to rule '
+         'out—if wrong, crisis alerts silently fail). Then give parents a place to see '
+         'and control what they\'re notified about.'),
+        ('Onboarding refinements', 'Low-friction, drip-style information collection. Don\'t '
+         'ask for everything upfront; let the app learn the family over time. Greg\'s '
+         'WeTransfer insight: one simple action to start. Greg maps the journeys in Figma '
+         'and flags dead ends.'),
+        ('TestFlight release of the new experience', 'The five-doors experience (all '
+         'verticals, the watchlist, the illustrated docs) is live on the production '
+         'backend and web dashboard; the iOS build that surfaces it (1.66) is built and '
+         'verified and ships with the next TestFlight upload. Beta phones run the previous '
+         'build until then—nothing breaks meanwhile.'),
+    ]
+    for title, desc in to_build:
+        p = doc.add_paragraph()
+        run = p.add_run(title + '. ')
+        run.bold = True
+        p.add_run(desc)
+
+    doc.add_heading('Deferred — with a demand test, not a build (confirm in this meeting)', level=3)
+    deferred = [
+        ('Payments', 'The beta is free for founding families; we validate willingness-to-pay '
+         'through the funnel in Section 12, not by charging inside the app. Building '
+         'in-app subscriptions now would pull App Store review, tax, and banking setup '
+         'onto the critical path for revenue we\'re not yet collecting. The engineering '
+         'checklist to turn on charging is captured for when the price is proven.'),
+        ('In-app chat invites + photo sharing between users', 'Heather\'s "invite users '
+         'to chat with you / share photos" collides with our own solo-first wedge '
+         '(Section 12): the second parent gets calendar invites and a magic forwarding '
+         'email—"never an app install, never an account." True multi-user accounts are a '
+         'data-model rebuild. We defer the build and instead test whether the demand is '
+         'real before committing to it.'),
+        ('At-rest encryption', 'The database and its backups are currently plaintext on the '
+         'host. Encrypting them is its own phase with real production-data risk (a botched '
+         'cutover loses the volume), so it gets a rehearsed migration, not a rushed one.'),
+        ('COPPA compliance build-out', 'The amended rule is now in force (see Section 12). '
+         'Required before any public kid-facing launch. The closed beta runs under direct '
+         'parental consent; the full compliance program is scheduled with counsel.'),
+    ]
+    for title, desc in deferred:
         p = doc.add_paragraph()
         run = p.add_run(title + '. ')
         run.bold = True
@@ -721,8 +805,9 @@ def create_doc():
         ('Editorial content pipeline', 'Systematic creation of articles inspired by '
          'our named voices (Becky Kennedy, Huberman, etc.). Original writing with '
          'proper attribution. 4-6 articles per category to start.'),
-        ('Cost controls', 'Per-family daily spending caps on AI usage. One bored kid '
-         'overnight should not generate a $4,000 bill.'),
+        ('Cost controls', 'Per-family daily spending caps on AI usage. No cap exists '
+         'today—one bored kid overnight could run $4,000–11,000 in model costs. A hard '
+         'ceiling goes in before the beta cohort grows.'),
         ('Homeschool market research', 'Heather\'s action item: demographic data on '
          'homeschooling families (~25% in Greg\'s area). Potential high-value segment.'),
     ]
@@ -1218,8 +1303,8 @@ def create_doc():
          'demand. No selling—one line pointing to the Snapshot. Two voices also halves '
          'the per-person cadence needed to stay daily.'),
         ('Early-access cohort', 'The warmest leads become founding families: a lifetime '
-         'discount (~$99/yr locked for life vs. $199 standard) in exchange for daily '
-         'feedback—early product champions, not revenue.'),
+         'discount (~$79–99/yr locked vs. the $129–149 standard the test range points to) '
+         'in exchange for daily feedback—early product champions, not revenue.'),
     ]
     for title, desc in funnel_items:
         p = doc.add_paragraph()
@@ -1319,7 +1404,7 @@ def create_doc():
     doc.add_paragraph()
     footer = doc.add_paragraph()
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = footer.add_run('MVP — June 2026, rev. July 12, 2026')
+    run = footer.add_run('MVP — June 2026, rev. July 17, 2026')
     run.font.size = Pt(10)
     run.font.color.rgb = INK_MUTED
 
