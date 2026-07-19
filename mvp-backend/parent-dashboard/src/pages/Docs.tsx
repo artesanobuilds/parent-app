@@ -27,8 +27,14 @@ function DocsHeader() {
 }
 
 function DocsNav({ current }: { current?: string }) {
+  // On phones the nav renders BELOW the article (order-2): a parent following
+  // the app's "Terms of Service" link must land on the document, not scroll
+  // past the whole docs index first. Desktop keeps the left sidebar.
   return (
-    <nav className="flex flex-col gap-500 shrink-0 md:w-56">
+    <nav className="order-2 md:order-1 mt-700 pt-500 border-t border-subtle md:mt-0 md:pt-0 md:border-0 flex flex-col gap-500 shrink-0 md:w-56">
+      <div className="text-ink-muted text-xs uppercase tracking-wide md:hidden">
+        More from the docs
+      </div>
       {SECTIONS.map((s) => (
         <div key={s.name}>
           <div className="text-ink-muted text-xs uppercase tracking-wide mb-200">{s.name}</div>
@@ -163,7 +169,7 @@ export default function Docs() {
         {isLegalSlug(slug) ? (
           <div className="flex flex-col md:flex-row gap-700">
             <DocsNav current={slug} />
-            <article className="min-w-0 flex-1">
+            <article className="order-1 md:order-2 min-w-0 flex-1">
               <LegalDoc slug={slug!} />
             </article>
           </div>
@@ -174,7 +180,7 @@ export default function Docs() {
         ) : doc ? (
           <div className="flex flex-col md:flex-row gap-700">
             <DocsNav current={doc.slug} />
-            <article className="min-w-0 flex-1">
+            <article className="order-1 md:order-2 min-w-0 flex-1">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
                 {doc.body}
               </ReactMarkdown>
