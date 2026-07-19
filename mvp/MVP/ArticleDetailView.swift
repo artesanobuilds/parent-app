@@ -7,6 +7,7 @@ struct ArticleDetailView: View {
     @EnvironmentObject private var configuration: ServerConfiguration
     @State private var article: APIArticle?
     @State private var isLoading = true
+    @State private var saveError: String?
 
     var body: some View {
         Group {
@@ -26,10 +27,29 @@ struct ArticleDetailView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(Color.bgCanvas, for: .navigationBar)
                 .toolbarBackground(.visible, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        let saved = contentVM.isSaved(itemType: "article", itemRef: articleId)
+                        Button {
+                            contentVM.toggleSaved(itemType: "article", itemRef: articleId,
+                                                  surface: "article_detail") { saveError = $0 }
+                        } label: {
+                            Image(systemName: saved ? "bookmark.fill" : "bookmark")
+                                .foregroundColor(saved ? .accentDefault : .inkPrimary)
+                        }
+                        .accessibilityLabel(saved ? "Saved — tap to remove" : "Save article")
+                    }
+                }
+                .alert("Something went wrong",
+                       isPresented: Binding(get: { saveError != nil },
+                                            set: { if !$0 { saveError = nil } })) {
+                    Button("OK") { saveError = nil }
+                } message: { Text(saveError ?? "") }
             } else {
                 notFound
             }
         }
+        .task { await contentVM.loadSavedRefs() }
         .task {
             Analytics.capture("content_opened", ["type": "article"])
             if let url = configuration.baseURL {

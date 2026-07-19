@@ -183,11 +183,36 @@ def _make_child_tool(user_id: str):
 
 _agent_cache: Dict[str, Dict[str, Any]] = {}
 
+def _saved_signal_context(user_name: str) -> str:
+    """Revealed preference: what this parent actually SAVES (vs the goals they
+    typed at onboarding). Appended to the profile context so the existing
+    cache-on-profile-string invalidation rebuilds the agent when saves change.
+    Read-time only — never written into the editable profile."""
+    try:
+        from app.server import storage_backend
+        signal = storage_backend.saved_signal(user_name)
+    except Exception:
+        return ""
+    if not signal["top_tags"] and not signal["recent_titles"]:
+        return ""
+    lines = ["", "What they save (revealed interest - weigh alongside stated goals):"]
+    if signal["top_tags"]:
+        lines.append("Recurring topics: " + ", ".join(
+            f"{tag} (x{count})" for tag, count in signal["top_tags"]
+        ))
+    if signal["recent_titles"]:
+        lines.append("Recently saved: " + "; ".join(signal["recent_titles"]))
+    return "\n".join(lines)
+
+
 def get_agent(user_name: str = "0"):
     """Return a cached agent executor personalized to the given user name."""
     raw_profile = profiling_service.get_family_profile(user_name)
     pruned_profile = _prune_empty(raw_profile)
     profile_context = json.dumps(pruned_profile, ensure_ascii=False, indent=2) if pruned_profile else None
+    saved_context = _saved_signal_context(user_name)
+    if saved_context:
+        profile_context = (profile_context or "") + saved_context
 
     cached = _agent_cache.get(user_name)
     if cached and cached.get("profile") == profile_context:

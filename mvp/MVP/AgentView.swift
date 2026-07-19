@@ -18,6 +18,40 @@ struct AgentView: View {
     /// by withContentNavigationDestinations() render them.
     @State private var navPath = NavigationPath()
 
+    /// Message ids whose reply was saved this session (fills the bookmark).
+    @State private var savedReplyIds: Set<UUID> = []
+
+    private var lastAssistantMessage: ChatMessage? {
+        viewModel.messages.last(where: {
+            $0.role == .assistant && !$0.content.isEmpty && !$0.isStreaming
+        })
+    }
+
+    private var lastReplySaved: Bool {
+        lastAssistantMessage.map { savedReplyIds.contains($0.id) } ?? false
+    }
+
+    /// Save Coach's most recent reply. The snapshot IS the copy — coach chat
+    /// has no durable server row — so the body ships with the save, keyed by
+    /// the client message id (the /feedback convention).
+    private func saveLastReply() {
+        guard let message = lastAssistantMessage,
+              let baseURL = configuration.baseURL else { return }
+        savedReplyIds.insert(message.id)   // optimistic
+        Task {
+            do {
+                try await SavedService.save(
+                    itemType: "coach_reply", itemRef: message.id.uuidString,
+                    body: message.content, surface: "coach",
+                    userID: viewModel.currentUserID, baseURL: baseURL
+                )
+            } catch {
+                savedReplyIds.remove(message.id)
+                viewModel.errorMessage = "Couldn't save that reply. Try again."
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack(path: $navPath) {
             VStack(spacing: 0) {
@@ -84,14 +118,16 @@ struct AgentView: View {
                                 .contentShape(Rectangle())
                         }
                         Button {
-                            // Bookmark placeholder
+                            saveLastReply()
                         } label: {
-                            Image(systemName: "bookmark")
+                            Image(systemName: lastReplySaved ? "bookmark.fill" : "bookmark")
                                 .font(.system(size: 17, weight: .medium))
-                                .foregroundColor(.inkPrimary)
+                                .foregroundColor(lastReplySaved ? .accentDefault : .inkPrimary)
                                 .frame(width: 44, height: 44)
                                 .contentShape(Rectangle())
                         }
+                        .disabled(lastAssistantMessage == nil)
+                        .accessibilityLabel(lastReplySaved ? "Reply saved" : "Save Coach's last reply")
                     }
                 }
             }

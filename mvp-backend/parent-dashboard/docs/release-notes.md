@@ -10,6 +10,17 @@ Every update we ship, newest first — what changed and how to find it. Features
 *app update* arrive on your phone through TestFlight; everything else is live the moment
 it's listed here.
 
+## July 19, 2026 — the Saved tab
+
+**Save anything for later** *(app update 1.72)* — a new **Saved** tab (the bookmark icon in
+the bottom bar) collects everything you bookmark across the app: tap the bookmark on any
+**library article** or **community post**, or the bookmark in the **Coach** chat to keep
+Coach's last reply. Saved coach replies expand right in the list — no digging back through
+the conversation. Your Plan-tab shortlist shows there too, so one place holds everything
+you're coming back to. Swipe to unsave. What you save also quietly helps Coach understand
+what you actually care about — that's covered in the updated
+[Privacy Policy](/dashboard/docs/privacy-policy).
+
 ## July 19, 2026
 
 **Message other parents** *(app update 1.71)* — MVP now has simple direct messages, so you

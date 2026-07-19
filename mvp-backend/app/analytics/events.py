@@ -49,6 +49,9 @@ EVENTS: dict[str, set[str]] = {
     "dm_message_sent": set(),
     "dm_blocked": set(),
     "dm_reported": set(),
+    # Saved tab (client) — item_type + surface enums only, never titles/content.
+    "item_saved": {"item_type", "surface"},
+    "item_unsaved": {"item_type", "surface"},
     # Ingest flywheel (Phase 5): every confirm/correct on an extracted item is
     # a labeled example — the corrected/confirmed ratio IS the corpus metric.
     "ingest_uploaded": {"kind"},                     # text | image

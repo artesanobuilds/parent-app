@@ -17,6 +17,64 @@ final class ContentViewModel: ObservableObject {
     /// Cache for full article content (keyed by article id).
     private var articleCache: [String: APIArticle] = [:]
 
+    // MARK: - Saved refs (bookmark state, fetched ONCE per surface — N+1 killer)
+
+    @Published var savedArticleRefs: Set<String> = []
+    @Published var savedPostRefs: Set<String> = []
+    private var savedRefsLoaded = false
+
+    func loadSavedRefs(force: Bool = false) async {
+        guard let baseURL, !userId.isEmpty, force || !savedRefsLoaded else { return }
+        savedRefsLoaded = true
+        if let refs = try? await SavedService.refs(itemType: "article", userID: userId, baseURL: baseURL) {
+            savedArticleRefs = refs
+        }
+        if let refs = try? await SavedService.refs(itemType: "community_post", userID: userId, baseURL: baseURL) {
+            savedPostRefs = refs
+        }
+    }
+
+    /// Toggle a bookmark with optimistic UI; on failure the state reverts and
+    /// the caller's error binding is set (user-state writes never fail silent).
+    func toggleSaved(itemType: String, itemRef: String, surface: String,
+                     onError: @escaping (String) -> Void) {
+        guard let baseURL, !userId.isEmpty else { return }
+        let wasSaved = isSaved(itemType: itemType, itemRef: itemRef)
+        setSavedLocal(itemType: itemType, itemRef: itemRef, saved: !wasSaved)
+        Task {
+            do {
+                if wasSaved {
+                    try await SavedService.unsave(itemType: itemType, itemRef: itemRef,
+                                                  surface: surface, userID: userId, baseURL: baseURL)
+                } else {
+                    try await SavedService.save(itemType: itemType, itemRef: itemRef,
+                                                surface: surface, userID: userId, baseURL: baseURL)
+                }
+            } catch {
+                setSavedLocal(itemType: itemType, itemRef: itemRef, saved: wasSaved)
+                onError(wasSaved ? "Couldn't remove that save. Try again."
+                                 : "Couldn't save that. Try again.")
+            }
+        }
+    }
+
+    func isSaved(itemType: String, itemRef: String) -> Bool {
+        itemType == "article" ? savedArticleRefs.contains(itemRef)
+                              : savedPostRefs.contains(itemRef)
+    }
+
+    func noteUnsaved(itemType: String, itemRef: String) {
+        setSavedLocal(itemType: itemType, itemRef: itemRef, saved: false)
+    }
+
+    private func setSavedLocal(itemType: String, itemRef: String, saved: Bool) {
+        if itemType == "article" {
+            if saved { savedArticleRefs.insert(itemRef) } else { savedArticleRefs.remove(itemRef) }
+        } else if itemType == "community_post" {
+            if saved { savedPostRefs.insert(itemRef) } else { savedPostRefs.remove(itemRef) }
+        }
+    }
+
     // MARK: - Load All Content
 
     func loadAllContent(baseURL: URL) async {

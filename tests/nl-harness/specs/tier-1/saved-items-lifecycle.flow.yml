@@ -1,0 +1,49 @@
+spec:
+  name: saved-items-lifecycle
+  tier: 1
+  modules: [saved, content, auth]
+  intent: >
+    The Saved tab's contract: a parent bookmarks an article, a community post,
+    and a coach reply; the refs endpoint drives bookmark state; unsave is soft
+    (re-saving revives with a bumped count); the merged list carries denormalized
+    snapshots that survive content changes; and account deletion takes the saved
+    items with it. Saves double as the coach's revealed-preference signal, so
+    integrity here feeds personalization quality too.
+
+  personas:
+    parent:
+      preset: new-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "Content library seeded (>=1 article via GET /content/articles)"
+
+  invariants:
+    - "Saving an article snapshots title/tags SERVER-side (client sends only the ref)"
+    - "coach_reply saves require a body (the snapshot is the only copy)"
+    - "GET /saved/refs returns active refs only; unsave removes, re-save restores"
+    - "Re-saving bumps save_count (revive, not duplicate)"
+    - "GET /saved lists newest first with origin tags"
+    - "Unknown article ref 404s; unknown item_type 400s; anonymous 401s"
+    - "DELETE /family removes the parent's saved items"
+
+  boundary_contracts:
+    - endpoint: POST /saved
+      as: parent
+      status: 200
+      response_includes: [id, item_type, item_ref, title, save_count]
+
+    - endpoint: GET /saved
+      as: parent
+      status: 200
+      response_includes: [items]
+
+    - endpoint: GET /saved/refs
+      as: parent
+      status: 200
+      response_includes: [refs]
+
+    - endpoint: DELETE /saved
+      as: parent
+      status: 200
+      response_includes: [unsaved]

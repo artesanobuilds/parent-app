@@ -7,6 +7,7 @@ struct CommunityPostDetailView: View {
     @State private var isSendingReply = false
     // Set when the reader taps Message on an author row — presents the thread.
     @State private var dmConversation: DMConversation?
+    @State private var saveError: String?
 
     private var post: APICommunityPost? {
         contentVM.postData(postId)
@@ -37,6 +38,25 @@ struct CommunityPostDetailView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(Color.bgCanvas, for: .navigationBar)
                 .toolbarBackground(.visible, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        let saved = contentVM.isSaved(itemType: "community_post", itemRef: postId)
+                        Button {
+                            contentVM.toggleSaved(itemType: "community_post", itemRef: postId,
+                                                  surface: "post_detail") { saveError = $0 }
+                        } label: {
+                            Image(systemName: saved ? "bookmark.fill" : "bookmark")
+                                .foregroundColor(saved ? .accentDefault : .inkPrimary)
+                        }
+                        .accessibilityLabel(saved ? "Saved — tap to remove" : "Save post")
+                    }
+                }
+                .alert("Something went wrong",
+                       isPresented: Binding(get: { saveError != nil },
+                                            set: { if !$0 { saveError = nil } })) {
+                    Button("OK") { saveError = nil }
+                } message: { Text(saveError ?? "") }
+                .task { await contentVM.loadSavedRefs() }
                 .task {
                     Analytics.capture("content_opened", ["type": "community_post"])
                     if let url = contentVM.baseURL {

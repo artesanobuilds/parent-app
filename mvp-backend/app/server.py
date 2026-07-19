@@ -1186,6 +1186,97 @@ def attach_kid_avatar(kid_name: str, req: AvatarAttachRequest,
     return _attach_avatar(user_id, req.key, kid_name=kid_name)
 
 
+# ── Saved items (the Saved tab) ──────────────────────────────────────
+#
+# Parent surface — NO _require_consent (that gate is kid-companion-specific).
+# Content saves are denormalized SERVER-side from the content tables (the
+# snapshot survives CMS edits/deletes and the client can't spoof titles);
+# coach replies carry their body from the client because the snapshot is the
+# only copy (coach chat has no durable server row). Activity saves are a
+# read-time projection of the Plan shortlist — never materialized.
+
+SAVED_ITEM_TYPES = ("article", "community_post", "coach_reply")
+
+
+class SaveItemRequest(BaseModel):
+    item_type: str
+    item_ref: str
+    body: Optional[str] = None      # coach_reply only — the snapshot itself
+    title: Optional[str] = None     # coach_reply optional label
+    kid_name: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None   # {surface, position_in_list, ...}
+
+
+@app.post("/saved")
+def save_item(req: SaveItemRequest, user_id: str = Depends(current_user)):
+    if req.item_type not in SAVED_ITEM_TYPES:
+        raise HTTPException(status_code=400, detail="Unknown item_type")
+    title, snippet, body, tags, source = "", "", "", [], {}
+    if req.item_type == "article":
+        article = content_service.get_article(req.item_ref)
+        if article is None:
+            raise HTTPException(status_code=404, detail="Unknown article")
+        title = article.get("title") or ""
+        snippet = article.get("subtitle") or article.get("summary") or ""
+        tags = list(article.get("tags") or []) + [article.get("category") or ""]
+        source = {"category": article.get("category")}
+    elif req.item_type == "community_post":
+        post = content_service.get_community_post(req.item_ref)
+        if post is None:
+            raise HTTPException(status_code=404, detail="Unknown post")
+        title = post.get("title") or ""
+        snippet = post.get("preview") or ""
+        tags = [post.get("category") or ""]
+        source = {"category": post.get("category")}
+    else:  # coach_reply — client-held snapshot (LangGraph memory is ephemeral)
+        body = (req.body or "").strip()
+        if not body:
+            raise HTTPException(status_code=400, detail="coach_reply needs a body")
+        body = body[:8000]
+        title = (req.title or body).strip()[:80]
+        snippet = body[:200]
+        source = {"agent": "coach"}
+    saved = storage_backend.save_item(
+        user_id=user_id, item_type=req.item_type, item_ref=req.item_ref,
+        title=title, snippet=snippet, body=body, source=source,
+        topic_tags=[t for t in tags if t], kid_name=req.kid_name,
+        context=req.context,
+    )
+    return saved
+
+
+@app.delete("/saved")
+def unsave_item(item_type: str, item_ref: str, user_id: str = Depends(current_user)):
+    """Soft unsave BY REF (no row id in the path) — the toggle never needs an
+    id, and the unsave timestamp is kept as signal."""
+    return {"unsaved": storage_backend.unsave_item(
+        user_id=user_id, item_type=item_type, item_ref=item_ref
+    )}
+
+
+@app.get("/saved")
+def list_saved(item_type: Optional[str] = None, limit: int = 100,
+               user_id: str = Depends(current_user)):
+    """Merged newest-first list: saved_items UNION the Plan shortlist
+    projection (origin 'plan' — unsaving those is a status change in Plan)."""
+    items = [
+        {**item, "origin": "saved"}
+        for item in storage_backend.list_saved(
+            user_id, item_type=item_type, limit=min(max(limit, 1), 200)
+        )
+    ]
+    if item_type in (None, "activity"):
+        items += storage_backend.saved_activity_projection(user_id)
+    items.sort(key=lambda i: i.get("saved_at") or "", reverse=True)
+    return {"items": items}
+
+
+@app.get("/saved/refs")
+def saved_refs(item_type: str, user_id: str = Depends(current_user)):
+    """The N+1 killer: one call per surface, bookmark states render locally."""
+    return {"refs": storage_backend.saved_refs(user_id, item_type)}
+
+
 # ── Direct messages (parent-to-parent) ───────────────────────────────
 #
 # Simple v1: member directory + one canonical conversation per pair, REST +

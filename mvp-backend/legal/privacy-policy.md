@@ -1,6 +1,6 @@
 ---
 title: Privacy Policy
-version: 1.1
+version: 1.2
 effective_date: 2026-07-19
 ---
 
@@ -41,6 +41,12 @@ messages are stored so both of you can read the thread, and they're deleted when
 deletes your account (both sides of the thread go). You can report or block any conversation at
 any time. So other parents can find you, **your display name is visible to other parents in the
 beta** — in the community and in the message directory.
+
+**What you save.** The Saved tab keeps the articles, community posts, and coach replies you
+bookmark. We also use your saves as a signal of what you actually care about — the topics you
+keep saving help your coach tailor its advice, alongside what you told us at onboarding.
+Unsaving something is part of that signal too. Saves are deleted with your account like
+everything else.
 
 **Photos of flyers and emails you share.** When you snap a camp flyer or paste an email, we
 extract the useful details (dates, prices, deadlines). The extracted details are kept; **the image

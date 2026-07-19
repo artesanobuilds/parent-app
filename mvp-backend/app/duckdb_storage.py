@@ -255,6 +255,38 @@ class DuckDBStorage(StorageBackend):
         ON dm_messages (conversation_id, created_at);
     """
 
+    # Saved items (the Saved tab). DENORMALIZED snapshots on purpose -- a save
+    # must survive a CMS edit or a deleted post, and for coach replies the
+    # snapshot is the ONLY copy (coach chat has no durable server row). SOFT
+    # delete via unsaved_at -- the unsave is itself a profiling signal -- and
+    # deliberately NO unique constraint: re-saving bumps save_count on the
+    # existing row (a unique index + soft delete would block re-save).
+    SAVED_DDL = """
+    CREATE TABLE IF NOT EXISTS saved_items (
+        id           TEXT PRIMARY KEY,
+        user_id      TEXT NOT NULL,
+        item_type    TEXT NOT NULL,
+        item_ref     TEXT NOT NULL,
+        title        TEXT NOT NULL DEFAULT '',
+        snippet      TEXT DEFAULT '',
+        body         TEXT DEFAULT '',
+        source_json  JSON,
+        topic_tags   JSON,
+        kid_name     TEXT,
+        context_json JSON,
+        save_count   INTEGER DEFAULT 1,
+        saved_at     TIMESTAMPTZ DEFAULT now(),
+        unsaved_at   TIMESTAMPTZ,
+        created_at   TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_saved_items_user
+        ON saved_items (user_id, unsaved_at, saved_at);
+
+    CREATE INDEX IF NOT EXISTS idx_saved_items_lookup
+        ON saved_items (user_id, item_type, item_ref);
+    """
+
     # Family Companion (kid agent + handoff). Real tables, not blobs:
     # configs are versioned with content-hash; messages are append-only;
     # credentials and moderation events get their own rows.
@@ -894,6 +926,8 @@ class DuckDBStorage(StorageBackend):
         # Parent-to-parent DMs (user state).
         ("dm_conversations", "dm_conversations.parquet"),
         ("dm_messages", "dm_messages.parquet"),
+        # Saved items (user state).
+        ("saved_items", "saved_items.parquet"),
     ]
 
     def __init__(self, db_path: Path | str | None = None) -> None:
@@ -930,6 +964,10 @@ class DuckDBStorage(StorageBackend):
             if stmt:
                 self._con.execute(stmt + ";")
         for stmt in self.DM_DDL.strip().split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                self._con.execute(stmt + ";")
+        for stmt in self.SAVED_DDL.strip().split(";"):
             stmt = stmt.strip()
             if stmt:
                 self._con.execute(stmt + ";")
@@ -2254,6 +2292,7 @@ class DuckDBStorage(StorageBackend):
                 # Legal ACCEPTANCES are user audit state and go with the family.
                 # legal_documents (the policies themselves) deliberately survive.
                 "legal_acceptances",
+                "saved_items",
             ]:
                 pre = self._con.execute(
                     f"SELECT count(*) FROM {table} WHERE user_id = ?",
@@ -2807,6 +2846,158 @@ class DuckDBStorage(StorageBackend):
             f"UPDATE dm_conversations SET {col} = ? WHERE id = ?",
             [blocked, conversation_id],
         )
+
+    # ── Saved items ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _saved_row(row) -> Dict[str, Any]:
+        return {
+            "id": row[0],
+            "item_type": row[1],
+            "item_ref": row[2],
+            "title": row[3],
+            "snippet": row[4] or "",
+            "body": row[5] or "",
+            "source": json.loads(row[6]) if row[6] else {},
+            "topic_tags": json.loads(row[7]) if row[7] else [],
+            "kid_name": row[8],
+            "save_count": int(row[9] or 1),
+            "saved_at": row[10].isoformat() if row[10] else None,
+        }
+
+    _SAVED_COLS = (
+        "id, item_type, item_ref, title, snippet, body, source_json, "
+        "topic_tags, kid_name, save_count, saved_at"
+    )
+
+    def save_item(self, *, user_id: str, item_type: str, item_ref: str,
+                  title: str, snippet: str = "", body: str = "",
+                  source: Optional[Dict[str, Any]] = None,
+                  topic_tags: Optional[List[str]] = None,
+                  kid_name: Optional[str] = None,
+                  context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Idempotent save / re-save. Re-saving revives the soft-deleted row and
+        bumps save_count (re-saving the same thing = unresolved — signal)."""
+        import uuid
+        updated = self._con.execute(
+            """
+            UPDATE saved_items
+            SET unsaved_at = NULL, saved_at = now(), save_count = save_count + 1,
+                title = ?, snippet = ?, body = ?
+            WHERE user_id = ? AND item_type = ? AND item_ref = ?
+            RETURNING id
+            """,
+            [title, snippet, body, user_id, item_type, item_ref],
+        ).fetchone()
+        if updated is None:
+            self._con.execute(
+                """
+                INSERT INTO saved_items (
+                    id, user_id, item_type, item_ref, title, snippet, body,
+                    source_json, topic_tags, kid_name, context_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    f"sv-{uuid.uuid4().hex[:12]}", user_id, item_type, item_ref,
+                    title, snippet, body,
+                    json.dumps(source or {}), json.dumps(topic_tags or []),
+                    kid_name, json.dumps(context or {}),
+                ],
+            )
+        row = self._con.execute(
+            f"SELECT {self._SAVED_COLS} FROM saved_items "
+            "WHERE user_id = ? AND item_type = ? AND item_ref = ?",
+            [user_id, item_type, item_ref],
+        ).fetchone()
+        return self._saved_row(row)
+
+    def unsave_item(self, *, user_id: str, item_type: str, item_ref: str) -> bool:
+        """SOFT delete — the unsave timestamp is itself a signal."""
+        row = self._con.execute(
+            """
+            UPDATE saved_items SET unsaved_at = now()
+            WHERE user_id = ? AND item_type = ? AND item_ref = ? AND unsaved_at IS NULL
+            RETURNING id
+            """,
+            [user_id, item_type, item_ref],
+        ).fetchone()
+        return row is not None
+
+    def list_saved(self, user_id: str, *, item_type: Optional[str] = None,
+                   limit: int = 100) -> List[Dict[str, Any]]:
+        if item_type:
+            rows = self._con.execute(
+                f"SELECT {self._SAVED_COLS} FROM saved_items "
+                "WHERE user_id = ? AND unsaved_at IS NULL AND item_type = ? "
+                "ORDER BY saved_at DESC LIMIT ?",
+                [user_id, item_type, limit],
+            ).fetchall()
+        else:
+            rows = self._con.execute(
+                f"SELECT {self._SAVED_COLS} FROM saved_items "
+                "WHERE user_id = ? AND unsaved_at IS NULL "
+                "ORDER BY saved_at DESC LIMIT ?",
+                [user_id, limit],
+            ).fetchall()
+        return [self._saved_row(r) for r in rows]
+
+    def saved_refs(self, user_id: str, item_type: str) -> List[str]:
+        """Active refs only — the client fetches this ONCE per surface and
+        renders bookmark states locally (a per-card is_saved call is N+1)."""
+        rows = self._con.execute(
+            "SELECT item_ref FROM saved_items "
+            "WHERE user_id = ? AND item_type = ? AND unsaved_at IS NULL",
+            [user_id, item_type],
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def saved_signal(self, user_id: str, *, top_tags: int = 5,
+                     recent_titles: int = 5) -> Dict[str, Any]:
+        """Revealed-preference digest for the coach prompt: what this parent
+        ACTUALLY saves vs what they said at onboarding. Read-time only — never
+        written into the editable profile."""
+        tag_rows = self._con.execute(
+            "SELECT topic_tags FROM saved_items "
+            "WHERE user_id = ? AND unsaved_at IS NULL",
+            [user_id],
+        ).fetchall()
+        counts: Dict[str, int] = {}
+        for (raw,) in tag_rows:
+            for tag in (json.loads(raw) if raw else []):
+                counts[tag] = counts.get(tag, 0) + 1
+        top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:top_tags]
+        titles = [
+            r[0] for r in self._con.execute(
+                "SELECT title FROM saved_items "
+                "WHERE user_id = ? AND unsaved_at IS NULL "
+                "ORDER BY saved_at DESC LIMIT ?",
+                [user_id, recent_titles],
+            ).fetchall()
+        ]
+        return {"top_tags": top, "recent_titles": titles}
+
+    def saved_activity_projection(self, user_id: str) -> List[Dict[str, Any]]:
+        """Read-only projection of shortlisted activities for the merged Saved
+        list. NEVER materialized into saved_items — dual-writing guarantees
+        drift; unsaving an activity is a STATUS change in the Plan tab."""
+        rows = self._con.execute(
+            "SELECT id, name, status, activity_type, updated_at "
+            "FROM tracked_activities "
+            "WHERE user_id = ? AND status IN ('exploring', 'interested') "
+            "ORDER BY updated_at DESC",
+            [user_id],
+        ).fetchall()
+        return [
+            {
+                "id": r[0], "item_type": "activity", "item_ref": r[0],
+                "title": r[1], "snippet": (r[3] or "camp").replace("_", " "),
+                "body": "", "source": {"status": r[2]}, "topic_tags": [],
+                "kid_name": None, "save_count": 1,
+                "saved_at": r[4].isoformat() if r[4] else None,
+                "origin": "plan",
+            }
+            for r in rows
+        ]
 
     # ── Daily summaries ──────────────────────────────────────────────
 

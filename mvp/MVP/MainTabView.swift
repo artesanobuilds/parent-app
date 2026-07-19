@@ -13,8 +13,12 @@ struct MainTabView: View {
     @State private var selectedTab: Tab = .home
 
     enum Tab: String {
-        case home, library, agent, circle, planning
+        case home, library, agent, circle, planning, saved
     }
+
+    // Bumped every time the Saved tab is selected, so SavedView re-fetches —
+    // a save made in Library/Coach/Circle must show without a relaunch.
+    @State private var savedRefreshToken = 0
 
     init(username: String = "") {
         self.username = username
@@ -73,6 +77,10 @@ struct MainTabView: View {
                     CircleView()
                 case .planning:
                     PlanView(viewModel: planVM, cosVM: cosVM, configuration: configuration, userID: username)
+                case .saved:
+                    SavedView(username: username, refreshToken: savedRefreshToken) {
+                        withAnimation(.hearthFast) { selectedTab = .planning }
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -87,6 +95,7 @@ struct MainTabView: View {
         .onAppear { Analytics.capture("screen_viewed", ["screen": selectedTab.rawValue]) }
         .onChange(of: selectedTab) { _, tab in
             Analytics.capture("screen_viewed", ["screen": tab.rawValue])
+            if tab == .saved { savedRefreshToken += 1 }
         }
     }
 
@@ -103,6 +112,7 @@ struct MainTabView: View {
             tabBarItem(tab: .agent, icon: "message", activeIcon: "message.fill", label: "Coach")
             tabBarItem(tab: .circle, icon: "person.2", activeIcon: "person.2.fill", label: "Circle")
             tabBarItem(tab: .planning, icon: "calendar", activeIcon: "calendar", label: "Plan")
+            tabBarItem(tab: .saved, icon: "bookmark", activeIcon: "bookmark.fill", label: "Saved")
         }
         .padding(.top, .hearth300)
         .padding(.bottom, 2)
@@ -124,13 +134,19 @@ struct MainTabView: View {
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: selectedTab == tab ? activeIcon : icon)
-                    .font(.system(size: 22, weight: .medium))
+                    .font(.system(size: 20, weight: .medium))
                     .frame(height: 26)
 
+                // Six tabs on a 375pt phone: the LABEL's Dynamic Type is capped
+                // (icons still scale, every item keeps its accessibilityLabel)
+                // and it may shrink slightly before it would ever wrap.
                 Text(label)
                     .font(.hearthLabel)
-                    .tracking(0.66)
+                    .tracking(0.4)
                     .textCase(.uppercase)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .dynamicTypeSize(...DynamicTypeSize.xLarge)
             }
             .foregroundColor(selectedTab == tab ? .accentDefault : .inkMuted)
             .frame(maxWidth: .infinity, minHeight: 56)
