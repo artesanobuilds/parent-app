@@ -219,6 +219,42 @@ class DuckDBStorage(StorageBackend):
         ON legal_acceptances (user_id, slug, accepted_at);
     """
 
+    # Parent-to-parent direct messages. Postgres-portable on purpose (ids +
+    # timestamps only, cursor pagination) -- messages ride the eventual
+    # DuckDB->Postgres migration, no dedicated store. participant_a/b are
+    # CANONICALLY ordered (a = min, b = max) so the unique index yields one
+    # conversation per pair regardless of who starts it. Inbox fields
+    # (last_message_at/preview) are denormalized on send. Per-side read stamps
+    # and block flags live on the conversation row.
+    DM_DDL = """
+    CREATE TABLE IF NOT EXISTS dm_conversations (
+        id                   TEXT PRIMARY KEY,
+        participant_a        TEXT NOT NULL,
+        participant_b        TEXT NOT NULL,
+        created_at           TIMESTAMPTZ DEFAULT now(),
+        last_message_at      TIMESTAMPTZ,
+        last_message_preview TEXT DEFAULT '',
+        a_last_read_at       TIMESTAMPTZ,
+        b_last_read_at       TIMESTAMPTZ,
+        a_blocked            BOOLEAN DEFAULT false,
+        b_blocked            BOOLEAN DEFAULT false
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_conversations_pair
+        ON dm_conversations (participant_a, participant_b);
+
+    CREATE TABLE IF NOT EXISTS dm_messages (
+        id              TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        sender_id       TEXT NOT NULL,
+        body            TEXT NOT NULL,
+        created_at      TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_dm_messages_conversation
+        ON dm_messages (conversation_id, created_at);
+    """
+
     # Family Companion (kid agent + handoff). Real tables, not blobs:
     # configs are versioned with content-hash; messages are append-only;
     # credentials and moderation events get their own rows.
@@ -855,6 +891,9 @@ class DuckDBStorage(StorageBackend):
         # (user audit state). Both excluded from the image in .dockerignore.
         ("legal_documents", "legal_documents.parquet"),
         ("legal_acceptances", "legal_acceptances.parquet"),
+        # Parent-to-parent DMs (user state).
+        ("dm_conversations", "dm_conversations.parquet"),
+        ("dm_messages", "dm_messages.parquet"),
     ]
 
     def __init__(self, db_path: Path | str | None = None) -> None:
@@ -887,6 +926,10 @@ class DuckDBStorage(StorageBackend):
             if stmt:
                 self._con.execute(stmt + ";")
         for stmt in self.LEGAL_DDL.strip().split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                self._con.execute(stmt + ";")
+        for stmt in self.DM_DDL.strip().split(";"):
             stmt = stmt.strip()
             if stmt:
                 self._con.execute(stmt + ";")
@@ -1096,28 +1139,25 @@ class DuckDBStorage(StorageBackend):
         }
 
     def get_community_posts(self, category: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+        # user_id is included so signed-in readers get the author's DM peer
+        # handle -- the SERVER strips it for anonymous callers (optional_user).
         if category:
             rows = self._con.execute(
-                "SELECT id, category, initials, name, title, preview "
+                "SELECT id, category, initials, name, title, preview, user_id "
                 "FROM community_posts WHERE category = ? ORDER BY id LIMIT ?",
                 [category, limit],
             ).fetchall()
-            posts = [
-                {"id": r[0], "category": r[1], "initials": r[2], "name": r[3],
-                 "title": r[4], "preview": r[5]}
-                for r in rows
-            ]
         else:
             rows = self._con.execute(
-                "SELECT id, category, initials, name, title, preview "
+                "SELECT id, category, initials, name, title, preview, user_id "
                 "FROM community_posts ORDER BY id LIMIT ?",
                 [limit],
             ).fetchall()
-            posts = [
-                {"id": r[0], "category": r[1], "initials": r[2], "name": r[3],
-                 "title": r[4], "preview": r[5]}
-                for r in rows
-            ]
+        posts = [
+            {"id": r[0], "category": r[1], "initials": r[2], "name": r[3],
+             "title": r[4], "preview": r[5], "user_id": r[6]}
+            for r in rows
+        ]
         # Add reply counts
         post_ids = [p["id"] for p in posts]
         if post_ids:
@@ -2224,6 +2264,33 @@ class DuckDBStorage(StorageBackend):
                 )
                 deleted[table] = pre
 
+            # DMs key on participant columns, not user_id. Deleting a family
+            # removes every conversation they participate in — BOTH sides (my
+            # messages are my data; the peer loses the thread — documented in
+            # the privacy policy).
+            dm_conv_ids = [
+                r[0] for r in self._con.execute(
+                    "SELECT id FROM dm_conversations "
+                    "WHERE participant_a = ? OR participant_b = ?",
+                    [user_id, user_id],
+                ).fetchall()
+            ]
+            dm_msgs = 0
+            for conv_id in dm_conv_ids:
+                dm_msgs += self._con.execute(
+                    "SELECT count(*) FROM dm_messages WHERE conversation_id = ?",
+                    [conv_id],
+                ).fetchone()[0]
+                self._con.execute(
+                    "DELETE FROM dm_messages WHERE conversation_id = ?", [conv_id]
+                )
+                self._con.execute(
+                    "DELETE FROM dm_conversations WHERE id = ?", [conv_id]
+                )
+            if dm_conv_ids:
+                deleted["dm_conversations"] = len(dm_conv_ids)
+                deleted["dm_messages"] = dm_msgs
+
             self.write_audit_event(
                 user_id=user_id, actor=actor,
                 action="family_deleted", details={"counts": deleted},
@@ -2587,6 +2654,159 @@ class DuckDBStorage(StorageBackend):
             "version": row[0],
             "accepted_at": row[1].isoformat() if row[1] else None,
         }
+
+    # ── Direct messages (parent-to-parent) ───────────────────────────
+
+    def list_account_names(self) -> Dict[str, Optional[str]]:
+        """user_id → display_name for every account row (the DM directory's
+        raw material — the server layer resolves fallbacks + filters)."""
+        rows = self._con.execute(
+            "SELECT user_id, display_name FROM user_accounts"
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    _DM_CONV_COLS = (
+        "id, participant_a, participant_b, created_at, last_message_at, "
+        "last_message_preview, a_last_read_at, b_last_read_at, a_blocked, b_blocked"
+    )
+
+    @staticmethod
+    def _dm_conv_row(row) -> Dict[str, Any]:
+        return {
+            "id": row[0],
+            "participant_a": row[1],
+            "participant_b": row[2],
+            "created_at": row[3].isoformat() if row[3] else None,
+            "last_message_at": row[4].isoformat() if row[4] else None,
+            "last_message_preview": row[5] or "",
+            "a_last_read_at": row[6].isoformat() if row[6] else None,
+            "b_last_read_at": row[7].isoformat() if row[7] else None,
+            "a_blocked": bool(row[8]),
+            "b_blocked": bool(row[9]),
+        }
+
+    @staticmethod
+    def _dm_pair(user_id: str, peer_id: str) -> tuple:
+        """Canonical ordering — one conversation per pair no matter who starts."""
+        return (user_id, peer_id) if user_id < peer_id else (peer_id, user_id)
+
+    def get_or_create_dm_conversation(self, user_id: str, peer_id: str) -> Dict[str, Any]:
+        import uuid
+        a, b = self._dm_pair(user_id, peer_id)
+        row = self._con.execute(
+            f"SELECT {self._DM_CONV_COLS} FROM dm_conversations "
+            "WHERE participant_a = ? AND participant_b = ?",
+            [a, b],
+        ).fetchone()
+        if row:
+            return self._dm_conv_row(row)
+        conv_id = f"dm-{uuid.uuid4().hex[:12]}"
+        self._con.execute(
+            "INSERT INTO dm_conversations (id, participant_a, participant_b) VALUES (?, ?, ?)",
+            [conv_id, a, b],
+        )
+        return self.get_or_create_dm_conversation(user_id, peer_id)
+
+    def get_dm_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {self._DM_CONV_COLS} FROM dm_conversations WHERE id = ?",
+            [conversation_id],
+        ).fetchone()
+        return self._dm_conv_row(row) if row else None
+
+    def list_dm_conversations(self, user_id: str) -> List[Dict[str, Any]]:
+        """The inbox: this user's conversations, newest activity first, each
+        annotated with peer_id + unread count (peer messages after my read
+        stamp). Per-row count query is fine at beta scale."""
+        rows = self._con.execute(
+            f"SELECT {self._DM_CONV_COLS} FROM dm_conversations "
+            "WHERE participant_a = ? OR participant_b = ? "
+            "ORDER BY COALESCE(last_message_at, created_at) DESC",
+            [user_id, user_id],
+        ).fetchall()
+        out = []
+        for row in rows:
+            conv = self._dm_conv_row(row)
+            i_am_a = conv["participant_a"] == user_id
+            conv["peer_id"] = conv["participant_b"] if i_am_a else conv["participant_a"]
+            conv["i_blocked"] = conv["a_blocked"] if i_am_a else conv["b_blocked"]
+            my_read = conv["a_last_read_at"] if i_am_a else conv["b_last_read_at"]
+            unread = self._con.execute(
+                "SELECT count(*) FROM dm_messages "
+                "WHERE conversation_id = ? AND sender_id != ? "
+                "AND created_at > COALESCE(CAST(? AS TIMESTAMPTZ), TIMESTAMPTZ '1970-01-01 00:00:00+00')",
+                [conv["id"], user_id, my_read],
+            ).fetchone()
+            conv["unread_count"] = int(unread[0]) if unread else 0
+            out.append(conv)
+        return out
+
+    def add_dm_message(self, conversation_id: str, sender_id: str, body: str) -> Dict[str, Any]:
+        import uuid
+        msg_id = f"dmm-{uuid.uuid4().hex[:12]}"
+        preview = body[:120]
+        with self._con.transaction():
+            self._con.execute(
+                "INSERT INTO dm_messages (id, conversation_id, sender_id, body) VALUES (?, ?, ?, ?)",
+                [msg_id, conversation_id, sender_id, body],
+            )
+            self._con.execute(
+                "UPDATE dm_conversations SET last_message_at = now(), last_message_preview = ? "
+                "WHERE id = ?",
+                [preview, conversation_id],
+            )
+        row = self._con.execute(
+            "SELECT id, conversation_id, sender_id, body, created_at "
+            "FROM dm_messages WHERE id = ?",
+            [msg_id],
+        ).fetchone()
+        return {
+            "id": row[0], "conversation_id": row[1], "sender_id": row[2],
+            "body": row[3], "created_at": row[4].isoformat() if row[4] else None,
+        }
+
+    def list_dm_messages(self, conversation_id: str, *, before: Optional[str] = None,
+                         limit: int = 50) -> List[Dict[str, Any]]:
+        """Newest-first page. `before` = the created_at cursor of the oldest
+        already-loaded message (ISO string)."""
+        if before:
+            rows = self._con.execute(
+                "SELECT id, conversation_id, sender_id, body, created_at FROM dm_messages "
+                "WHERE conversation_id = ? AND created_at < CAST(? AS TIMESTAMPTZ) "
+                "ORDER BY created_at DESC, id DESC LIMIT ?",
+                [conversation_id, before, limit],
+            ).fetchall()
+        else:
+            rows = self._con.execute(
+                "SELECT id, conversation_id, sender_id, body, created_at FROM dm_messages "
+                "WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+                [conversation_id, limit],
+            ).fetchall()
+        return [
+            {"id": r[0], "conversation_id": r[1], "sender_id": r[2],
+             "body": r[3], "created_at": r[4].isoformat() if r[4] else None}
+            for r in rows
+        ]
+
+    def mark_dm_read(self, conversation_id: str, user_id: str) -> None:
+        conv = self.get_dm_conversation(conversation_id)
+        if not conv:
+            return
+        col = "a_last_read_at" if conv["participant_a"] == user_id else "b_last_read_at"
+        self._con.execute(
+            f"UPDATE dm_conversations SET {col} = now() WHERE id = ?",
+            [conversation_id],
+        )
+
+    def set_dm_block(self, conversation_id: str, user_id: str, blocked: bool) -> None:
+        conv = self.get_dm_conversation(conversation_id)
+        if not conv:
+            return
+        col = "a_blocked" if conv["participant_a"] == user_id else "b_blocked"
+        self._con.execute(
+            f"UPDATE dm_conversations SET {col} = ? WHERE id = ?",
+            [blocked, conversation_id],
+        )
 
     # ── Daily summaries ──────────────────────────────────────────────
 

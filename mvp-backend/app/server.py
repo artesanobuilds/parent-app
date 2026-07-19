@@ -23,7 +23,7 @@ from app import moderation
 from app import telemetry
 from app import email_smtp
 from app import summary as kid_summary
-from app.auth import current_user, authorize_user_match, issue_token as auth_issue_token
+from app.auth import current_user, optional_user, authorize_user_match, issue_token as auth_issue_token
 from app.rate_limit import enforce as rate_limit_enforce
 from app.cost_logging import CostLoggingCallbackHandler, new_workflow_id
 from app.prompt_synthesis import _age_band as _kid_age_band, synthesize as kid_synthesize
@@ -1026,23 +1026,33 @@ def create_user_community_post(req: UserPostCreateRequest, user_id: str = Depend
     return content_service.create_community_post(data)
 
 
+def _strip_author_ids(items: List[Dict[str, Any]], viewer: Optional[str]) -> List[Dict[str, Any]]:
+    """Author user_ids double as DM peer handles — signed-in parents get them
+    (the Message button needs a target); anonymous readers don't (a user_id is
+    the auth principal and has no business in a public scrape)."""
+    if viewer is not None:
+        return items
+    return [{k: v for k, v in item.items() if k != "user_id"} for item in items]
+
+
 @app.get("/content/community/{post_id}")
-def get_community_post_detail(post_id: str):
+def get_community_post_detail(post_id: str, viewer: Optional[str] = Depends(optional_user)):
     """Get a single community post with its replies."""
     post = content_service.get_community_post(post_id)
     if post is None:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"error": "Post not found"})
     replies = content_service.get_replies_for_post(post_id)
-    post["replies"] = replies
+    post["replies"] = _strip_author_ids(replies, viewer)
     post["reply_count"] = len(replies)
-    return post
+    return _strip_author_ids([post], viewer)[0]
 
 
 @app.get("/content/community/{post_id}/replies")
-def get_post_replies(post_id: str, limit: int = 100):
+def get_post_replies(post_id: str, limit: int = 100,
+                     viewer: Optional[str] = Depends(optional_user)):
     """Get replies for a community post."""
-    return content_service.get_replies_for_post(post_id, limit=limit)
+    return _strip_author_ids(content_service.get_replies_for_post(post_id, limit=limit), viewer)
 
 
 @app.post("/content/community/{post_id}/replies")
@@ -1069,9 +1079,12 @@ def create_post_reply(post_id: str, req: ReplyCreateRequest, user_id: str = Depe
 
 
 @app.get("/content/community")
-def list_community_posts(category: str | None = None, limit: int = 50):
+def list_community_posts(category: str | None = None, limit: int = 50,
+                         viewer: Optional[str] = Depends(optional_user)):
     """Return community posts, optionally filtered by category."""
-    return content_service.get_community_posts(category=category, limit=limit)
+    return _strip_author_ids(
+        content_service.get_community_posts(category=category, limit=limit), viewer
+    )
 
 
 @app.get("/content/search")
@@ -1171,6 +1184,190 @@ def attach_parent_avatar(req: AvatarAttachRequest, user_id: str = Depends(curren
 def attach_kid_avatar(kid_name: str, req: AvatarAttachRequest,
                       user_id: str = Depends(current_user)):
     return _attach_avatar(user_id, req.key, kid_name=kid_name)
+
+
+# ── Direct messages (parent-to-parent) ───────────────────────────────
+#
+# Simple v1: member directory + one canonical conversation per pair, REST +
+# client polling (no SSE), report/block as the safety model (adults, closed
+# beta — no auto-moderation), pushes via the existing APNs module. Schema is
+# Postgres-portable on purpose; messages ride the eventual store migration.
+
+DM_MAX_BODY_CHARS = 2000
+
+
+class DMStartRequest(BaseModel):
+    peer_user_id: str
+
+
+class DMSendRequest(BaseModel):
+    body: str
+
+
+class DMReportRequest(BaseModel):
+    message_id: Optional[str] = None
+    note: Optional[str] = None
+
+
+def _dm_display_name(user_id: str) -> Optional[str]:
+    """COALESCE(user_accounts.display_name, profile parent name). Reads the
+    profiling snapshot (never get_family_profile — that CREATES an empty
+    family for unknown ids)."""
+    name = storage_backend.list_account_names().get(user_id)
+    if name and name.strip():
+        return name.strip()
+    snapshot = profiling_service.export_snapshot()
+    parent = (snapshot.get(user_id) or {}).get("parent") or {}
+    pname = (parent.get("name") or "").strip()
+    return pname or None
+
+
+def _dm_initials(name: str) -> str:
+    words = name.strip().split()
+    return "".join(w[0].upper() for w in words[:2]) if words else "?"
+
+
+def _dm_conversation_or_404(conversation_id: str, user_id: str) -> Dict[str, Any]:
+    """Participant guard. 404 (not 403) for non-participants — don't confirm
+    the conversation exists (the authorize_user_match resource convention)."""
+    conv = storage_backend.get_dm_conversation(conversation_id)
+    if conv is None or user_id not in (conv["participant_a"], conv["participant_b"]):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conv
+
+
+def _dm_peer_entry(conv: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    peer_id = conv["participant_b"] if conv["participant_a"] == user_id else conv["participant_a"]
+    peer_name = _dm_display_name(peer_id) or "A parent"
+    return {"peer_id": peer_id, "peer_name": peer_name, "peer_initials": _dm_initials(peer_name)}
+
+
+@app.get("/dm/members")
+def dm_members(user_id: str = Depends(current_user)):
+    """The directory: every member with a resolvable display name, self
+    excluded. Rows with no resolvable name are skipped (test junk)."""
+    accounts = storage_backend.list_account_names()
+    snapshot = profiling_service.export_snapshot()
+    member_ids = set(accounts) | set(snapshot)
+    members = []
+    for mid in member_ids:
+        if mid == user_id:
+            continue
+        name = _dm_display_name(mid)
+        if not name:
+            continue
+        members.append({"user_id": mid, "display_name": name, "initials": _dm_initials(name)})
+    members.sort(key=lambda m: m["display_name"].lower())
+    return {"members": members}
+
+
+@app.post("/dm/conversations")
+def dm_start_conversation(req: DMStartRequest, user_id: str = Depends(current_user)):
+    """Get-or-create the canonical-pair conversation with a peer."""
+    if req.peer_user_id == user_id:
+        raise HTTPException(status_code=400, detail="You can't message yourself")
+    if _dm_display_name(req.peer_user_id) is None:
+        raise HTTPException(status_code=404, detail="Unknown member")
+    conv = storage_backend.get_or_create_dm_conversation(user_id, req.peer_user_id)
+    return {**conv, **_dm_peer_entry(conv, user_id)}
+
+
+@app.get("/dm/conversations")
+def dm_inbox(user_id: str = Depends(current_user)):
+    """The inbox, newest activity first, with peer info + unread counts."""
+    convs = storage_backend.list_dm_conversations(user_id)
+    return {
+        "conversations": [{**c, **_dm_peer_entry(c, user_id)} for c in convs],
+        "total_unread": sum(c["unread_count"] for c in convs),
+    }
+
+
+@app.get("/dm/conversations/{conversation_id}/messages")
+def dm_messages(conversation_id: str, before: Optional[str] = None, limit: int = 50,
+                user_id: str = Depends(current_user)):
+    _dm_conversation_or_404(conversation_id, user_id)
+    msgs = storage_backend.list_dm_messages(
+        conversation_id, before=before, limit=min(max(limit, 1), 100)
+    )
+    return {"messages": msgs}
+
+
+@app.post("/dm/conversations/{conversation_id}/messages")
+def dm_send(conversation_id: str, req: DMSendRequest, user_id: str = Depends(current_user)):
+    rate_limit_enforce(user_id, "message")
+    conv = _dm_conversation_or_404(conversation_id, user_id)
+    if conv["a_blocked"] or conv["b_blocked"]:
+        raise HTTPException(status_code=403, detail="This conversation is blocked")
+    body = req.body.strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty message")
+    if len(body) > DM_MAX_BODY_CHARS:
+        raise HTTPException(status_code=400, detail=f"Message too long ({DM_MAX_BODY_CHARS} max)")
+    msg = storage_backend.add_dm_message(conversation_id, user_id, body)
+    # Sender's own read stamp moves too — your outbound message isn't unread.
+    storage_backend.mark_dm_read(conversation_id, user_id)
+    # Push to the peer, fire-and-forget (the send must not block on APNs).
+    peer = _dm_peer_entry(conv, user_id)["peer_id"]
+    sender_name = _dm_display_name(user_id) or "A parent"
+    import threading
+
+    def _notify() -> None:
+        try:
+            from app import push
+            push.send_push(
+                storage=storage_backend, user_id=peer,
+                title=sender_name, body=body[:120],
+                data={"type": "dm", "conversation_id": conversation_id},
+                interruption_level="active",
+            )
+        except Exception:
+            logger.warning("[dm] push dispatch failed (non-fatal)", exc_info=True)
+
+    threading.Thread(target=_notify, daemon=True).start()
+    return msg
+
+
+@app.post("/dm/conversations/{conversation_id}/read")
+def dm_mark_read(conversation_id: str, user_id: str = Depends(current_user)):
+    _dm_conversation_or_404(conversation_id, user_id)
+    storage_backend.mark_dm_read(conversation_id, user_id)
+    return {"ok": True}
+
+
+@app.post("/dm/conversations/{conversation_id}/block")
+def dm_block(conversation_id: str, user_id: str = Depends(current_user)):
+    _dm_conversation_or_404(conversation_id, user_id)
+    storage_backend.set_dm_block(conversation_id, user_id, True)
+    return {"ok": True, "blocked": True}
+
+
+@app.post("/dm/conversations/{conversation_id}/unblock")
+def dm_unblock(conversation_id: str, user_id: str = Depends(current_user)):
+    _dm_conversation_or_404(conversation_id, user_id)
+    storage_backend.set_dm_block(conversation_id, user_id, False)
+    return {"ok": True, "blocked": False}
+
+
+@app.post("/dm/conversations/{conversation_id}/report")
+def dm_report(conversation_id: str, req: DMReportRequest,
+              user_id: str = Depends(current_user)):
+    """Report a conversation to the founder — the /debug/report email pattern,
+    with the last ~10 messages as context. The v1 safety model is report +
+    block; no auto-moderation of parent DMs."""
+    _dm_conversation_or_404(conversation_id, user_id)
+    recent = storage_backend.list_dm_messages(conversation_id, limit=10)
+    lines = [
+        f"DM REPORT from {user_id} on conversation {conversation_id}",
+        f"Reported message: {req.message_id or '(whole conversation)'}",
+        f"Note: {req.note or '(none)'}",
+        "",
+        "Recent messages (newest first):",
+    ]
+    for m in recent:
+        lines.append(f"  [{m['created_at']}] {m['sender_id']}: {m['body'][:200]}")
+    from app import email_smtp
+    email_smtp.send_email("MVP DM report", "\n".join(lines))
+    return {"ok": True}
 
 
 @app.post("/profile/seed")

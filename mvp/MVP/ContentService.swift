@@ -58,7 +58,10 @@ struct APICommunityPost: Codable, Identifiable, Hashable {
 struct APIReply: Codable, Identifiable, Hashable {
     let id: String
     let postId: String
-    let userId: String
+    // Optional: the server includes author user_ids (the DM peer handle) only
+    // for signed-in readers. Non-optional would empty the WHOLE list when the
+    // field is absent — the Codable-strictness trap.
+    let userId: String?
     let authorName: String
     let initials: String
     let body: String
@@ -100,8 +103,17 @@ enum ContentService {
         }
     }
 
-    private static func getDecoded<T: Decodable>(_ url: URL) async throws -> T {
-        let (data, response) = try await URLSession.shared.data(from: url)
+    private static func getDecoded<T: Decodable>(_ url: URL, userID: String? = nil,
+                                                 baseURL: URL? = nil) async throws -> T {
+        var request = URLRequest(url: url)
+        // Optional bearer: community reads return author user_ids (DM peer
+        // handles) only to signed-in callers, so attach auth when we have it.
+        if let userID, !userID.isEmpty, let baseURL {
+            for (k, v) in await authHeader(userID: userID, baseURL: baseURL) {
+                request.setValue(v, forHTTPHeaderField: k)
+            }
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response)
         return try JSONDecoder().decode(T.self, from: data)
     }
@@ -145,17 +157,19 @@ enum ContentService {
         try await getDecoded(baseURL.appendingPathComponent("content/articles/\(id)"))
     }
 
-    static func fetchReplies(baseURL: URL, postId: String) async throws -> [APIReply] {
-        try await getDecoded(baseURL.appendingPathComponent("content/community/\(postId)/replies"))
+    static func fetchReplies(baseURL: URL, postId: String, userID: String? = nil) async throws -> [APIReply] {
+        try await getDecoded(baseURL.appendingPathComponent("content/community/\(postId)/replies"),
+                             userID: userID, baseURL: baseURL)
     }
 
-    static func fetchCommunityPosts(baseURL: URL, category: String? = nil) async throws -> [APICommunityPost] {
+    static func fetchCommunityPosts(baseURL: URL, category: String? = nil,
+                                    userID: String? = nil) async throws -> [APICommunityPost] {
         var components = URLComponents(url: baseURL.appendingPathComponent("content/community"), resolvingAgainstBaseURL: false)!
         if let category = category {
             components.queryItems = [URLQueryItem(name: "category", value: category)]
         }
         guard let url = components.url else { throw ContentServiceError.invalidResponse }
-        return try await getDecoded(url)
+        return try await getDecoded(url, userID: userID, baseURL: baseURL)
     }
 
     // MARK: Writes

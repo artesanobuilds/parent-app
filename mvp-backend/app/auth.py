@@ -123,6 +123,29 @@ def current_user(authorization: Optional[str] = Header(default=None)) -> str:
     )
 
 
+def optional_user(authorization: Optional[str] = Header(default=None)) -> Optional[str]:
+    """
+    FastAPI dependency for PUBLIC endpoints that reveal more to signed-in
+    callers (e.g. community author user_ids, which double as DM peer handles).
+    Resolves the bearer to a user_id when present and valid; returns None —
+    never raises — for anonymous or bad tokens, so the public read keeps
+    working either way.
+    """
+    token = _extract_bearer(authorization)
+    if token is None:
+        return None
+    if token.count(".") == 2:
+        user_id = _decode_access_token(token)
+        if user_id is not None:
+            return user_id
+    if _legacy_tokens_enabled():
+        from app.server import storage_backend
+        user_id = storage_backend.lookup_auth_token(token)
+        if user_id is not None:
+            return user_id
+    return None
+
+
 def authorize_user_match(*, authenticated: str, claimed: str, resource: bool = False) -> None:
     """
     Reject a request whose body/path user_id doesn't match the bearer token's

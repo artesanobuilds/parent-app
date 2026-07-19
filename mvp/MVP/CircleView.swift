@@ -4,6 +4,8 @@ struct CircleView: View {
     @EnvironmentObject private var contentVM: ContentViewModel
     @State private var selectedCategory: String? = nil
     @State private var showingNewPost = false
+    @State private var showingMessages = false
+    @State private var unreadMessages = 0
 
     private var filteredPosts: [APICommunityPost] {
         if let selected = selectedCategory {
@@ -62,6 +64,28 @@ struct CircleView: View {
             .toolbarBackground(Color.brandBackground, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        showingMessages = true
+                    } label: {
+                        Image(systemName: "envelope")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundColor(.inkPrimary)
+                            .overlay(alignment: .topTrailing) {
+                                if unreadMessages > 0 {
+                                    Text("\(min(unreadMessages, 9))")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.inkOnPhotoLight)
+                                        .padding(4)
+                                        .background(Color.accentDefault)
+                                        .clipShape(Circle())
+                                        .offset(x: 8, y: -8)
+                                }
+                            }
+                    }
+                    .accessibilityLabel(unreadMessages > 0
+                        ? "Messages, \(unreadMessages) unread" : "Messages")
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         showingNewPost = true
@@ -72,6 +96,12 @@ struct CircleView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showingMessages, onDismiss: { Task { await refreshUnread() } }) {
+                if let url = contentVM.baseURL, !contentVM.userId.isEmpty {
+                    MessagesInboxView(userID: contentVM.userId, baseURL: url)
+                }
+            }
+            .task { await refreshUnread() }
             .sheet(isPresented: $showingNewPost) {
                 if let url = contentVM.baseURL {
                     NewPostView(baseURL: url)
@@ -137,6 +167,13 @@ struct CircleView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
+    }
+
+    private func refreshUnread() async {
+        guard let url = contentVM.baseURL, !contentVM.userId.isEmpty else { return }
+        if let result = try? await DMService.inbox(userID: contentVM.userId, baseURL: url) {
+            unreadMessages = result.totalUnread
+        }
     }
 }
 

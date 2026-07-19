@@ -22,6 +22,8 @@ CONFIG_RATE_PER_MIN = int(os.getenv("RATE_LIMIT_CONFIG_PER_MIN", "30"))
 AUTH_RATE_PER_HOUR = int(os.getenv("RATE_LIMIT_AUTH_PER_HOUR", "60"))
 # A research run fans out web searches + LLM calls and is expensive; cap per-hour.
 RESEARCH_RATE_PER_HOUR = int(os.getenv("RATE_LIMIT_RESEARCH_PER_HOUR", "20"))
+# Parent-to-parent DMs: enough for a lively conversation, hostile to spam.
+MESSAGE_RATE_PER_MIN = int(os.getenv("RATE_LIMIT_MESSAGE_PER_MIN", "30"))
 
 
 @dataclass
@@ -54,6 +56,9 @@ class _RateLimiter:
                 elif klass == "research":
                     cap = RESEARCH_RATE_PER_HOUR
                     refill_per_sec = cap / 3600.0
+                elif klass == "message":
+                    cap = MESSAGE_RATE_PER_MIN
+                    refill_per_sec = cap / 60.0
                 else:
                     cap = 60
                     refill_per_sec = 1.0

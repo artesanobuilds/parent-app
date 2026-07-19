@@ -41,7 +41,7 @@ final class ContentViewModel: ObservableObject {
         }
 
         do {
-            communityPosts = try await ContentService.fetchCommunityPosts(baseURL: baseURL)
+            communityPosts = try await ContentService.fetchCommunityPosts(baseURL: baseURL, userID: userId)
         } catch {
             print("[ContentViewModel] fetchCommunityPosts failed: \(error)")
             failures.append("community posts")
@@ -96,7 +96,7 @@ final class ContentViewModel: ObservableObject {
 
     func loadReplies(baseURL: URL, postId: String) async {
         do {
-            let replies = try await ContentService.fetchReplies(baseURL: baseURL, postId: postId)
+            let replies = try await ContentService.fetchReplies(baseURL: baseURL, postId: postId, userID: userId)
             repliesCache[postId] = replies
         } catch {
             print("[ContentViewModel] loadReplies failed: \(error)")

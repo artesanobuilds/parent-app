@@ -26,6 +26,10 @@ enum Analytics {
         "plan_exported": ["format"],
         "legal_accepted": ["surface"],
         "legal_reaccept_shown": [],
+        "dm_conversation_started": ["source"],
+        "dm_message_sent": [],
+        "dm_blocked": [],
+        "dm_reported": [],
         // Client-only engagement events.
         "screen_viewed": ["screen"],
         "content_opened": ["type"],

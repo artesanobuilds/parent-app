@@ -5,6 +5,8 @@ struct CommunityPostDetailView: View {
     @EnvironmentObject private var contentVM: ContentViewModel
     @State private var replyText: String = ""
     @State private var isSendingReply = false
+    // Set when the reader taps Message on an author row — presents the thread.
+    @State private var dmConversation: DMConversation?
 
     private var post: APICommunityPost? {
         contentVM.postData(postId)
@@ -41,6 +43,14 @@ struct CommunityPostDetailView: View {
                         await contentVM.loadReplies(baseURL: url, postId: postId)
                     }
                 }
+                .sheet(item: $dmConversation) { conv in
+                    if let url = contentVM.baseURL {
+                        NavigationStack {
+                            ConversationView(conversation: conv,
+                                             userID: contentVM.userId, baseURL: url)
+                        }
+                    }
+                }
             } else {
                 notFound
             }
@@ -71,6 +81,39 @@ struct CommunityPostDetailView: View {
                         .foregroundColor(.inkMuted)
                 }
             }
+
+            Spacer()
+            messageButton(authorId: post.userId, source: "post")
+        }
+    }
+
+    /// Envelope button shown when the author is another signed-in parent
+    /// (their user_id only reaches us on authed reads — it's the DM handle).
+    @ViewBuilder
+    private func messageButton(authorId: String?, source: String) -> some View {
+        if let authorId, !authorId.isEmpty,
+           authorId != contentVM.userId, !contentVM.userId.isEmpty {
+            Button {
+                Task { await openConversation(with: authorId, source: source) }
+            } label: {
+                Image(systemName: "envelope")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.accentDefault)
+                    .frame(width: 32, height: 32)
+                    .background(Color.accentTint)
+                    .clipShape(Circle())
+            }
+            .accessibilityLabel("Message this parent")
+        }
+    }
+
+    private func openConversation(with peerId: String, source: String) async {
+        guard let url = contentVM.baseURL else { return }
+        if let conv = try? await DMService.startConversation(
+            peerId: peerId, userID: contentVM.userId, baseURL: url
+        ) {
+            Analytics.capture("dm_conversation_started", ["source": source])
+            dmConversation = conv
         }
     }
 
@@ -126,6 +169,7 @@ struct CommunityPostDetailView: View {
                     .foregroundColor(.inkPrimary)
 
                 Spacer()
+                messageButton(authorId: reply.userId, source: "reply")
             }
 
             Text(reply.body)
