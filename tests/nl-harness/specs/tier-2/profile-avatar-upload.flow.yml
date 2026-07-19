@@ -1,0 +1,46 @@
+spec:
+  name: profile-avatar-upload
+  tier: 2
+  modules: [blobs, profile]
+  intent: >
+    Profile photos ride Railway Storage Buckets: the app asks for a presigned
+    PUT (server derives the key), uploads bytes straight to the bucket, then
+    attaches the key to a kid or the parent. The flow proves the whole chain
+    against a real bucket — including the two security boundaries (a foreign
+    key can't be attached; attach can't create a ghost kid) and the deletion
+    promise (family delete sweeps the photo prefix). Skips cleanly when the
+    target backend has no bucket configured (upload-url 503s).
+
+  personas:
+    parent:
+      preset: new-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "BLOB_* configured on the backend (otherwise the flow self-skips)"
+
+  invariants:
+    - "POST /blobs/upload-url returns a server-derived key under u/{user_id}/"
+    - "Oversized / wrong-mime / wrong-kind requests 400"
+    - "PUT to the presigned URL lands bytes in the bucket (2xx)"
+    - "Attaching a key from another family's prefix 403s"
+    - "Attaching to a kid that doesn't exist 404s (never creates one)"
+    - "After attach, GET /profile serves a presigned avatar_url for that kid"
+    - "avatar_key is NOT settable via PATCH (whitelist subtraction holds)"
+    - "DELETE /family reports blobs swept (>=1) and the object is gone"
+
+  boundary_contracts:
+    - endpoint: POST /blobs/upload-url
+      as: parent
+      status: 200          # or 503 -> flow self-skips
+      response_includes: [key, url]
+
+    - endpoint: POST /profile/kids/{kid_name}/avatar
+      as: parent
+      status: 200
+      response_includes: [parent, children]
+
+    - endpoint: DELETE /family/{user_id}
+      as: parent
+      status: 200
+      response_includes: [ok, deleted]

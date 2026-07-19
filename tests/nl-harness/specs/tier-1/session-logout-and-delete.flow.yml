@@ -1,0 +1,45 @@
+spec:
+  name: session-logout-and-delete
+  tier: 1
+  modules: [auth, profile, legal]
+  intent: >
+    The two session-control promises shipped for beta: a parent can LOG OUT
+    (server revokes the session; the client clears locally regardless), and a
+    parent can DELETE their account themselves — after which nothing of the
+    family is served anymore: profile empty, legal acceptances gone, and the
+    delete response itemizes what was removed. This is the "you can leave"
+    contract the privacy policy points at (Settings → Delete account).
+
+  personas:
+    parent:
+      preset: new-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+
+  invariants:
+    - "POST /auth/logout with an empty body returns ok (revoke-all semantics —
+       legacy sessions have no refresh token and must not error)"
+    - "The bearer keeps working after logout (legacy opaque tokens are not
+       refresh tokens; the CLIENT clears them — server revocation targets
+       refresh lineages, covered in test_auth_v2)"
+    - "DELETE /family/{user_id} returns ok + per-table deletion counts"
+    - "A fresh token for the same user_id sees an EMPTY profile afterward"
+    - "Legal acceptances did not survive the delete (fresh status: needs both)"
+    - "Deleting an already-deleted family is safe (idempotent cleanup)"
+
+  boundary_contracts:
+    - endpoint: POST /auth/logout
+      as: parent
+      status: 200
+      response_includes: [ok]
+
+    - endpoint: DELETE /family/{user_id}
+      as: parent
+      status: 200
+      response_includes: [ok, deleted]
+
+    - endpoint: GET /profile
+      as: parent          # re-issued token
+      status: 200
+      response_includes: [parent, children]

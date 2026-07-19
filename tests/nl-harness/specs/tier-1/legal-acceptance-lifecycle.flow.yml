@@ -1,0 +1,70 @@
+spec:
+  name: legal-acceptance-lifecycle
+  tier: 1
+  modules: [legal, auth, cms]
+  intent: >
+    Legal documents are CMS-published and versioned; acceptance is per-user and
+    per-doc. A parent must see both docs pending, be unable to accept a version
+    they weren't shown (stale echo 409s), and land clean after accepting. When
+    an admin publishes a new version flagged requires_reacceptance, exactly the
+    changed doc re-prompts — and a typo-level publish (flag off) must NOT nag.
+    This is the app-wide agreement gate: if it breaks, new users can't finish
+    onboarding and existing users get stuck on (or never see) the banner.
+
+  personas:
+    parent:
+      preset: new-parent
+    admin:
+      preset: admin        # publish cycle skips cleanly when ADMIN_TOKEN unset
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "Legal docs seeded (privacy-policy + terms published, is_current)"
+
+  invariants:
+    - "GET /content/legal lists both slugs with version + effective_date (public)"
+    - "GET /content/legal/{slug} serves body_md (public); unknown slug 404s"
+    - "Fresh parent: accepted_all=false, needs both slugs"
+    - "Accepting a stale version echo returns 409 with the required versions"
+    - "Accepting the current versions writes one row per doc; accepted_all flips"
+    - "Admin publish with requires_reacceptance=true re-prompts ONLY that slug"
+    - "Re-accepting the new version clears the prompt"
+    - "Prior versions remain immutable in the version history"
+    - "Publish restores: cleanup re-publishes the prior body so a shared dev
+       backend isn't left showing harness text"
+
+  boundary_contracts:
+    - endpoint: GET /content/legal
+      as: anonymous
+      status: 200
+      response_includes: [documents]
+
+    - endpoint: GET /content/legal/privacy-policy
+      as: anonymous
+      status: 200
+      response_includes: [slug, version, body_md, effective_date]
+
+    - endpoint: GET /legal/status
+      as: parent
+      status: 200
+      response_includes: [documents, accepted_all, needs]
+
+    - endpoint: POST /legal/accept
+      as: parent
+      status: 409          # stale version echo
+      response_includes: [error, required]
+
+    - endpoint: POST /legal/accept
+      as: parent
+      status: 200          # current versions
+      response_includes: [ok, accepted]
+
+    - endpoint: PUT /cms/legal/terms/draft
+      as: admin
+      status: 200
+      response_includes: [slug, body_md]
+
+    - endpoint: POST /cms/legal/terms/publish
+      as: admin
+      status: 200
+      response_includes: [slug, version, is_current]
