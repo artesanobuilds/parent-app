@@ -136,6 +136,11 @@ on that topic with and without the playbook, on our own families first.
   mediator/therapist networks vet vendors on exactly this). First step is a scoping
   pass — gap analysis against the current hardening work, cost, and a realistic
   timeline — not a commitment to certify before beta.
+- **Scope the release ladder: friends & family → private beta → public beta.** Define
+  each stage before the first invite goes out: who's in it and how many, what has to
+  be true to enter it (feature scope, stability bar, support load we can absorb),
+  what we're trying to learn from it, and the graduation criteria to the next rung.
+  "Beta" stops being one word and becomes three gates with numbers.
 
 ## Action items
 
@@ -156,6 +161,7 @@ on that topic with and without the playbook, on our own families first.
 | Greg | Schedule + run the 3 design sprints; share Figma link + sprint list | In motion |
 | Greg | Design: saved-content strategy, payment placeholder screens, onboarding zip step | Within sprints |
 | Group | Team-vs-family concept research | |
+| Group | Scope the release ladder: friends & family → private beta → public beta (entry bars, cohort sizes, learning goals, graduation criteria per stage) | New (July 18) |
 
 ---
 
