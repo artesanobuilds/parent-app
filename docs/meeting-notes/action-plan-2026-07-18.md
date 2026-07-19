@@ -126,6 +126,17 @@ on that topic with and without the playbook, on our own families first.
 | Early investor conversations with key AI contacts; build in the open | Show adoption + engagement metrics |
 | Neuroscience advisor to deepen the profiling moat | |
 
+## Added July 18
+
+- **Pursue ISO certification for security and privacy** — ISO/IEC 27001 (information
+  security) and ISO/IEC 27701 (privacy). This turns our security posture from a
+  claim into a credential: it strengthens the trust kit (a family app holding kids'
+  data), differentiates against every consumer competitor (none are certified), and
+  is close to a prerequisite for the B2B2C channels in the GTM (employers/EAPs,
+  mediator/therapist networks vet vendors on exactly this). First step is a scoping
+  pass — gap analysis against the current hardening work, cost, and a realistic
+  timeline — not a commitment to certify before beta.
+
 ## Action items
 
 | Owner | Action | Status / next step |
@@ -136,6 +147,7 @@ on that topic with and without the playbook, on our own families first.
 | Miguel | **Workstream B pilot**: intake→playbook pipeline for one bucket | After Heather's first dump |
 | Miguel | Apply for AWS + Azure startup credits | Applications this week |
 | Miguel | Contact neuroscientist about advisory role | |
+| Miguel | Scope the ISO 27001/27701 path — gap analysis, cost, timeline | New (July 18) |
 | Heather | **Forward 5–10 real samples each** from Brightwheel, ParentSquare, WhatsApp groups | Fuel for Workstream A phase 2 |
 | Heather | Pick pilot bucket + record first brain-dump voice memo | Kicks off Workstream B |
 | Heather | Review/adjust the bucket list (seeded from the content taxonomy) | |
