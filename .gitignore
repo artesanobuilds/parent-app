@@ -1,6 +1,7 @@
 .DS_Store
 .venv/
 .env
+.env.*
 xcuserdata/
 DerivedData/
 __pycache__/
