@@ -1,0 +1,11 @@
+# Local-only developer tooling — NOT installed in the Docker image
+# (requirements.txt is what ships; keep emulators and their transitive
+# weight out of prod).
+#
+#   pip install -r requirements-dev.txt
+#
+# moto[server] = local in-memory S3 for the blob/photo surfaces
+# (tools/dev_blob_server.py). Simulator-only: presigned URLs point at
+# 127.0.0.1, which a physical device can never reach — device testing
+# uses a real bucket.
+moto[server]==5.2.2

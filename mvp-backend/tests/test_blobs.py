@@ -81,6 +81,30 @@ def _reconnect_shared_storage(server):
 
 
 # --------------------------------------------------------------------------- #
+# Environment guard
+# --------------------------------------------------------------------------- #
+
+# The prod bucket's name (not a secret — it's in every presigned URL). A dev
+# environment that points BLOB_* here can read AND delete real families'
+# photos — the exact hazard per-environment buckets exist to prevent.
+PROD_BUCKET = "photos-blob-s9qqmpzeamgcz"
+
+
+def test_local_env_never_points_at_the_prod_bucket():
+    """Runs against the AMBIENT env (no monkeypatch on purpose): if this
+    machine has BLOB_* set — e.g. for the moto dev emulator — it must not be
+    the prod bucket. Local dev belongs on moto or a dedicated dev bucket;
+    prod creds live in the untracked .env.production, never the loaded env."""
+    bucket = os.getenv("BLOB_BUCKET")
+    if not bucket:
+        return  # unconfigured local default — the hard no-op
+    assert bucket != PROD_BUCKET, (
+        "local BLOB_BUCKET is the PROD bucket — move prod creds to "
+        ".env.production and point local dev at moto (tools/dev_blob_server.py)"
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Module unit
 # --------------------------------------------------------------------------- #
 
