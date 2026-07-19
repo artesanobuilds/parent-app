@@ -1,7 +1,7 @@
 ---
 title: Privacy Policy
-version: 1.0
-effective_date: 2026-07-18
+version: 1.1
+effective_date: 2026-07-19
 ---
 
 > **Draft pending legal review.** MVP is in closed beta. This policy reflects how the product
@@ -35,6 +35,12 @@ immediately.
 
 **Your family's plan.** Activities, camps, registrations, calendar entries, to-dos, caregivers,
 and anything you ask the planner to track.
+
+**Messages you send other parents.** MVP has a simple parent-to-parent messaging feature. Your
+messages are stored so both of you can read the thread, and they're deleted when either of you
+deletes your account (both sides of the thread go). You can report or block any conversation at
+any time. So other parents can find you, **your display name is visible to other parents in the
+beta** — in the community and in the message directory.
 
 **Photos of flyers and emails you share.** When you snap a camp flyer or paste an email, we
 extract the useful details (dates, prices, deadlines). The extracted details are kept; **the image
