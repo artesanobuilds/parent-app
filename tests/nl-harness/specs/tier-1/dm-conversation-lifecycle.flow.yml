@@ -31,6 +31,10 @@ spec:
     - "A non-participant gets 404 on every conversation path (never 403 —
        existence is not confirmed)"
     - "Block (by either side) makes sends 403; unblock restores"
+    - "Reactions are tapbacks: one per user per message, a different emoji
+       replaces mine, the same emoji removes mine, emoji=null removes mine"
+    - "Reactions outside the allowed six are 400; a non-participant reacting
+       gets 404; reactions ride along in the message list"
     - "Report returns ok (email dispatch is best-effort server-side)"
     - "DELETE /family on one participant removes the thread from the OTHER
        participant's inbox too"
@@ -59,6 +63,11 @@ spec:
     - endpoint: GET /dm/conversations/{conversation_id}/messages
       as: mallory
       status: 404
+
+    - endpoint: POST /dm/conversations/{conversation_id}/reactions
+      as: bob
+      status: 200
+      response_includes: [message_id, reactions]
 
     - endpoint: POST /dm/conversations/{conversation_id}/report
       as: alice

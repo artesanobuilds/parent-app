@@ -1300,6 +1300,17 @@ class DMReportRequest(BaseModel):
     note: Optional[str] = None
 
 
+# The classic six tapbacks. Kept server-side so a hacked client can't attach
+# arbitrary strings that other phones then render.
+DM_REACTION_EMOJI = ("❤️", "\U0001F44D", "\U0001F44E", "\U0001F602",
+                     "‼️", "❓")
+
+
+class DMReactionRequest(BaseModel):
+    message_id: str
+    emoji: Optional[str] = None  # None = remove my reaction
+
+
 def _dm_display_name(user_id: str) -> Optional[str]:
     """COALESCE(user_accounts.display_name, profile parent name). Reads the
     profiling snapshot (never get_family_profile — that CREATES an empty
@@ -1416,6 +1427,21 @@ def dm_send(conversation_id: str, req: DMSendRequest, user_id: str = Depends(cur
 
     threading.Thread(target=_notify, daemon=True).start()
     return msg
+
+
+@app.post("/dm/conversations/{conversation_id}/reactions")
+def dm_react(conversation_id: str, req: DMReactionRequest,
+             user_id: str = Depends(current_user)):
+    """Tapback: set/replace/remove my one reaction on a message. Same emoji
+    twice (or emoji=null) removes it."""
+    _dm_conversation_or_404(conversation_id, user_id)
+    msg = storage_backend.get_dm_message(req.message_id)
+    if msg is None or msg["conversation_id"] != conversation_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if req.emoji is not None and req.emoji not in DM_REACTION_EMOJI:
+        raise HTTPException(status_code=400, detail="Unsupported reaction")
+    reactions = storage_backend.set_dm_reaction(req.message_id, user_id, req.emoji)
+    return {"message_id": req.message_id, "reactions": reactions}
 
 
 @app.post("/dm/conversations/{conversation_id}/read")

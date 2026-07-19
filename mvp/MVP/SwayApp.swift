@@ -251,13 +251,28 @@ struct MVPApp: App {
     }
 }
 
-// MARK: - Push notifications (crisis-lock alerts)
+// MARK: - Push notifications (crisis-lock alerts + DMs)
+
+/// In-app signals bridged from APNs callbacks. `dmPushReceived` fires on
+/// arrival (foreground) so open DM views refresh instantly — the push IS the
+/// delivery signal, not just a banner. `dmPushTapped` fires on tap and routes
+/// into the thread via the pending-deeplink stash.
+extension Notification.Name {
+    static let dmPushReceived = Notification.Name("dmPushReceived")
+    static let dmPushTapped = Notification.Name("dmPushTapped")
+}
 
 /// Handles APNs registration callbacks. A crisis-lock push tapped by the parent
 /// simply opens the app to Home, where the affected companion shows a red
-/// "Review" pill and the reactivate flow (KidsHomeSection). v1 keeps the deep
-/// link that light — no private-state routing.
+/// "Review" pill and the reactivate flow (KidsHomeSection) — that deep link
+/// stays deliberately light. A DM push deep-links into its thread (Phase 8.1).
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+
+    /// A tapped DM push's conversation id, stashed in UserDefaults because the
+    /// tap can arrive on a cold launch BEFORE the view tree exists to route it.
+    /// MainTabView consumes it from its launch task and on `dmPushTapped`.
+    static let pendingDMDeeplinkKey = "pending_dm_deeplink"
+
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
@@ -275,11 +290,40 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         print("[push] APNs registration failed: \(error.localizedDescription)")
     }
 
-    // Show the alert even when the app is foregrounded.
+    // Foreground arrival. For a DM push, the arrival itself is the refresh
+    // trigger (open views listen for dmPushReceived) — and when its thread is
+    // the one CURRENTLY on screen, the banner is suppressed: you're looking at
+    // the conversation; the message just appears.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions {
-        [.banner, .sound, .list]
+        let userInfo = notification.request.content.userInfo
+        if userInfo["type"] as? String == "dm",
+           let conversationId = userInfo["conversation_id"] as? String {
+            let suppressBanner = await MainActor.run { () -> Bool in
+                NotificationCenter.default.post(
+                    name: .dmPushReceived, object: nil,
+                    userInfo: ["conversation_id": conversationId]
+                )
+                return AppSession.current?.activeDMConversationId == conversationId
+            }
+            if suppressBanner { return [] }
+        }
+        return [.banner, .sound, .list]
+    }
+
+    // Tap on a delivered notification (background/cold launch included).
+    // DM pushes route into their thread; everything else keeps the light
+    // open-to-Home behavior.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse) async {
+        let userInfo = response.notification.request.content.userInfo
+        guard userInfo["type"] as? String == "dm",
+              let conversationId = userInfo["conversation_id"] as? String else { return }
+        await MainActor.run {
+            UserDefaults.standard.set(conversationId, forKey: AppDelegate.pendingDMDeeplinkKey)
+            NotificationCenter.default.post(name: .dmPushTapped, object: nil)
+        }
     }
 }
 

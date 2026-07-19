@@ -7,6 +7,7 @@ struct MessagesInboxView: View {
     let userID: String
     let baseURL: URL
 
+    @EnvironmentObject private var session: AppSession
     @State private var conversations: [DMConversation] = []
     @State private var loading = true
     @State private var errorMessage: String?
@@ -54,6 +55,10 @@ struct MessagesInboxView: View {
             .task(id: refreshToken) { await load() }
             .onChange(of: navPath) { _, path in
                 if path.isEmpty { refreshToken += 1 }
+            }
+            // A DM push while the inbox is visible → unread counts move live.
+            .onReceive(NotificationCenter.default.publisher(for: .dmPushReceived)) { _ in
+                refreshToken += 1
             }
             .trackScreen("dm_inbox")
         }
@@ -133,6 +138,15 @@ struct MessagesInboxView: View {
             let result = try await DMService.inbox(userID: userID, baseURL: baseURL)
             conversations = result.conversations
             errorMessage = nil
+            // Final hop of the push deep link: the inbox response carries the
+            // full conversation DTO — push the thread and clear the pending id.
+            if let pending = session.pendingDMConversationId {
+                session.pendingDMConversationId = nil
+                if let conv = conversations.first(where: { $0.id == pending }),
+                   navPath.isEmpty {
+                    navPath.append(conv)
+                }
+            }
         } catch {
             errorMessage = "Couldn't load messages. Pull to retry."
         }

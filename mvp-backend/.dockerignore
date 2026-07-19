@@ -54,4 +54,5 @@ data/legal_documents.parquet
 data/legal_acceptances.parquet
 data/dm_conversations.parquet
 data/dm_messages.parquet
+data/dm_reactions.parquet
 data/saved_items.parquet

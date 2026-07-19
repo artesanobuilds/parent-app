@@ -37,17 +37,35 @@ struct DMConversation: Codable, Identifiable, Hashable {
     }
 }
 
+struct DMReaction: Codable, Hashable {
+    let userId: String
+    let emoji: String
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case emoji
+    }
+}
+
 struct DMMessage: Codable, Identifiable, Hashable {
     let id: String
     let senderId: String
     let body: String
     let createdAt: String
+    // Optional: the send response carries no reactions field, only the list.
+    var reactions: [DMReaction]?
 
     enum CodingKeys: String, CodingKey {
-        case id, body
+        case id, body, reactions
         case senderId = "sender_id"
         case createdAt = "created_at"
     }
+}
+
+/// The classic six tapbacks — must match the server's DM_REACTION_EMOJI
+/// allowlist (an out-of-set emoji is a 400).
+enum DMTapback {
+    static let all = ["❤️", "👍", "👎", "😂", "‼️", "❓"]
 }
 
 private struct DMMembersResponse: Codable { let members: [DMMember] }
@@ -60,6 +78,14 @@ private struct DMInboxResponse: Codable {
     }
 }
 private struct DMMessagesResponse: Codable { let messages: [DMMessage] }
+private struct DMReactionResponse: Codable {
+    let messageId: String
+    let reactions: [DMReaction]
+    enum CodingKeys: String, CodingKey {
+        case messageId = "message_id"
+        case reactions
+    }
+}
 
 // MARK: - Service
 
@@ -130,6 +156,18 @@ enum DMService {
                                      method: "POST", body: ["body": body],
                                      userID: userID, baseURL: baseURL)
         return try JSONDecoder().decode(DMMessage.self, from: data)
+    }
+
+    /// Tapback: set/replace my one reaction on a message; the SAME emoji (or
+    /// nil) removes it. Returns the message's authoritative reaction list.
+    @MainActor
+    static func setReaction(messageId: String, emoji: String?, conversationId: String,
+                            userID: String, baseURL: URL) async throws -> [DMReaction] {
+        let body: [String: Any] = ["message_id": messageId, "emoji": emoji ?? NSNull()]
+        let data = try await request("dm/conversations/\(conversationId)/reactions",
+                                     method: "POST", body: body,
+                                     userID: userID, baseURL: baseURL)
+        return try JSONDecoder().decode(DMReactionResponse.self, from: data).reactions
     }
 
     @MainActor

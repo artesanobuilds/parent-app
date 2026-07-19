@@ -2,10 +2,12 @@ import SwiftUI
 
 struct CircleView: View {
     @EnvironmentObject private var contentVM: ContentViewModel
+    // Unread count lives on AppSession — the tab-bar badge reads the SAME
+    // value, so the two signal levels can never disagree.
+    @EnvironmentObject private var session: AppSession
     @State private var selectedCategory: String? = nil
     @State private var showingNewPost = false
     @State private var showingMessages = false
-    @State private var unreadMessages = 0
 
     private var filteredPosts: [APICommunityPost] {
         if let selected = selectedCategory {
@@ -65,26 +67,30 @@ struct CircleView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
+                    // Level-2 unread signal: markedly louder than the tab
+                    // badge — filled accent envelope + a legible count pill.
+                    // Zero unread keeps the quiet outline.
                     Button {
                         showingMessages = true
                     } label: {
-                        Image(systemName: "envelope")
+                        Image(systemName: session.dmUnread > 0 ? "envelope.badge.fill" : "envelope")
                             .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(.inkPrimary)
+                            .foregroundColor(session.dmUnread > 0 ? .accentDefault : .inkPrimary)
                             .overlay(alignment: .topTrailing) {
-                                if unreadMessages > 0 {
-                                    Text("\(min(unreadMessages, 9))")
-                                        .font(.system(size: 10, weight: .bold))
+                                if session.dmUnread > 0 {
+                                    Text(session.dmUnread > 9 ? "9+" : "\(session.dmUnread)")
+                                        .font(.system(size: 11, weight: .bold))
                                         .foregroundColor(.inkOnPhotoLight)
-                                        .padding(4)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 2)
                                         .background(Color.accentDefault)
-                                        .clipShape(Circle())
-                                        .offset(x: 8, y: -8)
+                                        .clipShape(Capsule())
+                                        .offset(x: 12, y: -10)
                                 }
                             }
                     }
-                    .accessibilityLabel(unreadMessages > 0
-                        ? "Messages, \(unreadMessages) unread" : "Messages")
+                    .accessibilityLabel(session.dmUnread > 0
+                        ? "Messages, \(session.dmUnread) unread" : "Messages")
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -99,9 +105,21 @@ struct CircleView: View {
             .sheet(isPresented: $showingMessages, onDismiss: { Task { await refreshUnread() } }) {
                 if let url = contentVM.baseURL, !contentVM.userId.isEmpty {
                     MessagesInboxView(userID: contentVM.userId, baseURL: url)
+                        .environmentObject(session)
                 }
             }
             .task { await refreshUnread() }
+            // A tapped DM push routed here by MainTabView: open the Messages
+            // sheet; the inbox pushes the thread and clears the pending id.
+            .onAppear {
+                if session.pendingDMConversationId != nil { showingMessages = true }
+            }
+            .onChange(of: session.pendingDMConversationId) { _, pending in
+                if pending != nil { showingMessages = true }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .dmPushReceived)) { _ in
+                Task { await refreshUnread() }
+            }
             .sheet(isPresented: $showingNewPost) {
                 if let url = contentVM.baseURL {
                     NewPostView(baseURL: url)
@@ -170,10 +188,7 @@ struct CircleView: View {
     }
 
     private func refreshUnread() async {
-        guard let url = contentVM.baseURL, !contentVM.userId.isEmpty else { return }
-        if let result = try? await DMService.inbox(userID: contentVM.userId, baseURL: url) {
-            unreadMessages = result.totalUnread
-        }
+        await session.refreshDMUnread(userID: contentVM.userId, baseURL: contentVM.baseURL)
     }
 }
 

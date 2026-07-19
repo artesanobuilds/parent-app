@@ -1,7 +1,7 @@
 # flows/generated/test_dm_conversation_lifecycle.py
 #
 # @generated_from: specs/tier-1/dm-conversation-lifecycle.flow.yml
-# @generated_at: 2026-07-19T00:00:00Z
+# @generated_at: 2026-07-19T18:00:00Z  (regenerated: +reactions segment)
 # @modules: dm, auth, profile
 # @promoted_by: (none -- awaiting review)
 #
@@ -62,6 +62,38 @@ def test_dm_conversation_lifecycle(flow_ctx, new_parent):
     flow_ctx.post(f"/dm/conversations/{conv_id}/unblock", json={}, as_=bob)
     assert flow_ctx.post(f"/dm/conversations/{conv_id}/messages",
                          json={"body": "back on"}, as_=bob).status_code == 200
+
+    # ── reactions: tapback semantics ────────────────────────────────
+    msg_id = sent.json()["id"]
+    r = flow_ctx.post(f"/dm/conversations/{conv_id}/reactions",
+                      json={"message_id": msg_id, "emoji": "❤️"}, as_=bob)
+    assert r.status_code == 200, r.text
+    assert r.json()["reactions"] == [{"user_id": bob.user_id, "emoji": "❤️"}]
+    # a different emoji replaces mine
+    r = flow_ctx.post(f"/dm/conversations/{conv_id}/reactions",
+                      json={"message_id": msg_id, "emoji": "\U0001F44D"}, as_=bob)
+    assert r.json()["reactions"] == [{"user_id": bob.user_id, "emoji": "\U0001F44D"}]
+    # the same emoji removes mine
+    r = flow_ctx.post(f"/dm/conversations/{conv_id}/reactions",
+                      json={"message_id": msg_id, "emoji": "\U0001F44D"}, as_=bob)
+    assert r.json()["reactions"] == []
+    # emoji=null removes (no-op when nothing set, still 200)
+    r = flow_ctx.post(f"/dm/conversations/{conv_id}/reactions",
+                      json={"message_id": msg_id, "emoji": None}, as_=bob)
+    assert r.status_code == 200 and r.json()["reactions"] == []
+    # outside the allowed six → 400; outsider → 404
+    assert flow_ctx.post(f"/dm/conversations/{conv_id}/reactions",
+                         json={"message_id": msg_id, "emoji": "🦄"},
+                         as_=bob).status_code == 400
+    assert flow_ctx.post(f"/dm/conversations/{conv_id}/reactions",
+                         json={"message_id": msg_id, "emoji": "❤️"},
+                         as_=mallory).status_code == 404
+    # reactions ride along in the message list
+    flow_ctx.post(f"/dm/conversations/{conv_id}/reactions",
+                  json={"message_id": msg_id, "emoji": "❤️"}, as_=alice)
+    listed = flow_ctx.get(f"/dm/conversations/{conv_id}/messages", as_=bob).json()["messages"]
+    reacted = next(m for m in listed if m["id"] == msg_id)
+    assert reacted["reactions"] == [{"user_id": alice.user_id, "emoji": "❤️"}]
 
     # ── report ──────────────────────────────────────────────────────
     assert flow_ctx.post(f"/dm/conversations/{conv_id}/report",

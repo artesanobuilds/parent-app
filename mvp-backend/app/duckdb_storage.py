@@ -253,6 +253,17 @@ class DuckDBStorage(StorageBackend):
 
     CREATE INDEX IF NOT EXISTS idx_dm_messages_conversation
         ON dm_messages (conversation_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS dm_reactions (
+        id         TEXT PRIMARY KEY,
+        message_id TEXT NOT NULL,
+        user_id    TEXT NOT NULL,
+        emoji      TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_reactions_message_user
+        ON dm_reactions (message_id, user_id);
     """
 
     # Saved items (the Saved tab). DENORMALIZED snapshots on purpose -- a save
@@ -926,6 +937,7 @@ class DuckDBStorage(StorageBackend):
         # Parent-to-parent DMs (user state).
         ("dm_conversations", "dm_conversations.parquet"),
         ("dm_messages", "dm_messages.parquet"),
+        ("dm_reactions", "dm_reactions.parquet"),
         # Saved items (user state).
         ("saved_items", "saved_items.parquet"),
     ]
@@ -2315,11 +2327,22 @@ class DuckDBStorage(StorageBackend):
                 ).fetchall()
             ]
             dm_msgs = 0
+            dm_reacts = 0
             for conv_id in dm_conv_ids:
                 dm_msgs += self._con.execute(
                     "SELECT count(*) FROM dm_messages WHERE conversation_id = ?",
                     [conv_id],
                 ).fetchone()[0]
+                dm_reacts += self._con.execute(
+                    "SELECT count(*) FROM dm_reactions WHERE message_id IN "
+                    "(SELECT id FROM dm_messages WHERE conversation_id = ?)",
+                    [conv_id],
+                ).fetchone()[0]
+                self._con.execute(
+                    "DELETE FROM dm_reactions WHERE message_id IN "
+                    "(SELECT id FROM dm_messages WHERE conversation_id = ?)",
+                    [conv_id],
+                )
                 self._con.execute(
                     "DELETE FROM dm_messages WHERE conversation_id = ?", [conv_id]
                 )
@@ -2329,6 +2352,13 @@ class DuckDBStorage(StorageBackend):
             if dm_conv_ids:
                 deleted["dm_conversations"] = len(dm_conv_ids)
                 deleted["dm_messages"] = dm_msgs
+                deleted["dm_reactions"] = dm_reacts
+            # Stray reactions BY this user on threads they don't participate
+            # in can't exist today (reacting requires participation), but the
+            # sweep is cheap and keeps the invariant honest.
+            self._con.execute(
+                "DELETE FROM dm_reactions WHERE user_id = ?", [user_id]
+            )
 
             self.write_audit_event(
                 user_id=user_id, actor=actor,
@@ -2821,10 +2851,70 @@ class DuckDBStorage(StorageBackend):
                 "WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
                 [conversation_id, limit],
             ).fetchall()
-        return [
+        msgs = [
             {"id": r[0], "conversation_id": r[1], "sender_id": r[2],
-             "body": r[3], "created_at": r[4].isoformat() if r[4] else None}
+             "body": r[3], "created_at": r[4].isoformat() if r[4] else None,
+             "reactions": []}
             for r in rows
+        ]
+        if msgs:
+            by_id = {m["id"]: m for m in msgs}
+            placeholders = ", ".join("?" for _ in msgs)
+            for mid, uid, emoji in self._con.execute(
+                f"SELECT message_id, user_id, emoji FROM dm_reactions "
+                f"WHERE message_id IN ({placeholders}) ORDER BY created_at",
+                list(by_id.keys()),
+            ).fetchall():
+                by_id[mid]["reactions"].append({"user_id": uid, "emoji": emoji})
+        return msgs
+
+    def get_dm_message(self, message_id: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            "SELECT id, conversation_id, sender_id, body, created_at "
+            "FROM dm_messages WHERE id = ?",
+            [message_id],
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0], "conversation_id": row[1], "sender_id": row[2],
+            "body": row[3], "created_at": row[4].isoformat() if row[4] else None,
+        }
+
+    def set_dm_reaction(self, message_id: str, user_id: str,
+                        emoji: Optional[str]) -> List[Dict[str, Any]]:
+        """Tapback semantics: one reaction per user per message. A different
+        emoji replaces yours, the same emoji removes it, None removes it.
+        Returns the message's resulting reaction list."""
+        import uuid
+        existing = self._con.execute(
+            "SELECT emoji FROM dm_reactions WHERE message_id = ? AND user_id = ?",
+            [message_id, user_id],
+        ).fetchone()
+        if emoji is None or (existing and existing[0] == emoji):
+            self._con.execute(
+                "DELETE FROM dm_reactions WHERE message_id = ? AND user_id = ?",
+                [message_id, user_id],
+            )
+        elif existing:
+            self._con.execute(
+                "UPDATE dm_reactions SET emoji = ?, created_at = now() "
+                "WHERE message_id = ? AND user_id = ?",
+                [emoji, message_id, user_id],
+            )
+        else:
+            self._con.execute(
+                "INSERT INTO dm_reactions (id, message_id, user_id, emoji) "
+                "VALUES (?, ?, ?, ?)",
+                [f"dmr-{uuid.uuid4().hex[:12]}", message_id, user_id, emoji],
+            )
+        return [
+            {"user_id": r[0], "emoji": r[1]}
+            for r in self._con.execute(
+                "SELECT user_id, emoji FROM dm_reactions "
+                "WHERE message_id = ? ORDER BY created_at",
+                [message_id],
+            ).fetchall()
         ]
 
     def mark_dm_read(self, conversation_id: str, user_id: str) -> None:

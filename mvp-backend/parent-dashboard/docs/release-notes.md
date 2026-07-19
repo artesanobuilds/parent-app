@@ -10,6 +10,21 @@ Every update we ship, newest first — what changed and how to find it. Features
 *app update* arrive on your phone through TestFlight; everything else is live the moment
 it's listed here.
 
+## July 19, 2026 — messages, sharpened
+
+**Reactions, instant delivery, and a smarter envelope** *(app update 1.73)* — four upgrades to
+parent-to-parent messages, straight from beta feedback:
+
+- **React to messages** — press and hold any message to add a reaction (❤️ 👍 👎 😂 ‼️ ❓),
+  just like iMessage. Tap yours again to remove it.
+- **Messages appear instantly** — when someone writes back while you're in the conversation, the
+  message shows up the moment your phone buzzes (and the notification banner stays out of your way,
+  since you're already reading the thread).
+- **Notifications open the conversation** — tapping a message notification now takes you straight
+  into that thread instead of dropping you on the home screen.
+- **You can see you have messages from anywhere** — the **Circle** tab in the bottom bar shows an
+  unread count, and inside Circle the envelope lights up with the number waiting.
+
 ## July 19, 2026 — the Saved tab
 
 **Save anything for later** *(app update 1.72)* — a new **Saved** tab (the bookmark icon in

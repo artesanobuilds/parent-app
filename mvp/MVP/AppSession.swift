@@ -26,6 +26,39 @@ final class AppSession: ObservableObject {
     /// Set while a sign-out or delete is in flight so the UI can disable buttons.
     @Published var isWorking = false
 
+    // MARK: - DMs (Phase 8.1)
+
+    /// The AppDelegate's window into the session — notification callbacks
+    /// arrive before any view exists and can't use the environment. Set once
+    /// at init (there is exactly one AppSession, owned by MVPApp).
+    static weak var current: AppSession?
+
+    /// Total unread DM count. The SINGLE source both signal levels read —
+    /// the Circle tab-bar badge and the in-Circle envelope — so they can
+    /// never disagree.
+    @Published var dmUnread = 0
+
+    /// Conversation currently open in ConversationView (set on appear, cleared
+    /// on disappear). The AppDelegate suppresses the push banner for THIS
+    /// thread — you're already looking at it; the push becomes the refresh.
+    @Published var activeDMConversationId: String?
+
+    /// A tapped DM push waiting to be routed into its thread. MainTabView
+    /// switches to Circle; CircleView opens the Messages sheet; the inbox
+    /// pushes the thread and clears this.
+    @Published var pendingDMConversationId: String?
+
+    init() {
+        AppSession.current = self
+    }
+
+    func refreshDMUnread(userID: String, baseURL: URL?) async {
+        guard let baseURL, !userID.isEmpty else { return }
+        if let result = try? await DMService.inbox(userID: userID, baseURL: baseURL) {
+            dmUnread = result.totalUnread
+        }
+    }
+
     /// Latest /legal/status. Nil until fetched. Drives the Home re-accept
     /// banner when a CMS publish flagged "requires re-acceptance".
     @Published var legalStatus: LegalStatus?
@@ -85,6 +118,12 @@ final class AppSession: ObservableObject {
         // it anyway — the ownership boundary — but don't even carry it over).
         defaults.removeObject(forKey: BlobService.pendingAttachKey)
         legalStatus = nil
+        // DM state is the outgoing user's — never carry a badge count or a
+        // pending deep link across to the next account on this device.
+        dmUnread = 0
+        activeDMConversationId = nil
+        pendingDMConversationId = nil
+        defaults.removeObject(forKey: AppDelegate.pendingDMDeeplinkKey)
 
         // Flip the gate LAST — this is what re-renders the app to SignInView.
         // parent_display_name deliberately SURVIVES log-out: it powers the

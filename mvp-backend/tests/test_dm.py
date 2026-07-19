@@ -134,6 +134,41 @@ def test_dm_full_lifecycle(monkeypatch):
                 headers=alice).json()["messages"]
             assert older and older[0]["body"] == "Camp carpool Thursday?"
 
+            # ── reactions: tapback semantics ─────────────────────────
+            msg_id = msgs[0]["id"]  # Bob's "Sure — Thursday works"
+            react = lambda who, emoji, cid=conv_id: client.post(
+                f"/dm/conversations/{cid}/reactions",
+                json={"message_id": msg_id, "emoji": emoji}, headers=who)
+            r = react(alice, "❤️")
+            assert r.status_code == 200, r.text
+            assert r.json()["reactions"] == [{"user_id": "dm-alice", "emoji": "❤️"}]
+            # a different emoji REPLACES mine (still one row)
+            assert react(alice, "\U0001F44D").json()["reactions"] == [
+                {"user_id": "dm-alice", "emoji": "\U0001F44D"}]
+            # second reactor joins
+            assert len(react(bob, "\U0001F602").json()["reactions"]) == 2
+            # same emoji again REMOVES mine
+            assert react(alice, "\U0001F44D").json()["reactions"] == [
+                {"user_id": "dm-bob", "emoji": "\U0001F602"}]
+            # emoji=null removes too
+            assert react(bob, None).json()["reactions"] == []
+            # guardrails: arbitrary emoji, unknown message, non-participant,
+            # and a real message reached via the WRONG conversation — all rejected
+            assert react(alice, "🦄").status_code == 400
+            assert client.post(f"/dm/conversations/{conv_id}/reactions",
+                               json={"message_id": "dmm-nope", "emoji": "❤️"},
+                               headers=alice).status_code == 404
+            assert react(eve, "❤️").status_code == 404
+            eve_conv = client.post("/dm/conversations", json={"peer_user_id": "dm-eve"},
+                                   headers=alice).json()["id"]
+            assert react(alice, "❤️", cid=eve_conv).status_code == 404
+            # reactions ride along in the message list
+            assert react(bob, "❤️").status_code == 200
+            listed = client.get(f"/dm/conversations/{conv_id}/messages",
+                                headers=alice).json()["messages"]
+            reacted = next(m for m in listed if m["id"] == msg_id)
+            assert reacted["reactions"] == [{"user_id": "dm-bob", "emoji": "❤️"}]
+
             # ── report emails the founder with context ───────────────
             r = client.post(f"/dm/conversations/{conv_id}/report",
                             json={"note": "test report"}, headers=alice)
@@ -141,10 +176,11 @@ def test_dm_full_lifecycle(monkeypatch):
             assert emails and "DM report" in emails[-1][0]
             assert "Camp carpool Thursday?" in emails[-1][1]
 
-            # ── delete_family removes BOTH sides' threads ────────────
+            # ── delete_family removes BOTH sides' threads + reactions ─
             r = client.delete("/family/dm-alice", headers=alice)
             assert r.status_code == 200
-            assert r.json()["deleted"].get("dm_conversations") == 1
+            assert r.json()["deleted"].get("dm_conversations") == 2  # bob + eve threads
+            assert r.json()["deleted"].get("dm_reactions") == 1  # bob's ❤️ swept too
             assert client.get("/dm/conversations", headers=bob).json()["conversations"] == []
     finally:
         _reconnect_shared_storage(server)

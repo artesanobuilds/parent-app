@@ -11,6 +11,9 @@ struct MainTabView: View {
     // conversation survives switching between the Plan hub's segments.
     @StateObject private var cosVM: CosChatViewModel
     @State private var selectedTab: Tab = .home
+    // Drives the Circle tab's unread-DM badge + the push deep link.
+    @EnvironmentObject private var session: AppSession
+    @Environment(\.scenePhase) private var scenePhase
 
     enum Tab: String {
         case home, library, agent, circle, planning, saved
@@ -55,7 +58,34 @@ struct MainTabView: View {
                 planVM.baseURL = url
                 await contentVM.loadAllContent(baseURL: url)
             }
+            // A DM push tapped before this tree existed (cold launch) is
+            // waiting in UserDefaults — route it now.
+            consumePendingDMDeeplink()
+            await session.refreshDMUnread(userID: username, baseURL: configuration.baseURL)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .dmPushTapped)) { _ in
+            consumePendingDMDeeplink()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .dmPushReceived)) { _ in
+            Task { await session.refreshDMUnread(userID: username, baseURL: configuration.baseURL) }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                consumePendingDMDeeplink()
+                Task { await session.refreshDMUnread(userID: username, baseURL: configuration.baseURL) }
+            }
+        }
+    }
+
+    /// Route a tapped DM push into its thread: Circle tab → (CircleView opens
+    /// the Messages sheet) → (the inbox pushes the conversation). The stash
+    /// survives the cold-launch race where the tap precedes the view tree.
+    private func consumePendingDMDeeplink() {
+        guard let conversationId = UserDefaults.standard.string(forKey: AppDelegate.pendingDMDeeplinkKey)
+        else { return }
+        UserDefaults.standard.removeObject(forKey: AppDelegate.pendingDMDeeplinkKey)
+        session.pendingDMConversationId = conversationId
+        withAnimation(.hearthFast) { selectedTab = .circle }
     }
 
     private var tabContent: some View {
@@ -110,7 +140,8 @@ struct MainTabView: View {
             tabBarItem(tab: .home, icon: "house", activeIcon: "house.fill", label: "Home")
             tabBarItem(tab: .library, icon: "book", activeIcon: "book.fill", label: "Library")
             tabBarItem(tab: .agent, icon: "message", activeIcon: "message.fill", label: "Coach")
-            tabBarItem(tab: .circle, icon: "person.2", activeIcon: "person.2.fill", label: "Circle")
+            tabBarItem(tab: .circle, icon: "person.2", activeIcon: "person.2.fill", label: "Circle",
+                       badge: session.dmUnread)
             tabBarItem(tab: .planning, icon: "calendar", activeIcon: "calendar", label: "Plan")
             tabBarItem(tab: .saved, icon: "bookmark", activeIcon: "bookmark.fill", label: "Saved")
         }
@@ -126,7 +157,8 @@ struct MainTabView: View {
         )
     }
 
-    private func tabBarItem(tab: Tab, icon: String, activeIcon: String, label: String) -> some View {
+    private func tabBarItem(tab: Tab, icon: String, activeIcon: String, label: String,
+                            badge: Int = 0) -> some View {
         Button {
             withAnimation(.hearthFast) {
                 selectedTab = tab
@@ -136,6 +168,20 @@ struct MainTabView: View {
                 Image(systemName: selectedTab == tab ? activeIcon : icon)
                     .font(.system(size: 20, weight: .medium))
                     .frame(height: 26)
+                    // Level-1 unread signal: visible from ANY tab. The louder
+                    // level-2 signal is the envelope inside Circle itself.
+                    .overlay(alignment: .topTrailing) {
+                        if badge > 0 {
+                            Text(badge > 9 ? "9+" : "\(badge)")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.inkOnPhotoLight)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(Color.accentDefault)
+                                .clipShape(Capsule())
+                                .offset(x: 10, y: -4)
+                        }
+                    }
 
                 // Six tabs on a 375pt phone: the LABEL's Dynamic Type is capped
                 // (icons still scale, every item keeps its accessibilityLabel)
@@ -153,6 +199,6 @@ struct MainTabView: View {
             .padding(.vertical, .hearth300)
             .contentShape(Rectangle())
         }
-        .accessibilityLabel(label)
+        .accessibilityLabel(badge > 0 ? "\(label), \(badge) unread messages" : label)
     }
 }
