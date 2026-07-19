@@ -46,6 +46,12 @@ bugs**. Each rule earns its place. Follow them.
   a user-facing vertical or door updates its doc page in the SAME PR** (page slug = the
   vertical's registry key). Existence is locked by `tests/test_public_docs.py`; currency
   is this rule.
+- **Every user-facing push adds a release-notes entry** to
+  `parent-dashboard/docs/release-notes.md` — newest at top, dated, written for beta
+  parents: what changed + exactly how to access it (+ a screenshot in
+  `public/docs-assets/` when feasible). iOS features are tagged *app update X.YY* (they
+  arrive via TestFlight, not the push); web features say *live now*. The note rides the
+  same deploy as the feature, so it can never lag.
 
 ## Verify before you commit
 - Backend: `cd mvp-backend && source .venv/bin/activate && pytest -q`

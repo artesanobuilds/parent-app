@@ -52,6 +52,7 @@ export const DOCS: DocPage[] = Object.entries(raw)
 // Section display order (sections not listed sort last, alphabetically).
 const SECTION_ORDER = [
   'Getting started',
+  "What's new",
   'Your plan',
   'Activities',
   'Coach & companions',

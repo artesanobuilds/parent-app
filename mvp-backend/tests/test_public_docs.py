@@ -108,3 +108,15 @@ def test_docs_page_renders_legal_from_the_api():
     assert "isLegalSlug" in src and "LegalDoc" in src, (
         "Docs.tsx no longer routes legal slugs to the API-backed renderer"
     )
+
+
+def test_release_notes_page_exists():
+    """Every user-facing push adds an entry to the release-notes page (repo
+    rule in CLAUDE.md). This locks the page's existence + shape: newest-first
+    dated entries under a "What's new" section."""
+    page = DOCS_DIR / "release-notes.md"
+    assert page.is_file(), "parent-dashboard/docs/release-notes.md is missing"
+    text = page.read_text()
+    meta = _frontmatter(page.read_text())
+    assert meta.get("section") == "What's new"
+    assert text.count("## ") >= 1, "release notes need at least one dated entry"
