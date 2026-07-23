@@ -10,6 +10,16 @@ Every update we ship, newest first — what changed and how to find it. Features
 *app update* arrive on your phone through TestFlight; everything else is live the moment
 it's listed here.
 
+## July 22, 2026 — voice, healed
+
+**Voice conversations now recover on their own** *(live now)* — a few of you hit a
+"Sorry — something went wrong" wall when talking to Coach by voice. We found the cause: if a
+voice reply got interrupted at exactly the wrong moment (say, you started talking while Coach
+was mid-lookup), the conversation could get stuck and *stay* stuck. Coach now repairs the
+conversation automatically before every reply, and if something still goes sideways it quietly
+retries before saying anything. If voice ever told you "something went wrong" — it's fixed,
+just open voice and talk.
+
 ## July 19, 2026 — messages, sharpened
 
 **Reactions, instant delivery, and a smarter envelope** *(app update 1.73)* — four upgrades to

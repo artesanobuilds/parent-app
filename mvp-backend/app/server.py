@@ -23,6 +23,7 @@ from app import moderation
 from app import telemetry
 from app import email_smtp
 from app import summary as kid_summary
+from app import thread_repair
 from app.auth import current_user, optional_user, authorize_user_match, issue_token as auth_issue_token
 from app.rate_limit import enforce as rate_limit_enforce
 from app.cost_logging import CostLoggingCallbackHandler, new_workflow_id
@@ -431,45 +432,57 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
 
     thread_messages = chat_memory.get_thread_messages(user_id, thread_id)
     thread_messages.append({"role": "user", "content": message})
-    assistant_buffer = ""
-    
-    try:
-        # Stream events from the graph
-        # "values" mode streams the full state at each step
-        # "updates" mode streams only the changes
-        async for event in agent.astream_events(
-            {"messages": [HumanMessage(content=message)]},
-            config=config,
-            version="v1"
-        ):
-            # We are interested in chat model stream events to stream tokens back to client
-            kind = event["event"]
-            
-            if kind == "on_chat_model_stream":
-                content = event["data"]["chunk"].content
-                if content:
-                    # Format as SSE data
-                    assistant_buffer += content
-                    yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
-            
-            elif kind == "on_tool_start":
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"[chat] tool_start name={event.get('name')} input={event.get('data', {}).get('input')}")
-                yield f"data: {json.dumps({'type': 'tool_start', 'tool': event['name']})}\n\n"
-                 
-            elif kind == "on_tool_end":
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"[chat] tool_end name={event.get('name')} output={event.get('data', {}).get('output')}")
-                yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name']})}\n\n"
 
-        yield "data: [DONE]\n\n"
-        if assistant_buffer:
-            thread_messages.append({"role": "assistant", "content": assistant_buffer})
-        persist_state(user_id)
+    # Self-heal a thread poisoned by a cancelled tool call before the turn
+    # (see app/thread_repair.py — without this one interrupted turn breaks
+    # the thread forever).
+    await thread_repair.repair_thread(agent, config)
 
-    except Exception as e:
-        logger.error(f"Error in stream: {e}")
-        yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+    for attempt in (1, 2):
+        assistant_buffer = ""
+        try:
+            # Stream events from the graph
+            # "values" mode streams the full state at each step
+            # "updates" mode streams only the changes
+            async for event in agent.astream_events(
+                {"messages": [HumanMessage(content=message)]},
+                config=config,
+                version="v1"
+            ):
+                # We are interested in chat model stream events to stream tokens back to client
+                kind = event["event"]
+
+                if kind == "on_chat_model_stream":
+                    content = event["data"]["chunk"].content
+                    if content:
+                        # Format as SSE data
+                        assistant_buffer += content
+                        yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+
+                elif kind == "on_tool_start":
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"[chat] tool_start name={event.get('name')} input={event.get('data', {}).get('input')}")
+                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': event['name']})}\n\n"
+
+                elif kind == "on_tool_end":
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"[chat] tool_end name={event.get('name')} output={event.get('data', {}).get('output')}")
+                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name']})}\n\n"
+
+            yield "data: [DONE]\n\n"
+            if assistant_buffer:
+                thread_messages.append({"role": "assistant", "content": assistant_buffer})
+            persist_state(user_id)
+            return
+
+        except Exception as e:
+            if attempt == 1 and not assistant_buffer and thread_repair.is_dangling_tool_error(e):
+                logger.warning(f"[chat] dangling tool call mid-run — repairing and retrying user_id={user_id} thread_id={thread_id}")
+                await thread_repair.repair_thread(agent, config)
+                continue
+            logger.exception(f"[chat] stream error user_id={user_id} thread_id={thread_id}")
+            yield f"data: {json.dumps({'type': 'error', 'content': 'Something went wrong. Please try again.'})}\n\n"
+            return
 
 
 async def generate_onboarding_stream(message: str, thread_id: str, user_id: str) -> AsyncGenerator[str, None]:
@@ -489,6 +502,8 @@ async def generate_onboarding_stream(message: str, thread_id: str, user_id: str)
     thread_messages = onboarding_memory.get_thread_messages(user_id, thread_id)
     thread_messages.append({"role": "user", "content": message})
     assistant_buffer = ""
+
+    await thread_repair.repair_thread(agent, config)
 
     try:
         async for event in agent.astream_events(
@@ -518,8 +533,8 @@ async def generate_onboarding_stream(message: str, thread_id: str, user_id: str)
         persist_state(user_id)
 
     except Exception as e:
-        logger.error(f"Error in onboarding stream: {e}")
-        yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+        logger.exception(f"[onboarding] stream error user_id={user_id} thread_id={thread_id}")
+        yield f"data: {json.dumps({'type': 'error', 'content': 'Something went wrong. Please try again.'})}\n\n"
 
 # ── Auth (closed-beta opaque tokens) ─────────────────────────────────
 

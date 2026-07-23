@@ -37,6 +37,7 @@ from app.convai_endpoint import (
     _openai_done,
     _probe_stream,
 )
+from app.thread_repair import is_dangling_tool_error, repair_thread
 
 logger = logging.getLogger(__name__)
 
@@ -153,34 +154,62 @@ async def _stream_response(user_id: str, thread_id: str, message: str):
     _voice_cost = CostLoggingCallbackHandler(
         feature="parent_voice", workflow=new_workflow_id(), session=thread_id, user=user_id
     )
-    # Share the thread with the text /chat path so the agent remembers across
-    # voice and text (same memory_key convention as server.generate_stream).
+    # NOTE: voice memory is its own thread (thread_id "default") — the text
+    # /chat path uses a per-install UUID thread, so the two do NOT share
+    # history today. Unifying them is a product decision, tracked in the plan.
     config = {"configurable": {"thread_id": f"{user_id}:{thread_id}"}, "callbacks": [_voice_cost]}
-    stripper = _LinkStripper()
 
-    try:
-        async for event in agent.astream_events(
-            {"messages": [HumanMessage(content=message)]},
-            config=config,
-            version="v1",
-        ):
-            if event["event"] != "on_chat_model_stream":
+    # Self-heal before the turn: a prior cancelled turn (ElevenLabs barge-in /
+    # timeout abort) can leave a dangling tool call that would 400 every
+    # request on this thread forever. See app/thread_repair.py.
+    await repair_thread(agent, config)
+
+    for attempt in (1, 2):
+        stripper = _LinkStripper()
+        yielded = False
+        try:
+            async for event in agent.astream_events(
+                {"messages": [HumanMessage(content=message)]},
+                config=config,
+                version="v1",
+            ):
+                if event["event"] != "on_chat_model_stream":
+                    continue
+                content = event["data"]["chunk"].content
+                if not content:
+                    continue
+                safe, tools = stripper.feed(content)
+                if safe:
+                    yielded = True
+                    yield _openai_delta(content=safe, chat_id=chat_id)
+                for kind, cid in tools:
+                    yielded = True
+                    yield _show_content_tool_delta(kind, cid, chat_id)
+
+            tail = stripper.flush()
+            if tail:
+                yield _openai_delta(content=tail, chat_id=chat_id)
+            yield _openai_done()
+            return
+
+        except Exception as exc:
+            # Poisoned mid-run (e.g. a concurrent voice request cancelled a
+            # tool call after our pre-flight check): repair and retry once,
+            # but only if nothing streamed yet — a retry after spoken output
+            # would repeat the sentence to the parent.
+            if attempt == 1 and not yielded and is_dangling_tool_error(exc):
+                logger.warning(
+                    "[parent-convai] dangling tool call mid-run — repairing and "
+                    "retrying user=%s thread=%s", user_id, thread_id,
+                )
+                await repair_thread(agent, config)
                 continue
-            content = event["data"]["chunk"].content
-            if not content:
-                continue
-            safe, tools = stripper.feed(content)
-            if safe:
-                yield _openai_delta(content=safe, chat_id=chat_id)
-            for kind, cid in tools:
-                yield _show_content_tool_delta(kind, cid, chat_id)
-
-        tail = stripper.flush()
-        if tail:
-            yield _openai_delta(content=tail, chat_id=chat_id)
-        yield _openai_done()
-
-    except Exception:
-        logger.exception("[parent-convai] stream error")
-        yield _openai_delta(content="Sorry — something went wrong. Let's try again.", chat_id=chat_id)
-        yield _openai_done()
+            logger.exception(
+                "[parent-convai] stream error user=%s thread=%s", user_id, thread_id
+            )
+            yield _openai_delta(
+                content="I hit a snag on my end — give me a second, then ask me again.",
+                chat_id=chat_id,
+            )
+            yield _openai_done()
+            return

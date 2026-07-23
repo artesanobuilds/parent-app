@@ -230,6 +230,11 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
     )
     config_lg = {"configurable": {"thread_id": memory_key}, "callbacks": [_voice_cost]}
 
+    # Self-heal a thread poisoned by a cancelled tool call (see
+    # app/thread_repair.py) before running the turn.
+    from app.thread_repair import repair_thread
+    await repair_thread(agent, config_lg)
+
     sm = moderation.StreamingModerator(
         user_id=user_id, kid_name=kid_name, agent_id=agent_id, age_band=age_band,
         cost_workflow=voice_wf, cost_user=user_id,
@@ -312,6 +317,8 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
         yield _openai_done()
 
     except Exception as e:
-        logger.exception("[convai] stream error")
+        logger.exception(
+            "[convai] stream error user=%s kid=%s thread=%s", user_id, kid_name, thread_id
+        )
         yield _openai_delta(content="Something went wrong. Let's try again.", chat_id=chat_id)
         yield _openai_done()
