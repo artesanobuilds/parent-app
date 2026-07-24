@@ -73,6 +73,73 @@ but a **separate** Custom-LLM endpoint and token endpoint.
 
 ---
 
+## Client events — agent-level config, **not** overridable per connection
+
+`client_events` is the list of non-audio events ElevenLabs pushes to the SDK. It is
+configured **on the agent** (console → Advanced → Client events, or via the API recipe
+below) and is **not** in the overridable set — putting a `conversation.client_events`
+list in `conversation_config_override` at token-mint time does nothing. If the app needs
+an event, the *agent* has to emit it.
+
+As-built, **2026-07-23** (live values):
+
+| Event | `kid-companion-v2` | `parent-coach-v2` | What breaks without it |
+|---|---|---|---|
+| `audio` | ✅ | ✅ | (enabled, but see "Text sync & alignment" — it doesn't actually arrive over WebRTC) |
+| `interruption` | ✅ | ✅ | barge-in isn't signalled to the client |
+| `user_transcript` | ✅ | ✅ | the kid/parent's own words never appear in the transcript |
+| `agent_response` | ✅ | ✅ | no agent text at all — audio only |
+| `agent_response_correction` | ✅ | ✅ | after a barge-in the transcript keeps the **unspoken** tail (see below) |
+| `vad_score` | ❌ **missing** | ✅ | the listening orb doesn't animate — the SDK's `onVadScore` callback fires **only** if the agent emits this event |
+
+> ⚠️ **Known follow-up:** `kid-companion-v2` is still missing `vad_score`, so the kid
+> surface's orb can't react to the kid's voice the way the parent surface's does. Add it
+> with the PATCH recipe below (the parent agent is the reference list).
+
+---
+
+## Text sync & alignment — why the transcript is revealed client-side
+
+**Platform reality: there is no alignment data over WebRTC.** The `audio` client event is
+enabled on both agents, but with the LiveKit/WebRTC transport ElevenLabs does **not**
+send `audio` events to the client — the audio rides the media track directly, and the
+per-chunk character **alignment** payload rides with those events. So the character-level
+"which characters have been spoken so far" signal is, in practice, **unavailable to the
+iOS app**. Treat alignment as **opportunistic**: wire it up, use it if it ever shows up
+(`Conversation.$latestAudioEvent` → `event.alignment`), never depend on it.
+
+**Why a naive `Text(message.content)` render is wrong.** The `agent_response` event
+carries the **entire turn's text at once**, delivered alongside the *first* audio chunk,
+and the SDK upserts it whole into `conversation.messages`. Render it directly and the
+whole paragraph pops onto screen while the agent is still on its first syllable — the
+reader finishes 10 seconds before the voice does, which reads as lag/desync and kills the
+"it's talking to me" illusion.
+
+**What the app does instead.** A client-side reveal engine — pacing in
+`VoiceRevealEngine.swift`, rendering in `StreamingText.swift`, wired identically on both
+surfaces (`ParentVoiceView` and `KidAgentView`) — types the turn out progressively:
+
+- Gated on **`conversation.agentState == .speaking`** — text only advances while audio is
+  actually playing, so it pauses through think-time and stops dead on a barge-in.
+- **Adaptive characters-per-second**: the rate is derived from the turn's length against
+  the observed speaking window rather than a fixed constant, so short and long turns both
+  land roughly with the audio. A floor rate guarantees the text always completes.
+- **Alignment, if present, wins**: when a real spoken-character count is available it
+  drives the reveal directly (`spokenProgress()`), and the rate engine is just the
+  fallback. Today that branch never fires on device — see above.
+- Reveal is **monotonic** and keyed per message id, so only the in-progress turn animates
+  and prior turns stay fully rendered.
+
+**Barge-in is `agent_response_correction`.** When the user interrupts, ElevenLabs fires
+`agent_response_correction` with the **truncated** text that actually got spoken, and the
+SDK rewrites that message's content **in place**. The reveal must therefore tolerate the
+text *shrinking* under it (clamp the revealed count down to the new length) — that
+correction event is the only thing that keeps the transcript honest about what the parent
+or kid actually heard. Drop the event from `client_events` and every interrupted turn
+leaves unspoken words on screen.
+
+---
+
 ## Architecture
 
 ```
@@ -187,6 +254,99 @@ secret in step 2 doesn't match `ELEVENLABS_CONVAI_SECRET`.
 
 ---
 
+## Editing agent config via API (safer than clicking through the console)
+
+Everything in the console is readable/writable at
+`https://api.elevenlabs.io/v1/convai/agents/{agent_id}` with an `xi-api-key` header
+(same key as `ELEVENLABS_API_KEY`, needs **`convai_write`** to PATCH). Always run the
+**GET-snapshot → PATCH → GET-diff** loop — a `PATCH` is a *partial* update, but nested
+objects you *do* send replace what's there, so you want a before/after you can diff.
+
+```bash
+KEY="$ELEVENLABS_API_KEY"
+AID="$ELEVENLABS_PARENT_AGENT_ID"          # or ELEVENLABS_AGENT_ID
+BASE="https://api.elevenlabs.io/v1/convai/agents/$AID"
+
+# 1. SNAPSHOT — keep it; this is your rollback and your key-name reference
+curl -s "$BASE" -H "xi-api-key: $KEY" > /tmp/agent.before.json
+
+# 2. PATCH — partial update, everything lives under conversation_config
+curl -s -X PATCH "$BASE" \
+  -H "xi-api-key: $KEY" -H "Content-Type: application/json" \
+  -d '{
+    "conversation_config": {
+      "conversation": {
+        "client_events": ["audio","interruption","user_transcript",
+                          "agent_response","agent_response_correction","vad_score"]
+      },
+      "tts": { "model_id": "eleven_flash_v2", "optimize_streaming_latency": 3 }
+    }
+  }' > /tmp/agent.patch.json
+
+# 3. DIFF — confirm you changed only what you meant to
+curl -s "$BASE" -H "xi-api-key: $KEY" > /tmp/agent.after.json
+diff <(jq -S . /tmp/agent.before.json) <(jq -S . /tmp/agent.after.json)
+```
+
+Notes:
+- `client_events` is a **whole-list replace** — send the complete list, not a delta.
+- For anything not shown here (`turn`, `asr`, `agent.prompt`, tools…), read the exact key
+  names out of `/tmp/agent.before.json` rather than guessing; the schema is wider than
+  the console UI.
+- A PATCH takes effect on the **next connection** — no publish step needed.
+
+> ⚠️ **Verified gotcha — English agents reject the `_v2_5` TTS models.** PATCHing
+> `"model_id": "eleven_flash_v2_5"` (or `eleven_turbo_v2_5`) onto an English-language
+> agent 400s with `English Agents must use turbo or flash v2`. The `_v2_5` models are the
+> **multilingual** variants; an English agent must use **`eleven_flash_v2`** (or
+> `eleven_turbo_v2`). The error text is confusing — it's telling you to *drop* the `_5`.
+
+### TTS & turn-taking state — 2026-07-23
+
+| | `kid-companion-v2` | `parent-coach-v2` |
+|---|---|---|
+| TTS model | `eleven_v3_conversational` (unchanged — **pending a listening check** before moving it) | **`eleven_flash_v2`** — moved here for latency (fastest first chunk, ~75–150 ms) |
+| `optimize_streaming_latency` | `3` | `3` |
+| Turn model | `turn_v3`, speculative turns **on** | `turn_v3`, speculative turns **on** |
+| Soft-timeout filler | **off** (`timeout_seconds: -1`) | **on at `2.0`s**, 3 randomized coach lines |
+
+Why the split: first-audio-chunk latency is what the parent perceives as "is this thing
+broken?", so the coach took the fastest model. The kid voice trades some latency for
+warmth, so it stays on `eleven_v3_conversational` until someone actually listens to both
+back-to-back on a device and calls it.
+
+### Soft-timeout fillers — the fix for silent tool turns
+
+A prod baseline on 2026-07-23 (`tools/voice_bench.py --prod --endpoint parent`) measured a
+**bimodal** time-to-first-spoken-text: ~1.0–1.7 s on most turns, but **~4.0–4.4 s whenever the
+agent calls the Tavily search tool** — during which the parent hears *pure silence*, because
+first-SSE-byte and first-content-delta are identical (we send nothing before the model's first
+token). `soft_timeout_config` is ElevenLabs' native cover for exactly that gap: if the custom
+LLM hasn't produced content within `timeout_seconds`, the agent speaks a filler line.
+
+As-built on `parent-coach-v2`:
+
+```jsonc
+"turn": { "soft_timeout_config": {
+  "timeout_seconds": 2.0,            // above the ~1.7s fast turns, below the ~4s tool turns
+  "message": "Let me think about that for a second.",
+  "additional_soft_timeout_messages": ["Mm — give me one sec.", "Okay, let me look at that."],
+  "randomize_fillers": true,
+  "use_llm_generated_message": false
+}}
+```
+
+> ⚠️ **`max_soft_timeouts_per_generation` cannot be lowered to 1.** PATCHing it returns `200`
+> but the value stays **`3`** — the API silently clamps it. So a genuinely slow generation can
+> stack up to three fillers before the real answer. If that ever sounds broken on device, the
+> lever is raising `timeout_seconds` (2.5–3.0), not the count.
+
+This is belt-and-braces with the prompt-side directive (the parent `voice_directive` tells the
+model to say something aloud *before* it searches): the directive depends on model compliance
+every turn, the soft timeout fires deterministically.
+
+---
+
 ## Data contract
 
 **Token endpoint → iOS** (`GET /voice/convai-token?kid_name=X`, `Authorization: Bearer`, `X-Kid-Pin`):
@@ -201,6 +361,10 @@ secret in step 2 doesn't match `ELEVENLABS_CONVAI_SECRET`.
   "custom_llm_extra_body": { "user_id":"...", "kid_name":"...", "thread_id":"default", "kid_pin":"...", "agent_id":"..." }
 }
 ```
+
+> Note: the `conversation.client_events` list inside the override above is **inert** —
+> client events are agent-level config and are not in the overridable set (see "Client
+> events" above). It's harmless, but changing it changes nothing; PATCH the agent instead.
 
 **ElevenLabs → Custom LLM** (`POST /v1/chat/completions`): standard OpenAI body plus
 `elevenlabs_extra_body` carrying the `custom_llm_extra_body` above. Backend pulls

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import uuid
 from typing import Any, Dict, Optional
 
@@ -86,6 +87,51 @@ def _end_call_tool_delta(chat_id: str) -> str:
     return f"data: {json.dumps(obj)}\n\n"
 
 
+# ── Voice-turn latency instrumentation ───────────────────────────────────────
+# Shared by both Custom-LLM endpoints (the parent one imports these) so the two
+# voice surfaces report the exact same numbers under the same metric names.
+
+def _ms(mark: float) -> int:
+    """Elapsed whole ms since a `time.monotonic()` mark. Monotonic, not wall
+    clock — an NTP step mid-turn must not invent negative latency."""
+    return int((time.monotonic() - mark) * 1000)
+
+
+def _voice_perf_metrics(
+    feature: str,
+    *,
+    repair_ms: Optional[int],
+    model_ttft_ms: Optional[int],
+    ttfb_ms: Optional[int],
+    tool_turn: int,
+    outcome: str,
+) -> None:
+    """OTel twin of the `[PERF][VOICE]` log line — logs are for forensics on one
+    turn, these are for the p50/p95 trend.
+
+    Dotted names follow the app/observability convention; Prometheus renders them
+    as `voice_turn_ttfb_ms` / `voice_turn_model_ttft_ms` / `voice_turn_repair_ms`
+    and the counter as `voice_turns_total`. Cardinality: 2 features × 2 tool_turn
+    × 4 outcomes (ok / blocked / error / interrupted) = 16 series on the counter,
+    2 each on the histograms.
+
+    Defensive twice over — obs.count/observe are no-ops when OTel is unconfigured
+    and swallow their own failures, and the whole body is wrapped besides. A
+    metrics outage must never cost a parent or kid their turn."""
+    try:
+        from app import observability as obs
+
+        if repair_ms is not None:
+            obs.observe("voice.turn.repair_ms", float(repair_ms), feature=feature)
+        if model_ttft_ms is not None:
+            obs.observe("voice.turn.model_ttft_ms", float(model_ttft_ms), feature=feature)
+        if ttfb_ms is not None:
+            obs.observe("voice.turn.ttfb_ms", float(ttfb_ms), feature=feature)
+        obs.count("voice.turns", feature=feature, tool_turn=tool_turn, outcome=outcome)
+    except Exception:  # noqa: BLE001 — telemetry must never break a voice turn
+        pass
+
+
 async def _probe_stream():
     """Minimal valid OpenAI SSE stream for ElevenLabs' connection-test probe."""
     chat_id = "probe"
@@ -146,13 +192,56 @@ async def convai_chat_completions(
 
 
 async def _stream_response(user_id: str, kid_name: str, thread_id: str, message: str):
+    turn_started = time.monotonic()
     storage = _storage()
     chat_id = uuid.uuid4().hex[:12]
 
+    from app.cost_logging import CostLoggingCallbackHandler, log_perf, new_workflow_id
+    # ONE id for the whole voice turn (agent + moderation + the perf line), so
+    # every [COST] line and the [PERF] line for this turn join on `workflow=`.
+    voice_wf = new_workflow_id()
+
+    # Turn timings. `model_ttft_ms` is when the model's first token reached US;
+    # `ttfb_ms` is when the first delta reached ElevenLabs. The gap between them
+    # is OUR buffering (moderation lookahead), i.e. the only part we can shrink.
+    repair_ms: Optional[int] = None
+    model_ttft_ms: Optional[int] = None
+    ttfb_ms: Optional[int] = None
+    chunks = 0
+    tool_turn = 0
+    perf_emitted = False
+
+    def _mark_yield() -> None:
+        """Call immediately before yielding a content delta to ElevenLabs."""
+        nonlocal ttfb_ms, chunks
+        if ttfb_ms is None:
+            ttfb_ms = _ms(turn_started)
+        chunks += 1
+
+    def _emit_perf(outcome: str) -> None:
+        """Exactly one [PERF][VOICE] line per turn, every exit path included —
+        a turn that errored or got blocked is precisely the one worth timing."""
+        nonlocal perf_emitted
+        if perf_emitted:
+            return
+        perf_emitted = True
+        log_perf(
+            "VOICE", feature="kid_voice", workflow=voice_wf, session=thread_id,
+            user=user_id, repair_ms=repair_ms, model_ttft_ms=model_ttft_ms,
+            ttfb_ms=ttfb_ms, total_ms=_ms(turn_started), chunks=chunks,
+            tool_turn=tool_turn,
+        )
+        _voice_perf_metrics(
+            "kid_voice", repair_ms=repair_ms, model_ttft_ms=model_ttft_ms,
+            ttfb_ms=ttfb_ms, tool_turn=tool_turn, outcome=outcome,
+        )
+
     agent, config = kid_agent_service.get_kid_agent(user_id, kid_name)
     if not config.get("enabled"):
+        _mark_yield()
         yield _openai_delta(content="I'm not ready to chat yet — your grown-up needs to set me up first.", chat_id=chat_id)
         yield _openai_done()
+        _emit_perf("blocked")
         return
 
     agent_id = config["id"]
@@ -161,17 +250,16 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
     lock = storage.is_kid_agent_crisis_locked(agent_id)
     if lock is not None:
         frozen_msg = "Your grown-up needs to check in with you before we can chat again."
+        _mark_yield()
         yield _openai_delta(content=frozen_msg, chat_id=chat_id)
         yield _end_call_tool_delta(chat_id)
         yield _openai_done()
+        _emit_perf("blocked")
         return
 
     family = profiling_service.get_family_profile(user_id)
     kid_profile = (family.get("children") or {}).get(kid_name) or {}
     age_band = _kid_age_band(kid_profile.get("age"))
-
-    from app.cost_logging import CostLoggingCallbackHandler, new_workflow_id
-    voice_wf = new_workflow_id()  # one id for the whole voice turn (agent + moderation)
 
     pre = moderation.moderate_input(
         user_id=user_id, kid_name=kid_name, agent_id=agent_id,
@@ -208,9 +296,11 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
                 user_id=user_id, kid_name=kid_name, agent_id=agent_id,
                 excerpt=message,
             )
+            _mark_yield()
             yield _openai_delta(content=crisis_msg, chat_id=chat_id)
             yield _end_call_tool_delta(chat_id)
             yield _openai_done()
+            _emit_perf("blocked")
             return
         else:
             redirect = "Hmm, let's try a different question — your grown-up will see this chat."
@@ -220,8 +310,10 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
                 agent_id=agent_id, message_id=user_msg_id,
                 details={"reason": pre.reason},
             )
+            _mark_yield()
             yield _openai_delta(content=redirect, chat_id=chat_id)
             yield _openai_done()
+            _emit_perf("blocked")
             return
 
     memory_key = f"kid:{user_id}:{kid_name}:{thread_id}"
@@ -233,7 +325,9 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
     # Self-heal a thread poisoned by a cancelled tool call (see
     # app/thread_repair.py) before running the turn.
     from app.thread_repair import repair_thread
+    repair_started = time.monotonic()
     await repair_thread(agent, config_lg)
+    repair_ms = _ms(repair_started)
 
     sm = moderation.StreamingModerator(
         user_id=user_id, kid_name=kid_name, agent_id=agent_id, age_band=age_band,
@@ -241,6 +335,11 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
     )
     assistant_buffer = ""
     block_handled = False
+    # Barge-in aborts the HTTP request, which throws GeneratorExit into this
+    # generator mid-loop — so the post-loop append below never runs and the kid's
+    # DURABLE history silently loses the turn they just heard half of. `persisted`
+    # lets the finally: at the bottom write it exactly once. See that block.
+    persisted = False
 
     def _apply_block_side_effects():
         nonlocal block_handled
@@ -274,38 +373,57 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
             )
 
     try:
+        # version="v2" is the cheaper event API — v1 builds a much heavier event
+        # payload per token, which is pure overhead on a voice hot path where
+        # every ms is audible. The two filters we use (`event["event"]` kind and
+        # `data.chunk.content`) are identical across versions.
         async for event in agent.astream_events(
             {"messages": [HumanMessage(content=message)]},
             config=config_lg,
-            version="v1",
+            version="v2",
         ):
             kind = event["event"]
+            if kind == "on_tool_start" and model_ttft_ms is None:
+                # A tool ran before the first spoken token — that turn's latency
+                # belongs in its own bucket, not the plain-answer distribution.
+                tool_turn = 1
             if kind == "on_chat_model_stream":
                 content = event["data"]["chunk"].content
-                if not content:
+                # In v2 a chunk's content can be a LIST of content blocks (tool-call
+                # deltas), not a str. Concatenating that into the buffer or feeding
+                # it to the moderator would blow up mid-turn, so skip anything that
+                # isn't spoken text — the tool result comes back as a later chunk.
+                if not content or not isinstance(content, str):
                     continue
+                if model_ttft_ms is None:
+                    model_ttft_ms = _ms(turn_started)  # before moderation buffering
                 assistant_buffer += content
                 for safe in sm.feed(content):
+                    _mark_yield()
                     yield _openai_delta(content=safe, chat_id=chat_id)
                 if sm.state.value == "blocked":
                     _apply_block_side_effects()
+                    _mark_yield()
                     yield _openai_delta(content=sm.replacement_message(), chat_id=chat_id)
                     yield _end_call_tool_delta(chat_id)
                     break
 
         for chunk in sm.finalize():
+            _mark_yield()
             yield _openai_delta(content=chunk, chat_id=chat_id)
 
         if sm.state.value == "blocked" and sm.block_reason:
             already = block_handled
             _apply_block_side_effects()
             if not already:
+                _mark_yield()
                 yield _openai_delta(content=sm.replacement_message(), chat_id=chat_id)
                 yield _end_call_tool_delta(chat_id)
             storage.append_kid_message(
                 agent_id=agent_id, thread_id=thread_id, role="assistant",
                 content=sm.replacement_message(), parent_flagged=True,
             )
+            persisted = True
         elif assistant_buffer:
             reply_id = str(uuid.uuid4())
             storage.append_kid_message(
@@ -313,12 +431,47 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
                 content=sm.assembled_output or assistant_buffer,
                 message_id=reply_id,
             )
+            persisted = True
 
         yield _openai_done()
+        _emit_perf("blocked" if sm.state.value == "blocked" else "ok")
 
     except Exception as e:
         logger.exception(
             "[convai] stream error user=%s kid=%s thread=%s", user_id, kid_name, thread_id
         )
+        _mark_yield()
         yield _openai_delta(content="Something went wrong. Let's try again.", chat_id=chat_id)
         yield _openai_done()
+        _emit_perf("error")
+
+    finally:
+        # Interrupted-turn durability. A barge-in (or any client abort) closes this
+        # generator, so neither branch above ran — yet the kid HEARD part of the
+        # reply and the parent will look for it in the transcript. Persist what we
+        # actually generated, preferring the moderator's assembled/safe text over
+        # the raw buffer so nothing unreviewed lands in durable history.
+        #
+        # Deliberately minimal: a synchronous storage append and nothing else. No
+        # crisis side effects (lock / push / end_call) fire here — those stay in
+        # _apply_block_side_effects on the live path, because a cancelled request
+        # is not the place to lock an agent or wake a parent's phone. A blocked
+        # turn writes nothing: the replacement message was never spoken.
+        if not persisted and assistant_buffer and sm.state.value != "blocked":
+            try:
+                storage.append_kid_message(
+                    agent_id=agent_id, thread_id=thread_id, role="assistant",
+                    content=sm.assembled_output or assistant_buffer,
+                    message_id=str(uuid.uuid4()),
+                )
+            except Exception:  # noqa: BLE001 — best-effort; never mask the real exit
+                logger.warning(
+                    "[convai] interrupted-turn persist failed user=%s kid=%s thread=%s",
+                    user_id, kid_name, thread_id,
+                )
+        # A barge-in is the MOST common way a voice turn ends, and it reaches
+        # here without passing either branch above. Emitting only on the clean
+        # exits would silently drop every interrupted turn out of the latency
+        # histogram — leaving it measuring the turns nobody minded waiting for.
+        # No-ops (perf_emitted) when the turn already reported.
+        _emit_perf("interrupted")

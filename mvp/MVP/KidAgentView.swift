@@ -49,6 +49,7 @@ struct KidAgentView: View {
                         agentName: kid.invariants.agentDisplayName,
                         history: coordinator.vm.messages,
                         inputLevel: coordinator.inputLevel,
+                        spokenProgress: { coordinator.spokenProgress() },
                         onSend: { text in
                             Task { await coordinator.sendVoiceText(text) }
                         },
@@ -178,6 +179,9 @@ private struct VoiceConversationSurface: View {
     let agentName: String
     let history: [KidChatMessage]
     let inputLevel: Double
+    /// How much of the agent's current turn has been spoken (coordinator →
+    /// `VoiceRevealEngine`); paces the live bubble's reveal.
+    let spokenProgress: () -> SpokenProgress
     let onSend: (String) -> Void
     let onToggleMute: () -> Void
 
@@ -199,7 +203,13 @@ private struct VoiceConversationSurface: View {
                                     role: msg.role == .user ? .user : .assistant,
                                     content: msg.content
                                 ),
-                                agentName: agentName
+                                agentName: agentName,
+                                // Every agent bubble in the live session takes the
+                                // streaming path so a turn going from live → past
+                                // doesn't swap view types mid-flight; only the last
+                                // one is actually active.
+                                streamingProgress: msg.role == .agent ? spokenProgress : nil,
+                                isStreamingActive: msg.id == liveAgentMessageID
                             )
                             .id(msg.id)
                         }
@@ -228,6 +238,11 @@ private struct VoiceConversationSurface: View {
 
             inputBar
         }
+    }
+
+    /// The turn currently being spoken — the only bubble that animates.
+    private var liveAgentMessageID: Message.ID? {
+        conversation.messages.last(where: { $0.role == .agent })?.id
     }
 
     private var statusLine: some View {
@@ -505,6 +520,13 @@ private struct HistoryScroll: View {
 private struct KidMessageBubble: View {
     let message: KidChatMessage
     let agentName: String
+    /// Voice-only reveal inputs. Supplied ONLY by the live voice surface, where
+    /// the agent's turn arrives whole-turn and has to be paced against the audio.
+    /// History, the text fallback (real SSE token streaming) and the crisis
+    /// surface pass nothing and keep the plain `Text` — zero behaviour change.
+    var streamingProgress: (() -> SpokenProgress)?
+    /// True only for the turn currently being spoken; older bubbles render whole.
+    var isStreamingActive: Bool = false
 
     var body: some View {
         HStack(alignment: .top, spacing: .hearth400) {
@@ -514,7 +536,7 @@ private struct KidMessageBubble: View {
                     .frame(width: 32, height: 32)
                     .overlay(Text(String(agentName.prefix(1)))
                         .font(.hearthLabel).foregroundColor(.accentDefault))
-                Text(message.content)
+                assistantBody
                     .font(.hearthBodyMD)
                     .foregroundColor(.inkPrimary)
                     .padding(.hearth400)
@@ -536,6 +558,17 @@ private struct KidMessageBubble: View {
                     .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var assistantBody: some View {
+        if let streamingProgress {
+            StreamingText(text: message.content,
+                          isActive: isStreamingActive,
+                          spokenProgress: streamingProgress)
+        } else {
+            Text(message.content)
         }
     }
 }

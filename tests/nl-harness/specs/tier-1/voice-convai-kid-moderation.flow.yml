@@ -1,0 +1,79 @@
+spec:
+  name: voice-convai-kid-moderation
+  tier: 1
+  modules: [auth, kid_agent, moderation, voice]
+  intent: >
+    The kid voice surface is the ElevenLabs Custom-LLM endpoint
+    POST /v1/chat/completions — ElevenLabs POSTs OpenAI-shaped requests and
+    speaks whatever we stream back. There is no client-side second chance:
+    what we emit is what the kid hears. This flow proves the two things that
+    must never regress on that path — (1) the console connection probe stays
+    healthy without spinning up an agent, and (2) a crisis disclosure spoken
+    ALOUD is gated exactly like a typed one: hand-off message, the `end_call`
+    tool that hangs up the call, and a durable crisis lock the parent sees.
+    Replaces the deleted voice-synthesize-* specs (v1 per-fragment TTS was
+    removed in the ConvAI v2 migration).
+
+  personas:
+    parent:
+      preset: kid-agent-parent
+
+  preconditions:
+    - "OPENAI_API_KEY is set on the backend (the kid_agent_parent persona synthesizes a prompt)"
+    - "ELEVENLABS_CONVAI_SECRET is set on the backend AND exported to the harness process — the flow self-skips otherwise, since without the shared secret every request is a correct 401"
+    - "Backend's moderation patterns include the crisis phrase used in this test"
+
+  invariants:
+    - "A request with no elevenlabs_extra_body (the ElevenLabs console probe) returns 200 with a valid OpenAI SSE stub and a terminal `data: [DONE]`"
+    - "A request with a wrong shared secret returns 401 on both Authorization: Bearer and X-ElevenLabs-Secret"
+    - "A request whose elevenlabs_extra_body is present but missing user_id/kid_name returns 400"
+    - "Every streamed frame is a `chat.completion.chunk` object and the stream ends with `data: [DONE]`"
+    - "A crisis phrase spoken to the kid agent streams the crisis hand-off message, never the model's own answer"
+    - "The crisis turn emits an `end_call` tool-call delta with finish_reason `tool_calls` — an open mic on a locked companion is a safety failure"
+    - "GET /kid-agent/crisis-locks then shows the agent locked"
+    - "A follow-up voice turn on the locked agent is refused with the frozen message + end_call, and never reaches the model"
+    - "GET /kid-moderation/events records a crisis_routed event for the turn"
+
+  known_defects:
+    - >
+      The "locked follow-up turn" invariant currently XFAILs. lock_kid_agent_for_crisis
+      also flips kid_agent_configs.enabled to FALSE, and the endpoint checks
+      config["enabled"] BEFORE is_kid_agent_crisis_locked — so for a crisis-locked
+      agent the lock branch is unreachable: the kid hears the SETUP copy ("your
+      grown-up needs to set me up first") and NO end_call is emitted, leaving the
+      mic open on a companion that was just locked for a crisis. Same
+      enabled-flipped-in-place root cause as the "companion shows INTRODUCE" bug on
+      Home. Fix = check the lock before the enabled flag (or exempt locked agents
+      from the disabled branch); then delete the xfail block in the generated test.
+
+  cleanup:
+    - "POST /kid-agent/{agent_id}/revive restores the agent (restore-by-republish: the flow locks a real agent, so it must unlock it), then the persona's DELETE /family/{user_id} cascades the rest"
+
+  boundary_contracts:
+    - endpoint: POST /v1/chat/completions
+      as: elevenlabs
+      streaming: true
+      status: 200
+
+    - endpoint: POST /v1/chat/completions
+      as: anonymous
+      status: 401
+
+    - endpoint: POST /v1/chat/completions
+      as: elevenlabs
+      status: 400
+
+    - endpoint: GET /kid-agent/crisis-locks
+      as: parent
+      status: 200
+      response_includes: [locks]
+
+    - endpoint: GET /kid-moderation/events
+      as: parent
+      status: 200
+      response_includes: [events]
+
+    - endpoint: POST /kid-agent/{agent_id}/revive
+      as: parent
+      status: 200
+      response_includes: [ok, agent_id, kid_name]

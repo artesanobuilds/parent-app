@@ -20,6 +20,14 @@ Aggregate a single workflow's total + breakdown:
 Always logs RAW usage (tokens / credits / minutes) — the durable, vendor-price-
 independent signal. Also logs `usd`, an ESTIMATE from the pricing table below
 (override via env; prices change — verify against current vendor rates).
+
+The same key=value convention carries LATENCY via `log_perf()`:
+
+    [PERF][VOICE]  feature=parent_voice workflow=<id> session=<id> user=<id> \
+                   repair_ms=12 model_ttft_ms=850 ttfb_ms=940 total_ms=6200 chunks=42 tool_turn=0
+
+Because a turn's [PERF] line reuses the SAME workflow id as its [COST] lines,
+"what did this slow turn cost / what did this expensive turn feel like" is one grep.
 """
 from __future__ import annotations
 
@@ -33,6 +41,10 @@ from langchain_core.callbacks import BaseCallbackHandler
 # Dedicated logger so cost lines are easy to route/grep ("[COST]"). Inherits the
 # app's handler/format; the line itself is self-describing.
 cost_logger = logging.getLogger("cost")
+
+# Latency lines get their OWN logger so a perf grep doesn't drag in spend lines
+# (and so either stream can be routed/leveled independently in prod).
+perf_logger = logging.getLogger("perf")
 
 
 # ── Pricing (USD) — PLACEHOLDER DEFAULTS. Override via env per real vendor rates.
@@ -131,6 +143,34 @@ def log_cost(
     try:
         cost_logger.info("[COST][%s] %s", component.upper(), _kv(base))
     except Exception:  # cost logging must never break a request
+        pass
+
+
+def log_perf(
+    component: str,
+    *,
+    feature: str,
+    workflow: str,
+    user: Optional[str] = None,
+    session: Optional[str] = None,
+    **fields: Any,
+) -> None:
+    """Emit one `[PERF][COMPONENT] ...` line — the latency twin of log_cost(),
+    same `_kv` formatting and the same `workflow` correlation id, so a turn's
+    timings join its spend lines on one grep.
+
+    Fields whose value is None are DROPPED by `_kv` — that's load-bearing, not
+    sloppiness: a turn blocked before the model runs legitimately has no
+    `model_ttft_ms`, and an absent key parses better than a fake 0."""
+    base: Dict[str, Any] = {"feature": feature, "workflow": workflow}
+    if session is not None:
+        base["session"] = session
+    if user is not None:
+        base["user"] = user
+    base.update(fields)
+    try:
+        perf_logger.info("[PERF][%s] %s", component.upper(), _kv(base))
+    except Exception:  # perf logging must never break a request
         pass
 
 

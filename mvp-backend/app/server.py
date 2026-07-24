@@ -2196,15 +2196,16 @@ async def voice_convai_token(
     # override we let ElevenLabs use the voice configured on the agent in the
     # dashboard. (Re-add a `"tts": {"voice_id": ...}` block below to restore
     # per-kid voice selection from the allowlist.)
+    # client_events are NOT set here: they are AGENT-level ElevenLabs config
+    # (set once per agent via the EL API/console — see
+    # setup/voice-v2-elevenlabs-setup.md), and the iOS SDK only forwards the
+    # agent-scoped prompt / first_message / language / voice overrides anyway.
+    # A "conversation" key in this dict is silently dropped — don't re-add it.
     override: Dict[str, Any] = {
         "agent": {
             "prompt": {"prompt": config.get("system_prompt", "")},
             "language": "en",
         },
-        "conversation": {"client_events": [
-            "audio", "agent_response", "agent_chat_response_part", "user_transcript",
-            "interruption", "conversation_initiation_metadata",
-        ]},
     }
     if first_message:
         override["agent"]["first_message"] = first_message
@@ -2287,16 +2288,20 @@ async def voice_parent_convai_token(user_id: str = Depends(current_user)):
         "asterisks or bold. Keep weaving content recommendations as "
         "[Title](mvp://library/{id}) or [Title](mvp://community/{id}) exactly as "
         "instructed: the link text is spoken naturally and the app shows the card."
+        " If you need to search or look something up, SAY one short sentence out "
+        "loud first — \"Let me look that up.\" — and then call the tool. Never go "
+        "silent while a tool runs: the parent hears dead air."
     )
+    # client_events are NOT set here: they are AGENT-level ElevenLabs config
+    # (set once per agent via the EL API/console — see
+    # setup/voice-v2-elevenlabs-setup.md), and the iOS SDK only forwards the
+    # agent-scoped prompt / first_message / language / voice overrides anyway.
+    # A "conversation" key in this dict is silently dropped — don't re-add it.
     override: Dict[str, Any] = {
         "agent": {
             "prompt": {"prompt": build_system_prompt_for(user_id) + voice_directive},
             "language": "en",
         },
-        "conversation": {"client_events": [
-            "audio", "agent_response", "agent_chat_response_part", "user_transcript",
-            "interruption", "conversation_initiation_metadata",
-        ]},
     }
     extra_body = {"user_id": user_id, "thread_id": "default"}
 

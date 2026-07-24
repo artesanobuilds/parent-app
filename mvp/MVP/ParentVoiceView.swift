@@ -144,7 +144,9 @@ private struct ParentLiveCallView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: .hearth400) {
                         ForEach(conversation.messages) { msg in
-                            bubble(role: msg.role, text: msg.content)
+                            bubble(role: msg.role,
+                                   text: msg.content,
+                                   isLive: msg.id == liveAgentMessageID)
                                 .id(msg.id)
                         }
                         if !coordinator.surfaced.isEmpty {
@@ -178,13 +180,21 @@ private struct ParentLiveCallView: View {
         }
     }
 
+    /// The turn currently being spoken — the only bubble that animates. Older
+    /// agent bubbles render whole so they never re-type on a view rebuild.
+    private var liveAgentMessageID: Message.ID? {
+        conversation.messages.last(where: { $0.role == .agent })?.id
+    }
+
     @ViewBuilder
-    private func bubble(role: Message.Role, text: String) -> some View {
+    private func bubble(role: Message.Role, text: String, isLive: Bool) -> some View {
         if role == .agent {
             // Voice transcripts arrive whole-turn (ElevenLabs doesn't stream them
             // in voice mode), so we type them out client-side to feel like the
-            // text chat — paced to roughly track the spoken audio.
-            StreamingText(text: text, spokenProgress: { coordinator.spokenProgress() })
+            // text chat — paced to track the spoken audio.
+            StreamingText(text: text,
+                          isActive: isLive,
+                          spokenProgress: { coordinator.spokenProgress() })
                 .font(.hearthBodyMD).foregroundColor(.inkPrimary)
                 .padding(.hearth400)
                 .background(Color.bgElevated)
@@ -246,54 +256,3 @@ private struct ParentLiveCallView: View {
     }
 }
 
-// MARK: - Streaming (typewriter) text
-
-/// Reveals `text` progressively to mimic the text-chat's token streaming. Voice
-/// transcripts arrive whole-turn from ElevenLabs (no per-token event in voice
-/// mode), so we type them out client-side. Each agent bubble gets its own
-/// instance (keyed by message id), so only the in-progress turn animates; prior
-/// turns render fully. Pace (~22 cps) roughly tracks the spoken audio.
-private struct StreamingText: View {
-    let text: String
-    /// Spoken-char count from audio alignment, or nil if unavailable. When
-    /// present the reveal tracks the actual speech; when nil it falls back to a
-    /// fixed-rate typewriter.
-    var spokenProgress: () -> Int? = { nil }
-    var fallbackCPS: Double = 22   // typewriter rate when no alignment
-    var floorCPS: Double = 9       // guarantees completion when alignment leads/undershoots
-
-    @State private var shown = 0
-    @State private var task: Task<Void, Never>?
-
-    var body: some View {
-        Text(String(text.prefix(shown)))
-            .onAppear { start() }
-            .onChange(of: text) { _, _ in start() }
-            .onDisappear { task?.cancel() }
-    }
-
-    private func start() {
-        task?.cancel()
-        if shown > text.count { shown = text.count }   // text shrank (correction)
-        guard shown < text.count else { return }
-        let begin = Date()
-        task = Task { @MainActor in
-            while shown < text.count {
-                let elapsed = Date().timeIntervalSince(begin)
-                let target: Int
-                if let spoken = spokenProgress() {
-                    // Alignment leads; the floor guarantees completion even if the
-                    // alignment char-count undershoots the message length.
-                    target = max(spoken, Int(elapsed * floorCPS))
-                } else {
-                    target = Int(elapsed * fallbackCPS)   // pure typewriter
-                }
-                shown = max(shown, min(target, text.count))  // monotonic
-                if shown >= text.count { break }
-                try? await Task.sleep(nanoseconds: 30_000_000)  // 30ms tick
-                if Task.isCancelled { return }
-            }
-            shown = text.count
-        }
-    }
-}

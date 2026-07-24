@@ -20,7 +20,15 @@ enum Analytics {
         "parent_chat_message_sent": ["thread_kind"],
         "kid_chat_message_sent": ["agent_id"],
         "voice_session_started": ["surface"],
-        "voice_session_ended": ["surface", "duration_s"],
+        // Voice is the product's riskiest surface, so it reports from the
+        // customer's seat: how long the connect made them wait, why it failed
+        // when it did, how long each reply took to start speaking, and whether
+        // they got pushed back to text. Durations/counts/flags only — never a
+        // word of what was said.
+        "voice_session_connected": ["surface", "token_ms", "connect_ms", "attempts"],
+        "voice_session_failed": ["surface", "stage", "reason"],
+        "voice_turn": ["surface", "response_gap_ms", "alignment_present", "interrupted"],
+        "voice_session_ended": ["surface", "duration_s", "turns", "fell_back_to_text"],
         "chat_opened": ["agent_kind"],
         "activity_tracked": ["status"],
         "plan_exported": ["format"],

@@ -44,6 +44,14 @@ final class KidCompanionCoordinator: ObservableObject {
     private let manager = KidVoiceSessionManager.shared
     private var voiceEndCancellable: AnyCancellable?
     private var handlingVoiceEnd = false
+    /// Paces the voice transcript's reveal against the spoken audio (shared with
+    /// the parent surface). Voice-only: the text fallback has real SSE token
+    /// streaming and never consults this. Not `@Published` — the bubble polls it
+    /// on its own tick rather than re-rendering the whole surface.
+    private let reveal = VoiceRevealEngine()
+    /// Customer-perspective voice metrics (reply latency, interruptions, how the
+    /// session ended). Owned here because this object owns the conversation.
+    private let telemetry = VoiceTurnTelemetry(surface: .kid)
 
     // Listening-orb level tuning. Floor ignores room noise; ceil saturates so a
     // shout doesn't max harder; alpha ≈ 0.2s response at typical VAD cadence.
@@ -69,15 +77,21 @@ final class KidCompanionCoordinator: ObservableObject {
         let service = vm.service
         let kidName = kid.kidName
         let outcome = await manager.connect(
+            surface: .kid,
             onVadScore: { [weak self] score in
                 // onVadScore is @Sendable / off-main — hop to the actor.
                 Task { @MainActor in self?.ingestVadScore(score) }
+            },
+            onInterruption: { [weak self] in
+                Task { @MainActor in self?.telemetry.noteInterruption() }
             },
             tokenProvider: { try await service.voiceConvAIToken(kidName: kidName) }
         )
         switch outcome {
         case .connected(let conversation):
             observeVoiceEnd(of: conversation)
+            reveal.observe(conversation)
+            telemetry.observe(conversation)
             phase = .voiceLive(conversation)
         case .crisisLocked:
             phase = .crisisLocked
@@ -102,8 +116,19 @@ final class KidCompanionCoordinator: ObservableObject {
     func exit() async {
         voiceEndCancellable = nil
         inputLevel = 0
+        reveal.reset()
+        // The kid closed the surface on their own terms — not a fallback.
+        // Idempotent: `handleVoiceSessionEnd` may already have closed it out.
+        telemetry.end(fellBackToText: false)
         await manager.teardown()
     }
+
+    // MARK: - Transcript reveal
+
+    /// How much of the agent's current turn has actually been spoken. Read by
+    /// the live voice bubble's `StreamingText` so the transcript appears in step
+    /// with the voice instead of popping in whole. See `VoiceRevealEngine`.
+    func spokenProgress() -> SpokenProgress { reveal.progress() }
 
     // MARK: - Voice phase
 
@@ -173,14 +198,19 @@ final class KidCompanionCoordinator: ObservableObject {
 
         voiceEndCancellable = nil
         inputLevel = 0
+        reveal.reset()
         await manager.teardown()
         // Refresh history so the just-finished voice turns appear in fallback.
         await vm.loadHistory()
 
         if let status = try? await vm.service.kidAgentStatus(kidName: kid.kidName),
            status.crisisLocked {
+            telemetry.end(fellBackToText: false)   // frozen surface, not text
             phase = .crisisLocked
         } else {
+            // Voice dropped out from under the kid and they landed in text —
+            // the single most important negative signal this surface has.
+            telemetry.end(fellBackToText: true)
             enterTextFallback(.voiceEnded)
         }
     }

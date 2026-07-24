@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/elevenlabs/elevenlabs-swift-sdk.git",
       "state" : {
-        "revision" : "2100969572d8cec5e0467f09a868b0d5c626f749",
-        "version" : "3.2.0"
+        "revision" : "1a66b950ffb36ee0ed4ab9d74ca4f7a5ff641454",
+        "version" : "3.2.2"
       }
     },
     {

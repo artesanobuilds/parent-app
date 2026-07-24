@@ -10,6 +10,22 @@ Every update we ship, newest first — what changed and how to find it. Features
 *app update* arrive on your phone through TestFlight; everything else is live the moment
 it's listed here.
 
+## July 23, 2026 — voice that reads along with you
+
+**Words now appear as they're spoken** *(app update 1.74)* — when you talk to Coach by voice,
+the reply used to drop onto the screen as one finished paragraph while the voice was still on
+its first sentence. Now the text arrives in step with the voice, a few words at a time, so you
+can read along instead of reading ahead. Same on your kid's companion. Nothing to turn on —
+just open voice and talk.
+
+**Coach starts talking sooner** *(live now)* — we sped up the voice itself, and when Coach
+needs a moment to look something up (an article, your plan, the calendar) it now says so out
+loud instead of going silent. Fewer "is this thing on?" pauses.
+
+**Interrupting leaves the right words on screen** *(app update 1.74)* — if you cut Coach off
+mid-sentence, the screen now trims back to what was actually said out loud, instead of leaving
+the rest of a reply you never heard.
+
 ## July 22, 2026 — voice, healed
 
 **Voice conversations now recover on their own** *(live now)* — a few of you hit a

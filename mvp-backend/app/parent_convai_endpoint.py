@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import uuid
 from typing import List, Optional, Tuple
 
@@ -33,9 +34,11 @@ from app.agent import get_agent
 # Reuse the kid endpoint's OpenAI-SSE helpers + the shared secret.
 from app.convai_endpoint import (
     CONVAI_SECRET,
+    _ms,
     _openai_delta,
     _openai_done,
     _probe_stream,
+    _voice_perf_metrics,
 )
 from app.thread_repair import is_dangling_tool_error, repair_thread
 
@@ -46,7 +49,42 @@ router = APIRouter()
 # Matches the content links the parent agent emits. `id` stops at the closing
 # paren; whitespace guards against accidental over-capture.
 _LINK_RE = re.compile(r"\[([^\]]*)\]\(mvp://(library|community)/([^)\s]+)\)")
-_HOLD_CAP = 300  # don't buffer a "pending link" longer than this before flushing
+_HOLD_CAP = 120  # backstop: never buffer a "pending link" longer than this
+_LINK_TARGETS = ("mvp://library/", "mvp://community/")
+_MAX_LABEL = 80  # a content title; anything longer isn't a link label
+
+
+def _is_plausible_link(tail: str) -> bool:
+    """Could `tail` (which starts at a '[') still become an mvp:// link once more
+    tokens arrive?
+
+    This is the whole point of the hold. The old rule — hold everything after the
+    last '[' until a link closes or 300 chars pile up — stalled speech for up to
+    300 characters on ANY bracketed aside in prose, which the parent hears as the
+    coach going silent mid-sentence. Now we hold only while the tail is still on a
+    path to a real link, and flush the instant it can't be one:
+
+      "[Some tit"              → inside the label      → plausible
+      "[Some title]"           → label just closed     → plausible
+      "[Some title](mvp://li"  → target prefix-matches → plausible
+      "[sic] and then"         → prose aside           → flush now
+      "[docs](https://…"       → not an mvp:// target  → flush now
+    """
+    close = tail.find("]")
+    if close == -1:
+        # Still inside the label. A "label" this long is prose, not a title.
+        return len(tail) - 1 <= _MAX_LABEL
+    if close - 1 > _MAX_LABEL:
+        return False
+    rest = tail[close + 1:]
+    if not rest:
+        return True                       # "[label]" — the "](" may be next chunk
+    if not rest.startswith("("):
+        return False                      # "[label] more prose" — never a link
+    partial = rest[1:]
+    # Prefix-compatible in either direction: "mvp://li" is a partial of the target,
+    # "mvp://library/abc" is the target plus an id we're still waiting to close.
+    return any(t.startswith(partial) or partial.startswith(t) for t in _LINK_TARGETS)
 
 
 class _LinkStripper:
@@ -69,13 +107,16 @@ class _LinkStripper:
             out.append(m.group(1))               # speak the label, drop the URL
             tools.append((m.group(2), m.group(3)))
             self._buf = self._buf[m.end():]
-        # Hold from the last '[' (a possible partial link) so we don't emit half
-        # a link; cap the hold so non-link brackets don't stall the stream.
+        # Hold from the last '[' ONLY while that tail is still a plausible link in
+        # progress — a real link must never leak its URL into speech, but ordinary
+        # bracketed prose must not stall it either. _HOLD_CAP stays as a backstop
+        # for the pathological case (e.g. "[t](mvp://library/" that never closes).
         idx = self._buf.rfind("[")
-        if idx == -1 or (len(self._buf) - idx) > _HOLD_CAP:
+        tail = self._buf[idx:] if idx != -1 else ""
+        if idx == -1 or len(tail) > _HOLD_CAP or not _is_plausible_link(tail):
             safe, self._buf = self._buf, ""
         else:
-            safe, self._buf = self._buf[:idx], self._buf[idx:]
+            safe, self._buf = self._buf[:idx], tail
         return "".join(out) + safe, tools
 
     def flush(self) -> str:
@@ -148,11 +189,15 @@ async def parent_convai_chat_completions(
 
 
 async def _stream_response(user_id: str, thread_id: str, message: str):
+    turn_started = time.monotonic()
     chat_id = uuid.uuid4().hex[:12]
     agent = get_agent(user_id)
-    from app.cost_logging import CostLoggingCallbackHandler, new_workflow_id
+    from app.cost_logging import CostLoggingCallbackHandler, log_perf, new_workflow_id
+    # ONE id for the whole voice turn, shared by the cost handler and the perf
+    # line so a turn's spend and its latency join on `workflow=`.
+    voice_wf = new_workflow_id()
     _voice_cost = CostLoggingCallbackHandler(
-        feature="parent_voice", workflow=new_workflow_id(), session=thread_id, user=user_id
+        feature="parent_voice", workflow=voice_wf, session=thread_id, user=user_id
     )
     # NOTE: voice memory is its own thread (thread_id "default") — the text
     # /chat path uses a per-install UUID thread, so the two do NOT share
@@ -162,54 +207,120 @@ async def _stream_response(user_id: str, thread_id: str, message: str):
     # Self-heal before the turn: a prior cancelled turn (ElevenLabs barge-in /
     # timeout abort) can leave a dangling tool call that would 400 every
     # request on this thread forever. See app/thread_repair.py.
+    repair_started = time.monotonic()
     await repair_thread(agent, config)
+    repair_ms = _ms(repair_started)
 
-    for attempt in (1, 2):
-        stripper = _LinkStripper()
-        yielded = False
-        try:
-            async for event in agent.astream_events(
-                {"messages": [HumanMessage(content=message)]},
-                config=config,
-                version="v1",
-            ):
-                if event["event"] != "on_chat_model_stream":
-                    continue
-                content = event["data"]["chunk"].content
-                if not content:
-                    continue
-                safe, tools = stripper.feed(content)
-                if safe:
-                    yielded = True
-                    yield _openai_delta(content=safe, chat_id=chat_id)
-                for kind, cid in tools:
-                    yielded = True
-                    yield _show_content_tool_delta(kind, cid, chat_id)
+    # Turn timings. `model_ttft_ms` is when the model's first token reached US;
+    # `ttfb_ms` is when the first delta reached ElevenLabs. The gap between them
+    # is OUR buffering (the link stripper's partial-link hold) — the shrinkable part.
+    # Deliberately NOT reset per retry attempt: the parent's wait started at t0.
+    model_ttft_ms: Optional[int] = None
+    ttfb_ms: Optional[int] = None
+    chunks = 0
+    tool_turn = 0
+    perf_emitted = False
 
-            tail = stripper.flush()
-            if tail:
-                yield _openai_delta(content=tail, chat_id=chat_id)
-            yield _openai_done()
+    def _mark_yield(content: bool = True) -> None:
+        """Call immediately before yielding to ElevenLabs. Tool-call deltas still
+        move TTFB (they're bytes on the wire) but aren't spoken, so they don't
+        count as chunks."""
+        nonlocal ttfb_ms, chunks
+        if ttfb_ms is None:
+            ttfb_ms = _ms(turn_started)
+        if content:
+            chunks += 1
+
+    def _emit_perf(outcome: str) -> None:
+        """Exactly one [PERF][VOICE] line per turn, error path included — a turn
+        that failed is precisely the one worth timing."""
+        nonlocal perf_emitted
+        if perf_emitted:
             return
+        perf_emitted = True
+        log_perf(
+            "VOICE", feature="parent_voice", workflow=voice_wf, session=thread_id,
+            user=user_id, repair_ms=repair_ms, model_ttft_ms=model_ttft_ms,
+            ttfb_ms=ttfb_ms, total_ms=_ms(turn_started), chunks=chunks,
+            tool_turn=tool_turn,
+        )
+        _voice_perf_metrics(
+            "parent_voice", repair_ms=repair_ms, model_ttft_ms=model_ttft_ms,
+            ttfb_ms=ttfb_ms, tool_turn=tool_turn, outcome=outcome,
+        )
 
-        except Exception as exc:
-            # Poisoned mid-run (e.g. a concurrent voice request cancelled a
-            # tool call after our pre-flight check): repair and retry once,
-            # but only if nothing streamed yet — a retry after spoken output
-            # would repeat the sentence to the parent.
-            if attempt == 1 and not yielded and is_dangling_tool_error(exc):
-                logger.warning(
-                    "[parent-convai] dangling tool call mid-run — repairing and "
-                    "retrying user=%s thread=%s", user_id, thread_id,
+    try:
+        for attempt in (1, 2):
+            stripper = _LinkStripper()
+            yielded = False
+            try:
+                # version="v2" is the cheaper event API — v1 builds a much heavier
+                # event payload per token, pure overhead on a voice hot path where
+                # every ms is audible. Our two filters are identical across versions.
+                async for event in agent.astream_events(
+                    {"messages": [HumanMessage(content=message)]},
+                    config=config,
+                    version="v2",
+                ):
+                    if event["event"] != "on_chat_model_stream":
+                        # A tool ran before the first spoken token — that turn's
+                        # latency belongs in its own bucket, not the plain-answer one.
+                        if event["event"] == "on_tool_start" and model_ttft_ms is None:
+                            tool_turn = 1
+                        continue
+                    content = event["data"]["chunk"].content
+                    # In v2 a chunk's content can be a LIST of content blocks (tool-call
+                    # deltas), not a str. Feeding that to the link stripper would blow up
+                    # mid-turn, so skip anything that isn't spoken text.
+                    if not content or not isinstance(content, str):
+                        continue
+                    if model_ttft_ms is None:
+                        model_ttft_ms = _ms(turn_started)  # before the link-stripper hold
+                    safe, tools = stripper.feed(content)
+                    if safe:
+                        yielded = True
+                        _mark_yield()
+                        yield _openai_delta(content=safe, chat_id=chat_id)
+                    for kind, cid in tools:
+                        yielded = True
+                        _mark_yield(content=False)
+                        yield _show_content_tool_delta(kind, cid, chat_id)
+
+                tail = stripper.flush()
+                if tail:
+                    _mark_yield()
+                    yield _openai_delta(content=tail, chat_id=chat_id)
+                yield _openai_done()
+                _emit_perf("ok")
+                return
+
+            except Exception as exc:
+                # Poisoned mid-run (e.g. a concurrent voice request cancelled a
+                # tool call after our pre-flight check): repair and retry once,
+                # but only if nothing streamed yet — a retry after spoken output
+                # would repeat the sentence to the parent.
+                if attempt == 1 and not yielded and is_dangling_tool_error(exc):
+                    logger.warning(
+                        "[parent-convai] dangling tool call mid-run — repairing and "
+                        "retrying user=%s thread=%s", user_id, thread_id,
+                    )
+                    await repair_thread(agent, config)
+                    continue
+                logger.exception(
+                    "[parent-convai] stream error user=%s thread=%s", user_id, thread_id
                 )
-                await repair_thread(agent, config)
-                continue
-            logger.exception(
-                "[parent-convai] stream error user=%s thread=%s", user_id, thread_id
-            )
-            yield _openai_delta(
-                content="I hit a snag on my end — give me a second, then ask me again.",
-                chat_id=chat_id,
-            )
-            yield _openai_done()
-            return
+                _mark_yield()
+                yield _openai_delta(
+                    content="I hit a snag on my end — give me a second, then ask me again.",
+                    chat_id=chat_id,
+                )
+                yield _openai_done()
+                _emit_perf("error")
+                return
+    finally:
+        # A barge-in is the MOST common way a voice turn ends, and it unwinds
+        # this generator without reaching either exit above. Emitting only on
+        # the clean exits would silently drop every interrupted turn out of the
+        # latency histogram — leaving it measuring the turns nobody minded
+        # waiting for. No-ops (perf_emitted) when the turn already reported.
+        _emit_perf("interrupted")

@@ -30,6 +30,12 @@ final class ParentCompanionCoordinator: ObservableObject {
     private let manager = KidVoiceSessionManager.shared
     private var toolTask: Task<Void, Never>?
     private var handledToolCallIds = Set<String>()
+    /// Paces the transcript reveal against the spoken audio (shared with the kid
+    /// surface). Not `@Published` — the view polls it on its own tick.
+    private let reveal = VoiceRevealEngine()
+    /// Customer-perspective voice metrics (reply latency, interruptions, how the
+    /// call ended). Owned here because this object owns the conversation.
+    private let telemetry = VoiceTurnTelemetry(surface: .parent)
 
     // VAD → orb tuning (same as the kid coordinator).
     private let vadFloor = 0.10
@@ -46,15 +52,20 @@ final class ParentCompanionCoordinator: ObservableObject {
         phase = .connecting
         let svc = service
         let outcome = await manager.connect(
+            surface: .parent,
             onVadScore: { [weak self] score in
                 Task { @MainActor in self?.ingestVadScore(score) }
+            },
+            onInterruption: { [weak self] in
+                Task { @MainActor in self?.telemetry.noteInterruption() }
             },
             tokenProvider: { try await svc.voiceParentConvAIToken() }
         )
         switch outcome {
         case .connected(let conversation):
             observeToolCalls(conversation)
-            observeAudioAlignment(conversation)
+            reveal.observe(conversation)
+            telemetry.observe(conversation)
             phase = .voiceLive(conversation)
         case .micPermissionDenied:
             phase = .failed("Microphone access is needed to talk. Enable it in Settings, then try again.")
@@ -75,48 +86,20 @@ final class ParentCompanionCoordinator: ObservableObject {
     func exit() async {
         toolTask?.cancel()
         toolTask = nil
-        audioCancellable = nil
         inputLevel = 0
-        spokenChars = 0
-        audioTurnEventId = nil
+        reveal.reset()
+        // The parent surface has no mid-call fallback: ending the call returns to
+        // the coach's text chat, which is where they came from. Always false.
+        telemetry.end(fellBackToText: false)
         await manager.teardown()
     }
 
-    // MARK: - Audio alignment (drives real, speech-synced transcript reveal)
+    // MARK: - Transcript reveal
 
-    /// Cumulative count of characters ElevenLabs has reported as SPOKEN for the
-    /// current agent turn, from per-chunk audio alignment. The transcript reveal
-    /// tracks this so text appears in lockstep with the voice. Resets per turn.
-    @Published private(set) var spokenChars: Int = 0
-    /// True once any alignment has arrived this session. If it stays false, the
-    /// transcript reveal falls back to a fixed-rate typewriter (alignment isn't
-    /// delivered over WebRTC for this agent).
-    private(set) var alignmentArrived = false
-
-    private var audioTurnEventId: Int?
-    private var audioCancellable: AnyCancellable?
-
-    /// Spoken progress for the active turn, or nil if alignment isn't available
-    /// (→ typewriter fallback). Read by `StreamingText`.
-    func spokenProgress() -> Int? { alignmentArrived ? spokenChars : nil }
-
-    private func observeAudioAlignment(_ conversation: Conversation) {
-        audioCancellable = conversation.$latestAudioEvent.sink { [weak self] event in
-            guard let event, let alignment = event.alignment else { return }
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if self.audioTurnEventId != event.eventId {
-                    self.audioTurnEventId = event.eventId   // new agent turn
-                    self.spokenChars = 0
-                }
-                if !self.alignmentArrived {
-                    self.alignmentArrived = true
-                    print("[parent-voice] ✅ audio alignment available — transcript will sync to speech")
-                }
-                self.spokenChars += alignment.chars.count
-            }
-        }
-    }
+    /// How much of the agent's current turn has actually been spoken. Read by
+    /// `StreamingText` so the transcript appears in step with the voice rather
+    /// than popping in whole. See `VoiceRevealEngine`.
+    func spokenProgress() -> SpokenProgress { reveal.progress() }
 
     // MARK: - Voice controls
 
