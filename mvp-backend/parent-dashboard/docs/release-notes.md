@@ -10,6 +10,18 @@ Every update we ship, newest first — what changed and how to find it. Features
 *app update* arrive on your phone through TestFlight; everything else is live the moment
 it's listed here.
 
+## July 24, 2026 — a coach that remembers you're there
+
+**Coach greets *you*, not "a user"** *(live now)* — voice conversations used to open with the
+same "Hello! How can I help you today?" every single time. Now Coach greets you by name and,
+if you've talked before, picks up the thread — "want to continue where we left off, or is
+something new going on?" Just open voice; the first words are already different.
+
+**Going quiet no longer confuses Coach** *(live now)* — if you paused to think, Coach used to
+fill the silence by repeating its last answer. Now a pause gets a gentle "still there? no
+rush" — and if you stay quiet, Coach simply waits with you instead of talking at you. Your
+kid's companion does the same, kid-sized ("are you still there?").
+
 ## July 23, 2026 — voice that reads along with you
 
 **Words now appear as they're spoken** *(app update 1.74)* — when you talk to Coach by voice,

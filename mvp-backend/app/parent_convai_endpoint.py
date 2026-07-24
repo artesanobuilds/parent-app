@@ -38,6 +38,7 @@ from app.convai_endpoint import (
     _openai_delta,
     _openai_done,
     _probe_stream,
+    _trailing_silence_nudges,
     _voice_perf_metrics,
 )
 from app.thread_repair import is_dangling_tool_error, repair_thread
@@ -174,23 +175,59 @@ async def parent_convai_chat_completions(
         raise HTTPException(status_code=400, detail="missing user_id in elevenlabs_extra_body")
 
     last_user_msg = ""
+    saw_user_msg = False
     for m in reversed(messages):
         if m.get("role") == "user":
+            saw_user_msg = True
             last_user_msg = m.get("content", "")
             break
-    if not last_user_msg:
+
+    # A turn-timeout nudge ("..."/empty) is a valid turn, not a malformed
+    # request — route it to the canned check-in instead of 400ing.
+    silence_nudges = _trailing_silence_nudges(messages) if saw_user_msg else 0
+    if not last_user_msg and not silence_nudges:
         raise HTTPException(status_code=400, detail="no user message found")
 
     return StreamingResponse(
-        _stream_response(user_id, thread_id, last_user_msg),
+        _stream_response(user_id, thread_id, last_user_msg,
+                         silence_nudges=silence_nudges),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-async def _stream_response(user_id: str, thread_id: str, message: str):
+async def _stream_response(user_id: str, thread_id: str, message: str,
+                           silence_nudges: int = 0):
     turn_started = time.monotonic()
     chat_id = uuid.uuid4().hex[:12]
+
+    # Turn-timeout nudge: the parent has gone quiet, not asked something. Speak
+    # a short check-in instead of running the agent — deterministic and instant,
+    # never re-answers the previous turn, and keeps phantom "..." turns out of
+    # the LangGraph thread (no repair/agent/LLM involved at all).
+    if silence_nudges:
+        import random
+        from app.cost_logging import log_perf, new_workflow_id
+        if silence_nudges == 1:
+            line = random.choice([
+                "Still there? No rush.",
+                "Take your time — I'm right here.",
+                "Still with me?",
+            ])
+        elif silence_nudges == 2:
+            line = "No hurry at all. I'll be here when you're ready."
+        else:
+            line = "I'll stay on the line — if you're done for now, just say goodbye or tap End."
+        yield _openai_delta(content=line, chat_id=chat_id)
+        yield _openai_done()
+        ms = _ms(turn_started)
+        log_perf("VOICE", feature="parent_voice", workflow=new_workflow_id(),
+                 session=thread_id, user=user_id, ttfb_ms=ms, total_ms=ms,
+                 chunks=1, tool_turn=0)
+        _voice_perf_metrics("parent_voice", repair_ms=None, model_ttft_ms=None,
+                            ttfb_ms=ms, tool_turn=0, outcome="silence")
+        return
+
     agent = get_agent(user_id)
     from app.cost_logging import CostLoggingCallbackHandler, log_perf, new_workflow_id
     # ONE id for the whole voice turn, shared by the cost handler and the perf

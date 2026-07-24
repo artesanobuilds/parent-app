@@ -345,6 +345,29 @@ This is belt-and-braces with the prompt-side directive (the parent `voice_direct
 model to say something aloud *before* it searches): the directive depends on model compliance
 every turn, the soft timeout fires deterministically.
 
+### User silence — the "..." turn (handled server-side)
+
+When the USER goes quiet for `turn_timeout` seconds, ElevenLabs prompts the custom LLM anyway,
+with a literal `"..."` (sometimes empty) user message — the docs don't spell this out; observed
+in prod 2026-07-23. Left to the model, it re-answers its previous turn, so a parent who paused
+to think heard the coach repeat itself.
+
+Both Custom-LLM endpoints intercept the sentinel BEFORE the agent runs (`_trailing_silence_nudges`
+in `app/convai_endpoint.py`) and stream a canned check-in instead — no LLM call, no thread
+pollution, `[PERF][VOICE]`/`voice_turns_total` outcome `silence`. Escalates with consecutive
+quiet turns: check-in → "take your time" → "say goodbye or tap End" (the kid version never
+suggests hanging up beyond "just say bye!"). Kid nudges skip moderation and are NOT persisted
+to the transcript — a "..." isn't the kid speaking.
+
+### Personalized greeting (parent coach)
+
+The parent token endpoint overrides `first_message` per connection
+(`_parent_voice_greeting` in `app/server.py`): first name from the family profile + a
+returning-vs-first-time split (durable chat memory, falling back to a live voice-thread peek).
+Deterministic — no LLM on the connect path; the topical "we were talking about X" callback
+comes from the voice thread's own LangGraph memory once the parent engages. Requires the
+Security-tab **First message** override, which is enabled on both agents.
+
 ---
 
 ## Data contract

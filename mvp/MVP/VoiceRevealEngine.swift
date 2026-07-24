@@ -149,7 +149,19 @@ final class VoiceRevealEngine: ObservableObject {
         } else if let since = speakingSince {
             speakingAccrued += Date().timeIntervalSince(since)
             speakingSince = nil
-            endTurn()
+            // `.listening` means the agent has yielded the floor — the turn's
+            // audio is genuinely over, so land the tail and calibrate.
+            // `.thinking` is a MID-turn pause (tool call, slow model, the gap
+            // after a soft-timeout filler): the voice will resume this same
+            // turn, so only the clock stops. Treating it as turn-end was the
+            // "whole paragraph dumps in at once" bug on tool turns — the view
+            // saw `finished` and landed all the text into what was actually a
+            // two-second pause. If `.thinking` ever wedges without resuming,
+            // StreamingText's stall guard (floorCPS after stallSeconds) keeps
+            // the text moving; nothing waits forever on this signal.
+            if state == .listening {
+                endTurn()
+            }
         }
     }
 

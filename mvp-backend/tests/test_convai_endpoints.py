@@ -1148,3 +1148,198 @@ def test_stripper_flush_releases_an_unterminated_hold():
     s = _S()
     assert s.feed("Read [Sleep")[0] == "Read "
     assert s.flush() == "[Sleep"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Silence nudges — ElevenLabs turn-timeout "..." handling (both endpoints)
+# ═════════════════════════════════════════════════════════════════════════════
+# On user silence, ElevenLabs prompts the LLM with a literal "..." user message.
+# Left alone, the model re-answers its previous turn (observed on device). The
+# endpoints intercept the sentinel and speak a canned check-in WITHOUT running
+# the agent.
+
+_PARENT_NUDGE_1 = {
+    "Still there? No rush.",
+    "Take your time — I'm right here.",
+    "Still with me?",
+}
+
+
+def _history_with_trailing_nudges(n: int) -> List[Dict[str, str]]:
+    msgs = [
+        {"role": "user", "content": "how do I handle bedtime?"},
+        {"role": "assistant", "content": "Here's a bedtime plan."},
+    ]
+    for _ in range(n):
+        msgs.append({"role": "user", "content": "..."})
+        if _ < n - 1:
+            msgs.append({"role": "assistant", "content": "Still there?"})
+    return msgs
+
+
+def test_parent_silence_nudge_speaks_checkin_without_running_the_agent(
+    client, secret, monkeypatch
+):
+    agent = _FakeAgent(["the model must never run"])
+    _install_parent_agent(monkeypatch, agent)
+
+    res = client.post(
+        PARENT_PATH,
+        json={"messages": _history_with_trailing_nudges(1),
+              "elevenlabs_extra_body": {"user_id": "u-quiet"}},
+        headers={"Authorization": f"Bearer {secret}"},
+    )
+    assert res.status_code == 200, res.text
+    payloads = _payloads(res.text)
+    assert _spoken(payloads) in _PARENT_NUDGE_1
+    assert payloads[-1] == "[DONE]"
+    # The whole point: no agent invocation, no thread repair, no LLM spend.
+    assert agent.attempts == 0
+    assert agent.state_reads == 0
+
+
+@pytest.mark.parametrize("n,expected", [
+    (2, "No hurry at all. I'll be here when you're ready."),
+    (3, "I'll stay on the line — if you're done for now, just say goodbye or tap End."),
+    (5, "I'll stay on the line — if you're done for now, just say goodbye or tap End."),
+])
+def test_parent_silence_nudges_escalate(client, secret, monkeypatch, n, expected):
+    _install_parent_agent(monkeypatch, _FakeAgent(["never"]))
+    res = client.post(
+        PARENT_PATH,
+        json={"messages": _history_with_trailing_nudges(n),
+              "elevenlabs_extra_body": {"user_id": "u-quiet"}},
+        headers={"Authorization": f"Bearer {secret}"},
+    )
+    assert _spoken(_payloads(res.text)) == expected
+
+
+def test_parent_empty_user_message_after_speech_is_a_nudge_not_400(
+    client, secret, monkeypatch
+):
+    """EL sometimes delivers the timeout as an empty user turn. That used to hit
+    the 'no user message found' 400 — every timeout became a spoken error."""
+    _install_parent_agent(monkeypatch, _FakeAgent(["never"]))
+    msgs = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "Hello!"},
+        {"role": "user", "content": ""},
+    ]
+    res = client.post(
+        PARENT_PATH,
+        json={"messages": msgs, "elevenlabs_extra_body": {"user_id": "u-quiet"}},
+        headers={"Authorization": f"Bearer {secret}"},
+    )
+    assert res.status_code == 200, res.text
+    assert _spoken(_payloads(res.text)) in _PARENT_NUDGE_1
+
+
+def test_kid_silence_nudge_skips_agent_moderation_and_transcript(
+    client, secret, monkeypatch, hermetic
+):
+    agent_id = "agent-kid-quiet"
+    agent = _FakeAgent(["the model must never run"])
+    _install_kid_agent(monkeypatch, agent, _kid_config(agent_id))
+
+    def _boom(*a, **k):
+        raise AssertionError("moderation must not run on a silence nudge")
+    monkeypatch.setattr(moderation, "moderate_input", _boom)
+
+    msgs = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "Hi Ada!"},
+        {"role": "user", "content": "..."},
+        {"role": "assistant", "content": "Are you still there, Ada?"},
+        {"role": "user", "content": "…"},
+    ]
+    res = client.post(
+        KID_PATH,
+        json={"messages": msgs,
+              "elevenlabs_extra_body": {"user_id": "u-kid-quiet", "kid_name": "Ada",
+                                        "thread_id": "th-quiet"}},
+        headers={"Authorization": f"Bearer {secret}"},
+    )
+    assert res.status_code == 200, res.text
+    # Two trailing nudges → the deterministic level-2 line.
+    assert _spoken(_payloads(res.text)) == "That's okay, take your time. I'm right here."
+    assert agent.attempts == 0
+    # Neither the "..." nor the canned line belongs in the durable transcript.
+    assert server.storage_backend.get_kid_messages(agent_id, "th-quiet") == []
+
+
+def test_kid_crisis_lock_still_wins_over_a_silence_nudge(
+    client, secret, monkeypatch, hermetic
+):
+    """Ordering guard: a locked companion must stay frozen even on a "..." turn —
+    the nudge branch sits BELOW the crisis-lock check on purpose."""
+    agent_id = "agent-kid-locked-quiet"
+    _install_kid_agent(monkeypatch, _FakeAgent(["never"]), _kid_config(agent_id))
+    server.storage_backend.lock_kid_agent_for_crisis(
+        agent_id=agent_id, user_id="u-kid-lockq", kid_name="Ada",
+        category="self_harm", severity="crisis", reason="test lock",
+    )
+    res = client.post(
+        KID_PATH,
+        json={"messages": _history_with_trailing_nudges(1),
+              "elevenlabs_extra_body": {"user_id": "u-kid-lockq", "kid_name": "Ada",
+                                        "thread_id": "th-lockq"}},
+        headers={"Authorization": f"Bearer {secret}"},
+    )
+    payloads = _payloads(res.text)
+    assert "grown-up needs to check in" in _spoken(payloads)
+    assert "end_call" in _tool_names(payloads)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Personalized voice greeting (parent token endpoint helper)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _greeting_for(monkeypatch, *, name, returning_chat, thread_messages):
+    from types import SimpleNamespace as NS
+
+    monkeypatch.setattr(
+        server.profiling_service, "get_family_profile",
+        lambda uid: {"parent": {"name": name}, "children": {"Alkina": {}, "Ceiba": {}}},
+    )
+    monkeypatch.setattr(
+        server, "chat_memory",
+        NS(user_ids=lambda: ["u-returning"] if returning_chat else []),
+    )
+    import app.agent as agent_mod
+
+    class _A:
+        async def aget_state(self, config):
+            return NS(values={"messages": thread_messages})
+
+    monkeypatch.setattr(agent_mod, "get_agent", lambda uid: _A())
+
+    async def _run() -> str:
+        return await server._parent_voice_greeting("u-returning")
+
+    return anyio.run(_run)
+
+
+def test_greeting_returning_parent_is_personal_and_continuous(monkeypatch):
+    g = _greeting_for(monkeypatch, name="Miguel Alvarado",
+                      returning_chat=True, thread_messages=[])
+    assert ", Miguel" in g            # first name only, from the profile
+    assert g.rstrip().endswith("?")   # always opens the floor
+    # Every returning variant references continuity, never a cold "how can I help".
+    assert any(w in g.lower() for w in ("again", "back", "since we last"))
+
+
+def test_greeting_first_session_introduces_the_coach(monkeypatch):
+    g = _greeting_for(monkeypatch, name=None,
+                      returning_chat=False, thread_messages=[])
+    assert "back" not in g.lower() and "again" not in g.lower()
+    assert g.rstrip().endswith("?")
+
+
+def test_greeting_live_voice_thread_counts_as_returning(monkeypatch):
+    """chat_memory empty but the in-process voice thread has history — greeting
+    must not re-introduce the coach mid-relationship."""
+    g = _greeting_for(monkeypatch, name="Heather",
+                      returning_chat=False, thread_messages=["prior turn"])
+    assert any(w in g.lower() for w in ("again", "back", "since we last"))
+    assert ", Heather" in g

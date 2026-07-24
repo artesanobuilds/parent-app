@@ -70,6 +70,37 @@ def _openai_done() -> str:
     return "data: [DONE]\n\n"
 
 
+# ── Silence nudges ───────────────────────────────────────────────────────────
+# When the user says nothing for `turn_timeout` seconds, ElevenLabs prompts the
+# LLM anyway — with a literal "..." as the user message (observed in prod; the
+# docs don't spell it out). Left to the model, that produces the worst possible
+# behavior: it re-answers its previous turn, so a parent who pauses to think
+# hears the coach repeat itself. Intercept the sentinel BEFORE the agent ever
+# sees it and speak a short check-in instead — deterministic, instant, free,
+# and it never pollutes the LangGraph thread with phantom "..." turns.
+
+_SILENCE_SENTINELS = {"", "...", "…"}
+
+
+def _is_silence_nudge(text: str) -> bool:
+    return text.strip() in _SILENCE_SENTINELS
+
+
+def _trailing_silence_nudges(messages: list) -> int:
+    """How many consecutive user turns (counting back from the latest, skipping
+    assistant replies in between) are silence sentinels. 0 = the latest user
+    turn is real speech. Drives the escalating check-in → sign-off sequence."""
+    count = 0
+    for m in reversed(messages):
+        if m.get("role") != "user":
+            continue
+        if _is_silence_nudge(m.get("content", "") or ""):
+            count += 1
+        else:
+            break
+    return count
+
+
 def _end_call_tool_delta(chat_id: str) -> str:
     delta = {
         "tool_calls": [{
@@ -112,8 +143,8 @@ def _voice_perf_metrics(
     Dotted names follow the app/observability convention; Prometheus renders them
     as `voice_turn_ttfb_ms` / `voice_turn_model_ttft_ms` / `voice_turn_repair_ms`
     and the counter as `voice_turns_total`. Cardinality: 2 features × 2 tool_turn
-    × 4 outcomes (ok / blocked / error / interrupted) = 16 series on the counter,
-    2 each on the histograms.
+    × 5 outcomes (ok / blocked / error / interrupted / silence) = 20 series on
+    the counter, 2 each on the histograms.
 
     Defensive twice over — obs.count/observe are no-ops when OTel is unconfigured
     and swallow their own failures, and the whole body is wrapped besides. A
@@ -176,22 +207,29 @@ async def convai_chat_completions(
         raise HTTPException(status_code=400, detail="missing user_id or kid_name in elevenlabs_extra_body")
 
     last_user_msg = ""
+    saw_user_msg = False
     for m in reversed(messages):
         if m.get("role") == "user":
+            saw_user_msg = True
             last_user_msg = m.get("content", "")
             break
 
-    if not last_user_msg:
+    # A turn-timeout nudge ("..."/empty) is a valid turn, not a malformed
+    # request — route it to the canned check-in instead of 400ing.
+    silence_nudges = _trailing_silence_nudges(messages) if saw_user_msg else 0
+    if not last_user_msg and not silence_nudges:
         raise HTTPException(status_code=400, detail="no user message found")
 
     return StreamingResponse(
-        _stream_response(user_id, kid_name, thread_id, last_user_msg),
+        _stream_response(user_id, kid_name, thread_id, last_user_msg,
+                         silence_nudges=silence_nudges),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-async def _stream_response(user_id: str, kid_name: str, thread_id: str, message: str):
+async def _stream_response(user_id: str, kid_name: str, thread_id: str, message: str,
+                           silence_nudges: int = 0):
     turn_started = time.monotonic()
     storage = _storage()
     chat_id = uuid.uuid4().hex[:12]
@@ -255,6 +293,27 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
         yield _end_call_tool_delta(chat_id)
         yield _openai_done()
         _emit_perf("blocked")
+        return
+
+    # Turn-timeout nudge: the kid has gone quiet, not said something. Answer
+    # with a gentle check-in — no agent, no moderation, and nothing appended to
+    # the transcript (a "..." isn't the kid speaking, and the canned line isn't
+    # the companion thinking). Escalates gently, never hangs up on a kid.
+    if silence_nudges:
+        import random
+        if silence_nudges == 1:
+            line = random.choice([
+                f"Are you still there, {kid_name}?",
+                "You got quiet — still there?",
+            ])
+        elif silence_nudges == 2:
+            line = "That's okay, take your time. I'm right here."
+        else:
+            line = "We can keep chatting whenever you want. If you're all done, just say bye!"
+        _mark_yield()
+        yield _openai_delta(content=line, chat_id=chat_id)
+        yield _openai_done()
+        _emit_perf("silence")
         return
 
     family = profiling_service.get_family_profile(user_id)

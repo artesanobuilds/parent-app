@@ -2259,12 +2259,65 @@ async def voice_convai_token(
 
 
 @app.get("/voice/parent-convai-token")
+async def _parent_voice_greeting(user_id: str) -> str:
+    """
+    First words the coach speaks on connect (sent as the `first_message`
+    override — the agent's console default is a generic "Hello! How can I help
+    you today?" that beta parents heard verbatim every single session).
+
+    Deliberately deterministic — no LLM call on the connect path, which we just
+    spent a whole batch keeping fast. The *topical* callback ("we were talking
+    about Alkina hitting Ceiba") comes for free from the voice thread's own
+    LangGraph memory the moment the parent says "let's continue"; the greeting
+    only needs to sound like the coach remembers THEM, not recap the case file.
+    """
+    import random
+
+    first_name = ""
+    try:
+        fam = profiling_service.get_family_profile(user_id) or {}
+        raw = ((fam.get("parent") or {}).get("name") or "").strip()
+        first_name = raw.split()[0] if raw else ""
+    except Exception:
+        pass
+
+    # "Returning" = we have any prior coaching history for this parent: durable
+    # text-chat memory, or a live voice thread in this process (MemorySaver —
+    # survives between sessions until a deploy restarts us).
+    returning = False
+    try:
+        returning = user_id in set(chat_memory.user_ids())
+    except Exception:
+        pass
+    if not returning:
+        try:
+            from app.agent import get_agent
+            state = await get_agent(user_id).aget_state(
+                {"configurable": {"thread_id": f"{user_id}:default"}}
+            )
+            returning = bool((getattr(state, "values", None) or {}).get("messages"))
+        except Exception:
+            pass
+
+    n = f", {first_name}" if first_name else ""
+    if returning:
+        return random.choice([
+            f"Good to hear you again{n}. Want to pick up where we left off, or is something new going on?",
+            f"Welcome back{n}. What's on your mind today — the thing we've been working on, or something new?",
+            f"Hey{n}, glad you're back. How have things been since we last talked?",
+        ])
+    return random.choice([
+        f"Hi{n} — I'm your coach. What's going on in your family today?",
+        f"Hey{n}, good to meet you. What's happening with your kids today?",
+    ])
+
+
 async def voice_parent_convai_token(user_id: str = Depends(current_user)):
     """
     Issue a ConvAI conversation token for the PARENT coaching agent. Mirrors the
-    kid token endpoint but: no PIN, no crisis lock, no first-message ritual. The
-    per-user system prompt (soul + family profile + content catalog) is sent as
-    an override so the dashboard agent personalizes per connection.
+    kid token endpoint but: no PIN, no crisis lock. The per-user system prompt
+    (soul + family profile + content catalog) and a personalized `first_message`
+    are sent as overrides so the dashboard agent personalizes per connection.
     """
     import httpx
     from app.agent import build_system_prompt_for
@@ -2300,6 +2353,7 @@ async def voice_parent_convai_token(user_id: str = Depends(current_user)):
     override: Dict[str, Any] = {
         "agent": {
             "prompt": {"prompt": build_system_prompt_for(user_id) + voice_directive},
+            "first_message": await _parent_voice_greeting(user_id),
             "language": "en",
         },
     }
