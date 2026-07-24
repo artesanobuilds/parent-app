@@ -1343,3 +1343,27 @@ def test_greeting_live_voice_thread_counts_as_returning(monkeypatch):
                       returning_chat=False, thread_messages=["prior turn"])
     assert any(w in g.lower() for w in ("again", "back", "since we last"))
     assert ", Heather" in g
+
+
+def test_parent_token_route_is_bound_to_the_authed_endpoint(client, monkeypatch):
+    """REGRESSION: a helper def inserted between @app.get and the endpoint left
+    the route decorating the helper — auth vanished and every client got a 422
+    asking for a `user_id` query param (the 2026-07-24 "can't connect" outage).
+
+    The route must reject an unauthenticated call as auth (401/403), never 422
+    — a 422 here means the decorator is bound to the wrong function again."""
+    res = client.get("/voice/parent-convai-token")
+    assert res.status_code in (401, 403), res.text
+
+    # And with auth it must reach the REAL endpoint: unset EL config → its 503,
+    # which only that function raises.
+    monkeypatch.delenv("ELEVENLABS_PARENT_AGENT_ID", raising=False)
+    monkeypatch.setattr(server, "current_user", lambda: "u-route-check", raising=False)
+    from app.auth import current_user as real_dep
+    server.app.dependency_overrides[real_dep] = lambda: "u-route-check"
+    try:
+        res = client.get("/voice/parent-convai-token")
+        assert res.status_code == 503, res.text
+        assert "not configured" in res.text
+    finally:
+        server.app.dependency_overrides.pop(real_dep, None)

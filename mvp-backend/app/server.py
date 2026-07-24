@@ -2258,7 +2258,6 @@ async def voice_convai_token(
     }
 
 
-@app.get("/voice/parent-convai-token")
 async def _parent_voice_greeting(user_id: str) -> str:
     """
     First words the coach speaks on connect (sent as the `first_message`
@@ -2312,6 +2311,7 @@ async def _parent_voice_greeting(user_id: str) -> str:
     ])
 
 
+@app.get("/voice/parent-convai-token")
 async def voice_parent_convai_token(user_id: str = Depends(current_user)):
     """
     Issue a ConvAI conversation token for the PARENT coaching agent. Mirrors the
