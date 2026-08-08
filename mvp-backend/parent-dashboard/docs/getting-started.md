@@ -7,10 +7,11 @@ draft: false
 
 # Getting started
 
-MVP is a chief of staff for your kids' activities. It keeps the whole
-job in one place — finding options, deciding, registering, and staying on top
-of everything that follows (payments, forms, schedules, who's driving) — so
-you don't have to hold it all in your head.
+MVP is one coach for the whole job of raising your kids — the hard parenting
+questions and the logistics behind them. It keeps it all in one place: finding
+options, deciding, registering, and staying on top of everything that follows
+(payments, forms, schedules, who's driving) — so you don't have to hold it in
+your head.
 
 There are two ways to use it:
 

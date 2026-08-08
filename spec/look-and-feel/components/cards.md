@@ -1,6 +1,8 @@
 # Cards
 
-Cards are the primary content container. Four variants — each tunes the chrome/photo ratio for what's inside. Article and category lean editorial (photo dominates); post and sober lean quiet (chrome quiets, photo retreats). Cards on `bg/canvas` lift via `border/hairline` + `bg/elevated` — not shadow. Photo tiles use no shadow at all (the color block is the weight).
+Cards are the primary content container. Five variants — each tunes the chrome/photo ratio for what's inside. Article and category lean editorial (photo dominates); post, sober and dashboard lean quiet (chrome quiets, photo retreats).
+
+> **beta-v1 reversal.** Cards used to lift via `border/hairline` + `bg/elevated`, with shadows reserved for overlays. Greg's redesign puts a soft ambient shadow on every content card and no hairline at all. **`elevation/1` is now the card default; the hairline is demoted to dividers, separators, and input borders.** When converting an old surface, strip the `RoundedRectangle().stroke(border/hairline)` overlay and apply `elevation/1`. Photo tiles still use no shadow (the color block is the weight).
 
 ## Variants
 

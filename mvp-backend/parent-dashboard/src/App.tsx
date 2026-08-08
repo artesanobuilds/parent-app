@@ -5,6 +5,7 @@ import { pageview } from './analytics';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Docs from './pages/Docs';
+import Invite from './pages/Invite';
 import Discovery from './pages/Discovery';
 import Plan from './pages/Plan';
 import Chat from './pages/Chat';
@@ -34,6 +35,12 @@ export default function App() {
           guard keeps excluding these. */}
       <Route path="/docs" element={<Docs />} />
       <Route path="/docs/:slug" element={<Docs />} />
+      {/* PUBLIC invite landing — also OUTSIDE ProtectedRoute, and for a
+          stronger reason than the docs: the person opening an invite has no
+          account yet (a nanny, a grandparent), so the auth guard would strand
+          exactly the visitor the link exists for. This is the path
+          CIRCLE_INVITE_BASE_URL points at. */}
+      <Route path="/invite/:token" element={<Invite />} />
       <Route
         element={
           <ProtectedRoute>

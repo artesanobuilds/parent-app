@@ -23,13 +23,20 @@ Tokens land in two files at implementation time: `mvp/MVP/Theme.swift` (colors, 
 | `ink/placeholder` | `Color.hearthInkPlaceholder` | `neutral/ink-300` |
 | `ink/onPhoto-dark` | `Color.hearthInkOnPhotoDark` | `neutral/ink-900` |
 | `ink/onPhoto-light` | `Color.hearthInkOnPhotoLight` | `neutral/paper` |
-| `border/hairline` | `Color.hearthBorderHairline` | `neutral/cream-200` |
+| `border/hairline` | `Color.hearthBorderHairline` | `neutral/cream-300` |
 | `border/strong` | `Color.hearthBorderStrong` | `neutral/ink-300` |
-| `accent/default` | `Color.hearthAccent` | `brand/olive-500` |
-| `accent/press` | `Color.hearthAccentPress` | `brand/olive-700` |
-| `accent/tint` | `Color.hearthAccentTint` | `brand/olive-100` |
-| `focus/ring-on-light` | `Color.hearthFocusRingOnLight` | `brand/olive-500` |
+| `bg/voice` | `Color.hearthVoice` | `surface/voice-navy` |
+| `bg/disabled` | `Color.hearthDisabled` | `neutral/warm-gray-400` |
+| `accent/default` | `Color.hearthAccent` | `brand/teal-500` — **fill only** |
+| `accent/onCanvas` | `Color.hearthAccentOnCanvas` | `brand/teal-600` — **accent text/icons on cream** |
+| `accent/press` | `Color.hearthAccentPress` | `brand/teal-700` |
+| `accent/tint` | `Color.hearthAccentTint` | `brand/teal-100` |
+| `accent/kid` | `Color.hearthAccentKid` | `kid/saffron` |
+| `accent/kid-tint` | `Color.hearthAccentKidTint` | `kid/saffron-tint` |
+| `focus/ring-on-light` | `Color.hearthFocusRingOnLight` | `brand/teal-600` |
 | `focus/ring-on-photo` | `Color.hearthFocusRingOnPhoto` | `neutral/paper` |
+
+Per-kid accents resolve through `Color.kidAccent(seed:)`, which hashes a **stable kid identifier** into `Color.kidAccentPalette`. Pass the kid-agent config `id` where one exists; fall back to the name only when it doesn't. Never index-based (deleting a kid recolors the rest), never keyed on an editable display name.
 | `photo/saffron` | `Color.hearthPhotoSaffron` | `photo/saffron` |
 | `photo/rose` | `Color.hearthPhotoRose` | `photo/rose` |
 | `photo/royal` | `Color.hearthPhotoRoyal` | `photo/royal` |
@@ -73,7 +80,15 @@ Page gutter = `.hearth700` (24pt). Section rhythm = `.hearth800`–`.hearth1000`
 
 ### Elevation → `View` modifier
 
-`elevation/0` … `elevation/3` are exposed as a single `.hearthElevation(_:)` view modifier that applies a shadow with the primitive color baked in. Never call `.shadow(color:radius:x:y:)` directly.
+Elevation ships as three named `View` modifiers in `Theme.swift`, each with the primitive color and alpha baked in. **Never call `.shadow(color:radius:x:y:)` directly.**
+
+| Modifier | Token | Use |
+|---|---|---|
+| `.hearthCardElevation()` | `elevation/1` | **content cards — the beta-v1 default** |
+| `.hearthNavElevation()` | `elevation/2` | sticky nav, raised toast |
+| `.hearthOverlayElevation()` | `elevation/3` | sheets, modals, drawers |
+
+beta-v1 reversed the old rule: cards lift with a soft shadow, not a hairline. When converting a pre-beta surface, delete the `.overlay(RoundedRectangle(...).stroke(Color.borderHairline, lineWidth: 1))` and add `.hearthCardElevation()`. Hairlines stay correct for dividers, separators, and input borders.
 
 ---
 
@@ -237,10 +252,10 @@ Until then: every screenshot, every Xcode Preview, every TestFlight build is lig
 
 The implementation must render these five canonical compositions and they must look right next to each other in an Xcode Preview gallery (`Theme_Previews.swift`).
 
-1. **Home root.** `NavigationStack` + large title "Library" in Fraunces, `bg/canvas`, two-column category-tile grid (saffron + forest photo tiles), bottom `HearthTabBar` with five items, selected = olive.
+1. **Home dashboard.** `bg/canvas`, parent avatar top-right in `accent/default`, then the four serif section headers (`COACH` / `YOUR KIDS` / `COMING UP` / `FOR YOU`) each with a leading icon, white cards lifted by `elevation/1` with **no hairline**, kid cards bordered in their per-kid accent, teal `shape/button` CTAs, bottom tab bar with five items and a pill behind the active icon.
 2. **Article reader.** Hero photo full-bleed top, byline in `type/caption-mono` over `ink/muted`, body in `type/body-lg` Inter with `.lineSpacing` matching token, end card (next-article CTA) at bottom.
 3. **Kid-agent chat (sober).** `bg/sober`, no photography, `type/body-md`, send button = `accent/default` filled, no animations beyond `motion/instant`, 44pt tap targets visible in the Xcode debug overlay.
-4. **Crisis lock screen.** `bg/sober`, single `type/display-md` headline in `ink/primary`, one olive button "Call support", no photo, no motion, no chrome.
+4. **Crisis lock screen.** `bg/sober`, single `type/display-md` headline in `ink/primary`, one `accent/default` button "Call support", no photo, no motion, no chrome.
 5. **Settings sheet.** `.sheet(item:)` presentation, drag indicator visible, corner radius `shape/xl`, `bg/elevated`, form rows at 48pt min height, primary action pinned bottom with safe-area `.hearth500` padding.
 
 Each composition must pass the Accessibility Inspector audit with zero contrast or hit-target findings before it is considered "rendered."

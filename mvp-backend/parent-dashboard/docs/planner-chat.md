@@ -7,8 +7,13 @@ draft: false
 
 # The planning assistant
 
-The assistant can do everything the buttons can do, plus the parts that need
-judgment. Talk to it the way you'd brief a very organized friend.
+The planning assistant **is your coach** — same assistant, same memory. It used
+to be a separate one that only knew logistics; now anything on this page can be
+asked in either place, and what you tell one, the other knows. See
+[the parenting coach](coach).
+
+It can do everything the buttons can do, plus the parts that need judgment.
+Talk to it the way you'd brief a very organized friend.
 
 ![A fresh chat opens with the four doors — camps, classes, outings, trips — each a one-tap way in.](/dashboard/docs-assets/chat-fresh.png)
 

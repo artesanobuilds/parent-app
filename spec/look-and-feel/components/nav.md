@@ -10,17 +10,19 @@ Three navigation surfaces: bottom tab bar (iOS primary), top nav (article / deta
 | `top-nav` | screen header, back + title + action | `bg/canvas` (transparent on article hero) | 56 + safe-area | top fixed |
 | `sub-nav` | within-screen filter / category strip | `bg/canvas` | 48 | beneath top-nav, scrolls with content |
 
-## Tab bar slots (5 max)
+## Tab bar slots (5 max) — beta-v1
 
-| Slot | Icon | Label | Notes |
+| Slot | Icon | Label | Destination |
 |---|---|---|---|
-| 1 | home | "home" | feed |
-| 2 | library | "library" | category tiles |
-| 3 | center (raised) | "ask" | kid-agent + intent-driven query |
-| 4 | community | "community" | parent posts |
-| 5 | profile | "you" | settings, kid-agent config |
+| 1 | house | `HOME` | the dashboard — coach nudge, kids, coming up, for you |
+| 2 | message | `COACH` | the coaching agent |
+| 3 | calendar | `PLAN` | the Chief-of-Staff activity board |
+| 4 | person.2 | `CIRCLE` | parent community + DMs (carries the unread badge) |
+| 5 | gearshape | `SETTINGS` | profile, library, saved, account |
 
-Center slot ("ask") sits 8pt above the bar baseline, `shape/pill`, `accent/default` fill, icon `ink/onPhoto-light`. Five slots is the cap; if a sixth surfaces, move one into profile.
+**Five slots is a hard cap.** beta-v1 spent the sixth: `library` and `saved` moved into `SETTINGS`, and the library's primary route is now the ranked "for you" feed reached from the dashboard's `FOR YOU → See all`. Six labels needed `minimumScaleFactor` to survive a 375pt phone; five do not.
+
+The raised center "ask" slot from the pre-beta spec is **gone** — there is no raised slot. The active tab is marked instead by a rounded-rect pill behind its icon, with the label in `accent/onCanvas` (the tab bar sits on canvas, so the fill hex would be an AA fail as text).
 
 ## States
 

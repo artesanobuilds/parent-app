@@ -7,9 +7,17 @@ draft: false
 
 # The parenting coach
 
-The plan board handles the logistics of parenting. The coach handles the rest
-of it — the bedtime meltdowns, the sibling wars, the "am I doing this right?"
-at 11pm. It lives in the iPhone app, in the **Coach** tab.
+The coach handles the hard parts of parenting — the bedtime meltdowns, the
+sibling wars, the "am I doing this right?" at 11pm — **and** the logistics
+behind them: the camps, the classes, the calendar, the to-dos. It used to be
+two separate assistants; it's one now. It lives in the iPhone app, in the
+**Coach** tab.
+
+That matters for the turns that are both at once. "Ben's summer is a mess" is a
+coverage problem *and* an overwhelmed parent, and you get one answer to the
+whole thing instead of being sent to another tab for the other half. Everything
+on [the planning assistant](planner-chat) page is something you can ask the
+coach directly, and the two share one memory — tell one, and the other knows.
 
 ## What a conversation looks like
 
@@ -31,6 +39,17 @@ next week's conversation starts from where you actually are, not from zero.
 You can see and edit everything it knows in **Profile**. Nothing is inferred
 from anywhere else; the profile is what you've said, and it's yours to
 correct or delete.
+
+It also knows your **Circle** — your co-parent, your nanny, grandma, whoever
+you've added — including the notes you keep on each of them. So "can Rosa cover
+Thursday?" is a question it can actually answer.
+
+## Reading, when it's useful
+
+There's no library to browse any more. The coach knows the whole library and
+brings you an article when one genuinely fits what you're going through —
+usually one link, in the middle of a sentence, not a reading list. The same
+ranking powers **Home → For you → See all** if you'd rather go looking.
 
 ## Voice
 

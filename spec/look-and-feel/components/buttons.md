@@ -2,13 +2,16 @@
 
 Buttons are the load-bearing CTA primitive. Three variants, three sizes, four+ interactive states. iOS hit target is `44pt` minimum regardless of visual height — pad the tap area, not the chrome. Labels are sentence-case for functional UI ("save changes"), Title Case only when echoing an article-level action.
 
+> **beta-v1 changes.** Radius moved from `shape/pill` to **`shape/button` (8)** — Greg's CTAs are tight rects, not capsules. The accent is now teal and is **split**: `accent/default` is the FILL, `accent/onCanvas` is for accent-colored TEXT drawn on cream. A `quiet` button standalone on `bg/canvas` therefore takes `accent/onCanvas`, not `accent/default` — using the fill hex as text on canvas is 4.15:1, an AA fail. A disabled button uses `bg/disabled` with `ink/secondary`; **never white on `bg/disabled` (2.07:1)**.
+
 ## Variants
 
 | Variant | Use | Fill | Label | Border |
 |---|---|---|---|---|
-| `primary` | one per screen — the verb the parent came for | `accent/default` | `ink/onPhoto-light` (on olive, AA-pass) | none |
+| `primary` | one per screen — the verb the parent came for | `accent/default` | `ink/onPhoto-light` (5.25:1, AA-pass) | none |
 | `secondary` | adjacent counter-verb (cancel, back) | `bg/elevated` | `ink/primary` | `border/hairline` 1px |
-| `quiet` | inline action inside a card or row, toolbar / nav-adjacent (icon-only ok) | transparent | `accent/default` when standalone; inherits surface ink (`ink/primary` / `ink/secondary` / `ink/onPhoto-*`) when nested | none |
+| `quiet` | inline action inside a card or row, toolbar / nav-adjacent (icon-only ok) | transparent | `accent/onCanvas` when standalone on canvas; `accent/default` when standalone on `bg/elevated`; inherits surface ink (`ink/primary` / `ink/secondary` / `ink/onPhoto-*`) when nested | none |
+| `disabled` (modifier) | inert primary | `bg/disabled` | `ink/secondary` (6.66:1) | none |
 
 `danger` is a **modifier on `secondary`**, not a variant: fill stays `bg/elevated`; label and border swap to `status/error`. There is no `danger primary` — destructive actions stay quiet until invoked. Color inheritance for `quiet` follows the surface the same way photo overlays do.
 
