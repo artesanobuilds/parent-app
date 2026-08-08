@@ -21,24 +21,26 @@ struct SavedView: View {
     @State private var expandedReplies: Set<String> = []
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if loading && items.isEmpty {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if items.isEmpty {
-                    emptyState
-                } else {
-                    savedList
-                }
+        // No NavigationStack of its own. beta-v1 moved Saved out of the tab bar
+        // and behind Settings, which already supplies a stack — nesting a
+        // second one renders two stacked nav bars. The title and the
+        // destination registrations below attach to the enclosing stack.
+        Group {
+            if loading && items.isEmpty {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if items.isEmpty {
+                emptyState
+            } else {
+                savedList
             }
-            .background(Color.bgCanvas.ignoresSafeArea())
-            .navigationTitle("Saved")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.bgCanvas, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .withContentNavigationDestinations()
-            .task(id: refreshToken) { await load() }
         }
+        .background(Color.bgCanvas.ignoresSafeArea())
+        .navigationTitle("Saved")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Color.bgCanvas, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .withContentNavigationDestinations()
+        .task(id: refreshToken) { await load() }
     }
 
     private var emptyState: some View {
@@ -79,11 +81,10 @@ struct SavedView: View {
                 rowLabel(item, icon: "book")
             }
             .swipeActions(edge: .trailing) { unsaveButton(item) }
-        case "community_post":
-            NavigationLink(value: PostRoute(id: item.itemRef)) {
-                rowLabel(item, icon: "person.2")
-            }
-            .swipeActions(edge: .trailing) { unsaveButton(item) }
+        // "community_post" rows are deliberately NOT rendered. The public board
+        // was retired in beta-v1 sprint 2, so the post can no longer be opened —
+        // but the saved rows are the parent's data and are left untouched in
+        // DuckDB rather than deleted. They simply don't list.
         case "coach_reply":
             Button {
                 withAnimation(.hearthFast) {

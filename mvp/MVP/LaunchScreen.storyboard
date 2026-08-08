@@ -7,7 +7,31 @@
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
     <scenes>
-        <!--Launch Screen — full-bleed Hearth LaunchHero image on a cream canvas.-->
+        <!--Launch Screen — the MVP wordmark on cream, positioned to match the
+            SwiftUI splash so the handoff is invisible.
+
+            History, so this doesn't regress again in either direction:
+            it first showed a full-bleed LaunchHero PHOTO, which meant the app
+            opened with two visibly different splashes back to back. Stripping
+            the photo left it completely EMPTY, which reads as a broken app —
+            a blank cream card zooms out of the icon and sits there.
+
+            The fix is neither: show the same wordmark the SwiftUI splash shows,
+            in the same place. One splash, no blank frame.
+
+            Two things must stay in sync by hand, because a storyboard can read
+            neither the Hearth tokens nor a custom font:
+              * the background MUST equal bg/canvas (neutral/cream-200 #E9E4DC).
+                It previously drifted to the pre-beta #F3F0EB and flashed.
+              * LaunchWordmark.imageset is Fraunces BAKED TO PNG. Custom fonts
+                are not registered yet when the launch screen renders, so a
+                UILabel in Fraunces would silently fall back to the system face.
+                Regenerate the PNG if the display face changes.
+
+            centerY multiplier 0.82 puts the wordmark slightly above centre,
+            matching where OnboardingView.splashScreen lands it once the CTAs
+            take up the bottom of the screen.
+        -->
         <scene sceneID="launch-scene">
             <objects>
                 <viewController id="launch-view-controller" sceneMemberID="viewController">
@@ -15,17 +39,15 @@
                         <rect key="frame" x="0.0" y="0.0" width="414" height="896"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFill" translatesAutoresizingMaskIntoConstraints="NO" image="LaunchHero" id="launch-hero"/>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" translatesAutoresizingMaskIntoConstraints="NO" image="LaunchWordmark" id="launch-wordmark"/>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="launch-safe-area"/>
-                        <!-- cream canvas — visible at the edges only if the image doesn't fully cover -->
-                        <color key="backgroundColor" red="0.9529411764705882" green="0.9411764705882353" blue="0.9215686274509804" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <!-- bg/canvas = neutral/cream-200 #E9E4DC -->
+                        <color key="backgroundColor" red="0.9137254901960784" green="0.8941176470588236" blue="0.8627450980392157" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
-                            <!-- Pin the hero to all four edges, full-bleed (ignores safe area). -->
-                            <constraint firstItem="launch-hero" firstAttribute="leading" secondItem="launch-view" secondAttribute="leading" id="constraint-leading"/>
-                            <constraint firstItem="launch-hero" firstAttribute="trailing" secondItem="launch-view" secondAttribute="trailing" id="constraint-trailing"/>
-                            <constraint firstItem="launch-hero" firstAttribute="top" secondItem="launch-view" secondAttribute="top" id="constraint-top"/>
-                            <constraint firstItem="launch-hero" firstAttribute="bottom" secondItem="launch-view" secondAttribute="bottom" id="constraint-bottom"/>
+                            <constraint firstItem="launch-wordmark" firstAttribute="centerX" secondItem="launch-view" secondAttribute="centerX" id="wordmark-center-x"/>
+                            <constraint firstItem="launch-wordmark" firstAttribute="centerY" secondItem="launch-view" secondAttribute="centerY" multiplier="0.82" id="wordmark-center-y"/>
+                            <constraint firstItem="launch-wordmark" firstAttribute="width" secondItem="launch-view" secondAttribute="width" multiplier="0.58" id="wordmark-width"/>
                         </constraints>
                     </view>
                 </viewController>
@@ -35,6 +57,6 @@
         </scene>
     </scenes>
     <resources>
-        <image name="LaunchHero" width="752" height="1584"/>
+        <image name="LaunchWordmark" width="240" height="71"/>
     </resources>
 </document>

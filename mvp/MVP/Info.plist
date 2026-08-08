@@ -22,12 +22,10 @@
 		<string>Fraunces[SOFT,WONK,opsz,wght].ttf</string>
 		<string>JetBrainsMono[wght].ttf</string>
 	</array>
-	<key>UILaunchScreen</key>
-	<dict>
-		<key>UIImageName</key>
-		<string>LaunchHero</string>
-		<key>UIImageRespectsSafeAreaInsets</key>
-		<false/>
-	</dict>
+	<!-- No UILaunchScreen dict on purpose. The active launch screen is
+	     LaunchScreen.storyboard (set via INFOPLIST_KEY_UILaunchStoryboardName),
+	     and UILaunchStoryboardName takes precedence over UILaunchScreen when
+	     both are present — so this dict was dead config that still named the
+	     LaunchHero image and made the launch screen look branded in review. -->
 </dict>
 </plist>

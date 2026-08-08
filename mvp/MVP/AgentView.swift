@@ -10,8 +10,8 @@ struct AgentView: View {
     @EnvironmentObject private var contentVM: ContentViewModel
 
     /// Tracks which assistant message IDs have had content cards generated.
-    /// Maps message ID -> (community posts, library items) so content is stable.
-    @State private var contentCards: [UUID: ([APICommunityPost], [APIArticle])] = [:]
+    /// Maps message ID -> library items so content is stable.
+    @State private var contentCards: [UUID: [APIArticle]] = [:]
 
     /// Programmatic pushes for the coach's inline mvp:// citations — the
     /// OpenURLAction below appends routes here and the destinations registered
@@ -60,21 +60,24 @@ struct AgentView: View {
                 messageList
                 inputArea
             }
-            // The coach cites content as [Title](mvp://library/{id}) and
-            // [Title](mvp://community/{id}) (see agent.py + the content
-            // catalog). These links were DEAD until this handler: no mvp://
-            // scheme is registered anywhere, so taps did nothing. Route them
-            // in-app; the learn-more disclaimer opens the public coach doc;
-            // real web links (search citations) fall through to Safari.
+            // The coach cites content as [Title](mvp://library/{id}) (see
+            // agent.py + the content catalog). These links were DEAD until
+            // this handler: no mvp:// scheme is registered anywhere, so taps
+            // did nothing. Route them in-app; the learn-more disclaimer opens
+            // the public coach doc; real web links (search citations) fall
+            // through to Safari.
+            //
+            // `mvp://community/` was the second host until the public board
+            // was retired in beta-v1 sprint 2. The catalog no longer emits it,
+            // and the `default` case below swallows any stale link rather than
+            // bouncing the parent to a "cannot open" alert. Locked by
+            // tests/test_coach_citation_contract.py.
             .environment(\.openURL, OpenURLAction { url in
                 guard url.scheme == "mvp" else { return .systemAction }
                 let id = url.lastPathComponent
                 switch url.host {
                 case "library" where !id.isEmpty:
                     navPath.append(ArticleRoute(id: id))
-                    return .handled
-                case "community" where !id.isEmpty:
-                    navPath.append(PostRoute(id: id))
                     return .handled
                 case "learn-more":
                     if let base = configuration.baseURL {
@@ -178,22 +181,7 @@ struct AgentView: View {
 
                             // Show content cards after the response finishes streaming
                             if !message.isStreaming && !message.content.isEmpty {
-                                let cards = cardsForMessage(message)
-                                if !cards.0.isEmpty || !cards.1.isEmpty {
-                                    VStack(alignment: .leading, spacing: .hearth600) {
-                                        CommunitySection(posts: cards.0)
-                                        LibrarySection(items: cards.1)
-                                        FeedbackRow(
-                                            feedback: message.feedback,
-                                            onThumbsUp: { viewModel.submitFeedback(messageID: message.id, feedback: .thumbsUp) },
-                                            onThumbsDown: { viewModel.submitFeedback(messageID: message.id, feedback: .thumbsDown) }
-                                        )
-                                    }
-                                    .padding(.horizontal, .hearth500)
-                                    .padding(.top, .hearth500)
-                                    .padding(.bottom, .hearth300)
-                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                                }
+                                contentCardBlock(for: message)
                             }
                         }
                     }
@@ -377,17 +365,41 @@ struct AgentView: View {
         }
     }
 
+    /// The library cards + feedback row shown under a finished assistant reply.
+    ///
+    /// Extracted out of `messageList` deliberately: inlined, the surrounding
+    /// ForEach expression grew past what the Swift type-checker will solve in
+    /// reasonable time and the build failed with a timeout rather than a real
+    /// error. Keep this a separate `@ViewBuilder`.
+    @ViewBuilder
+    private func contentCardBlock(for message: ChatMessage) -> some View {
+        let cards = cardsForMessage(message)
+        if !cards.isEmpty {
+            VStack(alignment: .leading, spacing: .hearth600) {
+                LibrarySection(items: cards)
+                FeedbackRow(
+                    feedback: message.feedback,
+                    onThumbsUp: { viewModel.submitFeedback(messageID: message.id, feedback: .thumbsUp) },
+                    onThumbsDown: { viewModel.submitFeedback(messageID: message.id, feedback: .thumbsDown) }
+                )
+            }
+            .padding(.horizontal, .hearth500)
+            .padding(.top, .hearth500)
+            .padding(.bottom, .hearth300)
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
+        }
+    }
+
     /// Returns stable content cards for a given message, generating them once.
-    private func cardsForMessage(_ message: ChatMessage) -> ([APICommunityPost], [APIArticle]) {
+    private func cardsForMessage(_ message: ChatMessage) -> [APIArticle] {
         if let existing = contentCards[message.id] {
             return existing
         }
-        let posts = contentVM.randomCommunityPosts()
         let items = contentVM.randomLibraryItems()
         // Schedule state mutation outside of the view body
         DispatchQueue.main.async {
-            contentCards[message.id] = (posts, items)
+            contentCards[message.id] = items
         }
-        return (posts, items)
+        return items
     }
 }

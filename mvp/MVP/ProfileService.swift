@@ -34,10 +34,15 @@ struct ParentProfileDTO: Codable {
     // Freshly presigned by GET /profile when a photo exists (expires in ~15m —
     // display-only, never persist).
     var avatarUrl: String? = nil
+    /// Onboarding's "free time" grid selections (`ProfileOptions.familyActivityOptions`).
+    /// Read here so the account sheet's "Family interests" grid can show what
+    /// was picked at onboarding; written back via `updateParent`.
+    var familyActivities: [String]? = nil
 
     enum CodingKeys: String, CodingKey {
         case name, pronouns, country, employment, stressors, goals
         case avatarUrl = "avatar_url"
+        case familyActivities = "family_activities"
         case postalCode = "postal_code"
         case primaryLanguage = "primary_language"
         case parentAgeRange = "parent_age_range"

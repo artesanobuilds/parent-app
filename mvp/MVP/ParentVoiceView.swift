@@ -220,12 +220,10 @@ private struct ParentLiveCallView: View {
                         LibraryItemCard(item: item)
                     }
                     .buttonStyle(.plain)
-                } else if ref.kind == "community", let post = contentVM.postData(ref.id) {
-                    NavigationLink(value: PostRoute(id: post.id)) {
-                        CommunityPostCard(post: post)
-                    }
-                    .buttonStyle(.plain)
                 }
+                // `ref.kind == "community"` used to render a board post here.
+                // The board is retired (beta-v1 sprint 2) and the coach no
+                // longer surfaces those refs; an old one simply renders nothing.
             }
         }
         .padding(.top, .hearth500)

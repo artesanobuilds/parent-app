@@ -27,7 +27,7 @@ private struct SavedRefsResponse: Codable { let refs: [String] }
 
 // MARK: - Service
 
-/// REST client for the Saved tab. Same shape as ProfileService/DMService.
+/// REST client for the Saved tab. Same shape as ProfileService/CircleService.
 enum SavedService {
 
     @MainActor

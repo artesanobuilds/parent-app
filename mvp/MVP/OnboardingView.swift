@@ -1,201 +1,159 @@
 import SwiftUI
 
 // MARK: - Onboarding Data (sent to backend)
+//
+// UNCHANGED SHAPE, deliberately. beta-v1 cut three screens from the funnel
+// (demographics, energy/dread, support crew) but the backend fields STAY —
+// the Coach now learns them conversationally. So every property below survives
+// and the ones the funnel no longer asks simply arrive empty. `/profile/seed`'s
+// wire contract is pinned by tests/test_onboarding_seed_contract.py; do not
+// drop keys here to "tidy up".
 
 struct OnboardingData {
     let parentName: String
-    let kids: [(name: String, age: String, temperament: String, pronouns: String, gradeBand: String)]
+    let kids: [(name: String, age: String, temperament: String, pronouns: String, gradeBand: String, gender: String)]
     let household: String
-    let supportSystem: String
-    let energyPattern: String
-    let dreadedMoment: String
+    let supportSystem: String       // no longer asked — Coach learns it
+    let energyPattern: String       // no longer asked — Coach learns it
+    let dreadedMoment: String       // no longer asked — Coach learns it
     let challenges: [String]
     let goals: [String]
     // Demographic additions
-    let postalCode: String
-    let country: String
+    let postalCode: String          // Phase-3 Figma delta: RESTORED — Chief-of-Staff activity discovery needs it
+    let country: String             // no longer asked — Coach learns it
     let primaryLanguage: String
-    let parentAgeRange: String
-    let adultsInHousehold: Int?
-    let employment: String
-    let culturalBackground: String
-    let pronouns: String
-}
-
-// MARK: - Kid Entry Model
-
-struct KidEntry: Identifiable {
-    let id = UUID()
-    var name: String = ""
-    var age: String = ""
-    var temperament: String = ""
-    var pronouns: String = ""
-    var gradeBand: String = ""
-}
-
-// MARK: - Whimsical Illustration Compositions
-
-/// Floating collage-style illustration using emoji and SF Symbols
-/// Inspired by CHANI's playful animal collages
-private struct CollageIllustration: View {
-    let items: [(String, CGFloat, CGFloat, CGFloat, Double)]  // emoji, x%, y%, size, rotation
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    Text(item.0)
-                        .font(.system(size: item.3))
-                        .rotationEffect(.degrees(item.4))
-                        .position(
-                            x: geo.size.width * item.1,
-                            y: geo.size.height * item.2
-                        )
-                }
-            }
-        }
-    }
-}
-
-/// Decorative sparkle cluster that floats around content
-private struct SparkleCluster: View {
-    let count: Int
-    let color: Color
-
-    var body: some View {
-        ZStack {
-            ForEach(0..<count, id: \.self) { i in
-                let angle = Double(i) * (360.0 / Double(count))
-                let radius: CGFloat = CGFloat.random(in: 8...22)
-                Image(systemName: ["sparkle", "star.fill", "circle.fill"][i % 3])
-                    .font(.system(size: CGFloat.random(in: 4...10)))
-                    .foregroundColor(color.opacity(Double.random(in: 0.4...1.0)))
-                    .offset(
-                        x: cos(angle * .pi / 180) * radius,
-                        y: sin(angle * .pi / 180) * radius
-                    )
-            }
-        }
-    }
-}
-
-/// Wavy underline decoration inspired by CHANI's squiggly dividers
-private struct WavyLine: View {
-    var width: CGFloat = 120
-    var color: Color = .accentDefault
-
-    var body: some View {
-        WavyShape()
-            .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-            .frame(width: width, height: 8)
-    }
-}
-
-private struct WavyShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let wavelength = rect.width / 4
-        let amplitude: CGFloat = 3
-
-        path.move(to: CGPoint(x: 0, y: rect.midY))
-        for i in stride(from: 0, through: rect.width, by: 1) {
-            let y = rect.midY + sin(i / wavelength * .pi * 2) * amplitude
-            path.addLine(to: CGPoint(x: i, y: y))
-        }
-        return path
-    }
+    let parentAgeRange: String      // no longer asked — Coach learns it
+    let adultsInHousehold: Int?     // no longer asked — omitted from the body
+    let employment: String          // no longer asked — Coach learns it
+    let culturalBackground: String  // no longer asked — Coach learns it
+    let pronouns: String            // no longer asked — Coach learns it
+    // Phase-3 Figma deltas (additive — new keys only, nothing renamed)
+    let secondaryLanguage: String
+    let educationStyle: String
+    let familyActivities: [String]
+    let coachVoice: String
+    let coachPersonality: String
 }
 
 // MARK: - Onboarding View
 
+/// The beta-v1 funnel. Eight *kinds* of screen, but a DYNAMIC number of them:
+/// the parent says how many children they have and the flow grows one screen
+/// per child.
+///
+///   splash → acquainted → kidCount → kid(0) … kid(n-1) → freeTime → mind
+///          → signIn → warmup (the progress ring) → allSet
+///
+/// Two structural rules make the dynamic count safe:
+///
+///  1. `flow` is COMPUTED from `draft.kids.count`, and `draft.stepIndex` is a
+///     position in it. Forward moves name their destination (`goTo(.mind)`)
+///     rather than incrementing, so reshaping the flow can never land the
+///     parent on the wrong screen. Back is `stepIndex - 1`, which walks the
+///     computed array and therefore handles n children for free.
+///  2. `includesSignInStep` is captured ONCE at init. It must not be derived
+///     from live auth state: signing in would shrink the flow underneath the
+///     current index.
+///
+/// Sign-in now lives INSIDE the funnel (Greg's "Securing your family's space"),
+/// which means every answer is collected before an account exists. That is only
+/// safe because of `OnboardingDraft` — see the durability notes on that type.
 struct OnboardingView: View {
-    var onComplete: (OnboardingData) -> Void
 
-    @State private var keyboardVisible: Bool = false
-    @State private var step: Int = 0
-    @State private var parentName: String = ""
-    @State private var kids: [KidEntry] = [KidEntry()]
-    // Multi-select: realistic households often combine (e.g. "Two-parent
-    // home" + "Blended family"). Stored as Set in UI; flattened to a
-    // comma-joined String when sent to the backend.
-    @State private var household: Set<String> = []
-    @State private var supportSystem: Set<String> = []
-    @State private var energyPattern: String = ""
-    @State private var dreadedMoment: String = ""
-    @State private var challenges: Set<String> = []
-    @State private var goals: Set<String> = []
-    @State private var isReturningUser: Bool = false
-    @State private var returningUserName: String = ""
-    @State private var appearAnimation: Bool = false
-    // Demographic additions (step 2 "About you")
-    @State private var postalCode: String = ""
-    @State private var country: String = "US"
-    @State private var primaryLanguage: String = ""
-    @State private var parentAgeRange: String = ""
-    @State private var adultsInHousehold: Int = 2
-    @State private var employment: String = ""
-    @State private var culturalBackground: String = ""
-    @State private var pronouns: String = ""
-    // Legal agreement gate on the final step. Tapping "Let's go" with this
-    // checked stashes a durable legal_accept_pending flag; SwayApp's launch
-    // task POSTs the acceptance (and retries next launch if it fails offline).
-    @State private var agreedToLegal: Bool = false
+    // MARK: Inputs
 
-    private let totalSteps = 9  // 0=welcome, 1=name, 2=aboutYou, 3=kids, 4=world, 5=energy, 6=challenges, 7=goals, 8=preview
+    /// Whether the funnel must present the sign-in screen. Captured into state
+    /// at init; see rule 2 above.
+    var signInRequired: Bool
 
-    // Option lists — each entry is (label, SF Symbol name). The chip renderer
-    // uses `Image(systemName: symbol)` so icons stay tinted with Hearth
-    // tokens and match the editorial line-art aesthetic. Replaces the
-    // previous (label, emoji) tuples that read as kindergarten-app next to
-    // Fraunces typography.
+    /// Called the moment sign-in resolves an account. The app persists the
+    /// account id, and when the account ALREADY has a profile (same parent, new
+    /// device or reinstall) it ends onboarding immediately — this view is torn
+    /// down mid-funnel by design.
+    var onSignedIn: (AuthService.SignInOutcome) -> Void
 
-    private let countryOptions: [(label: String, symbol: String)] = [
-        ("US", "globe.americas"),
-        ("MX", "globe.americas"),
-        ("CA", "globe.americas"),
-        ("GB", "globe.europe.africa"),
-        ("Other", "globe")
+    /// Stash + POST `/profile/seed`. Returns true once the server confirmed a
+    /// 200. Called from the ring screen, which is the beat Greg labels "Getting
+    /// to know your family". A false return is NOT fatal: the payload stays
+    /// durable in `pending_seed_body` and the next launch retries it.
+    var onSeed: (OnboardingData) async -> Bool
+
+    /// "Take me home" — flips `onboarding_completed`.
+    var onFinish: () -> Void
+
+    init(
+        signInRequired: Bool,
+        onSignedIn: @escaping (AuthService.SignInOutcome) -> Void,
+        onSeed: @escaping (OnboardingData) async -> Bool,
+        onFinish: @escaping () -> Void
+    ) {
+        self.signInRequired = signInRequired
+        self.onSignedIn = onSignedIn
+        self.onSeed = onSeed
+        self.onFinish = onFinish
+        _includesSignInStep = State(initialValue: signInRequired)
+        // Resume an abandoned funnel. `load` returns nil on a clean install and
+        // on an undecodable draft, both of which mean "start at the splash".
+        _draft = State(initialValue: OnboardingDraft.load() ?? OnboardingDraft())
+    }
+
+    // MARK: State
+
+    /// The ONE piece of funnel state. Every answer and the current position
+    /// live here, and a single `.onChange` below persists the whole thing on
+    /// every mutation — so there is no way to add a field that isn't durable.
+    @State private var draft: OnboardingDraft
+    @State private var includesSignInStep: Bool
+
+    /// The resolved account id, written by `onSignedIn` via SwayApp. Read here
+    /// (never written) so the warm-up can authenticate.
+    @AppStorage("user_name") private var accountID = ""
+
+    /// True when the parent reached sign-in via the splash's "I already have an
+    /// account" rather than by walking the funnel. It changes what happens on a
+    /// successful sign-in whose account turns out to have NO profile: the
+    /// normal path goes to the ring (every answer already collected), but a
+    /// splash jumper has answered nothing, so sending them to the ring would
+    /// seed an empty family. They go to the first question instead.
+    @State private var cameToSignInFromSplash = false
+
+    // Ring state
+    @State private var ringSteps: [WarmupStep] = OnboardingWarmupService.placeholderSteps
+    @State private var ringPercent: Int = 0
+    @State private var warmupStarted = false
+
+    @State private var didResume = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    // MARK: Tunables
+
+    /// Hard ceiling on the ring, measured from the moment it appears. The
+    /// backend bounds each beat at 25s and there are four of them, so a fully
+    /// pathological run outlives this — deliberately. A parent stuck behind a
+    /// spinner because an LLM call timed out is strictly worse than an
+    /// unpersonalised Home.
+    private static let ringDeadline: TimeInterval = 32
+    /// Floor, so a fast warm-up doesn't strobe past.
+    private static let ringMinimumDwell: TimeInterval = 2.2
+    private static let ringPollInterval: TimeInterval = 0.7
+
+    // MARK: - Option lists
+    //
+    // Reused verbatim from the pre-beta funnel; their labels already match
+    // Greg's chips. The lists the redesign STOPPED asking (parent age,
+    // employment, pronouns, energy, dread, support crew) are gone from this
+    // file entirely — the Coach gathers them conversationally now.
+
+    private let languageOptions = ["English", "Spanish", "Mandarin", "Other"]
+
+    private let householdOptions = [
+        "Two-parent home", "Single parent", "Co-parenting",
+        "Blended family", "Extended family", "It's complicated"
     ]
 
-    private let languageOptions: [(label: String, symbol: String)] = [
-        ("English", "text.bubble"),
-        ("Spanish", "text.bubble"),
-        ("Mandarin", "text.bubble"),
-        ("Other", "globe")
-    ]
-
-    private let parentAgeOptions: [(label: String, symbol: String)] = [
-        ("<25", "person"),
-        ("25-34", "person"),
-        ("35-44", "person"),
-        ("45-54", "person"),
-        ("55+", "person"),
-        ("Prefer not to say", "lock")
-    ]
-
-    private let employmentOptions: [(label: String, symbol: String)] = [
-        ("Stay-at-home", "house"),
-        ("Part-time", "clock"),
-        ("Full-time", "briefcase"),
-        ("Shift work", "moon.stars"),
-        ("Self-employed", "laptopcomputer"),
-        ("Unemployed", "pause.circle"),
-        ("Other", "ellipsis.circle")
-    ]
-
-    // Pronouns are text-primary; icon adds noise. Symbol kept for tuple
-    // shape consistency but the chip renderer can drop it when empty.
-    private let parentPronounsOptions: [(label: String, symbol: String)] = [
-        ("she/her", ""),
-        ("he/him", ""),
-        ("they/them", ""),
-        ("Other", "")
-    ]
-
-    private let kidPronounsOptions: [(label: String, symbol: String)] = [
-        ("she/her", ""),
-        ("he/him", ""),
-        ("they/them", "")
+    /// Phase-3 Figma delta — "Education style" on "Let's get acquainted".
+    private let educationStyleOptions = [
+        "Public school", "Private school", "Homeschool", "Montessori", "Waldorf", "Other"
     ]
 
     private let gradeBandOptions = [
@@ -203,50 +161,37 @@ struct OnboardingView: View {
         "6", "7", "8", "9", "10", "11", "12", "N/A"
     ]
 
-    private let householdOptions: [(label: String, symbol: String)] = [
-        ("Two-parent home", "house.fill"),
-        ("Single parent", "person.fill"),
-        ("Co-parenting", "person.2.fill"),
-        ("Blended family", "person.3.fill"),
-        ("Extended family", "house.and.flag"),
-        ("It's complicated", "questionmark.circle")
+    /// Phase-3 Figma delta — the new "free time" screen's 3x3 icon grid.
+    /// Greg's frame repeats Nature and Parks twice; that's a Figma placeholder
+    /// artifact, not a spec — this is the clean, distinct list. SINGLE SOURCE:
+    /// `ProfileOptions.familyActivityOptions`, which the beta-v1 account
+    /// sheet's "Family interests" grid also reads (see
+    /// `patterns_onboarding_parity`).
+    private var freeTimeOptions: [(label: String, symbol: String)] {
+        ProfileOptions.familyActivityOptions
+    }
+
+    /// Phase-3 Figma delta — "Set up how you want the coach to respond" on the
+    /// final "all set" screen.
+    private let coachVoiceOptions = [
+        "Default - Male", "Default - Female", "Warm - Male", "Warm - Female"
+    ]
+    private let coachPersonalityOptions = [
+        "Default - Genuine", "Direct - Coach", "Gentle - Nurturing", "Playful - Upbeat"
     ]
 
-    private let supportOptions: [(label: String, symbol: String)] = [
-        ("Family nearby", "heart"),
-        ("Childcare/nanny", "figure.and.child.holdinghands"),
-        ("Partner is hands-on", "hands.sparkles"),
-        ("Friends & neighbors", "person.3"),
-        ("Online communities", "bubble.left.and.bubble.right"),
-        ("Mostly on my own", "person")
-    ]
-
-    private let energyOptions: [(label: String, symbol: String)] = [
-        ("Morning person", "sunrise"),
-        ("Night owl", "moon.stars"),
-        ("Afternoon peak", "sun.max"),
-        ("Depends on the day", "arrow.triangle.2.circlepath")
-    ]
-
-    private let dreadedOptions: [(label: String, symbol: String)] = [
-        ("Mornings", "sunrise"),
-        ("After school", "bag"),
-        ("Dinnertime", "fork.knife"),
-        ("Bedtime", "bed.double"),
-        ("Weekends", "calendar"),
-        ("Homework hour", "book"),
-        ("Transitions", "arrow.triangle.swap"),
-        ("Honestly, all of it", "face.smiling")
-    ]
-
-    private let temperamentOptions: [(label: String, symbol: String)] = [
-        ("Spirited", "flame"),
-        ("Sensitive", "heart"),
-        ("Easy-going", "cloud.sun"),
-        ("Strong-willed", "bolt"),
-        ("Shy/cautious", "tortoise"),
-        ("Social butterfly", "figure.wave")
-    ]
+    /// Personality chips. SINGLE SOURCE: `ProfileOptions.temperamentChips` in
+    /// ProfileEditorViews.swift, which the kid-settings sheet also reads. The
+    /// funnel must not keep its own copy — a temperament picked at signup has to
+    /// still be findable when the parent later edits it, and two independently
+    /// maintained lists are exactly how that drifts apart
+    /// (see `patterns_onboarding_parity`).
+    ///
+    /// Greg's kid frames show "Spirited" twice; that's a Figma artifact, not a
+    /// seventh option.
+    private var temperamentOptions: [(label: String, symbol: String)] {
+        ProfileOptions.temperamentChips
+    }
 
     private let challengeOptions: [(label: String, symbol: String)] = [
         ("Morning routines", "sunrise"),
@@ -255,10 +200,10 @@ struct OnboardingView: View {
         ("Picky eating", "fork.knife"),
         ("Screen time", "iphone"),
         ("Sibling rivalry", "person.2"),
-        ("Work-life balance", "scale.3d"),
-        ("Feeling alone in it", "person"),
         ("School struggles", "book.closed"),
-        ("Behavior changes", "arrow.triangle.2.circlepath")
+        ("Behavior changes", "arrow.triangle.2.circlepath"),
+        ("Work-life balance", "scale.3d"),
+        ("Feeling alone in it", "person")
     ]
 
     private let goalOptions: [(label: String, symbol: String)] = [
@@ -270,23 +215,81 @@ struct OnboardingView: View {
         ("Building confidence", "figure.stand")
     ]
 
+    // MARK: - Flow
+
+    enum Step: Equatable {
+        case splash
+        case acquainted
+        case kidCount
+        case kid(Int)
+        case freeTime
+        case mind
+        case signIn
+        case warmup
+        case allSet
+    }
+
+    /// The screen order, recomputed from the collected child count.
+    private var flow: [Step] {
+        var steps: [Step] = [.splash, .acquainted, .kidCount]
+        for index in draft.kids.indices { steps.append(.kid(index)) }
+        steps.append(.freeTime)
+        steps.append(.mind)
+        if includesSignInStep { steps.append(.signIn) }
+        steps.append(.warmup)
+        steps.append(.allSet)
+        return steps
+    }
+
+    private var currentStep: Step {
+        let steps = flow
+        guard !steps.isEmpty else { return .splash }
+        return steps[min(max(draft.stepIndex, 0), steps.count - 1)]
+    }
+
+    private func goTo(_ step: Step) {
+        guard let index = flow.firstIndex(of: step) else { return }
+        withAnimation(.hearth(.hearthSlow, reduceMotion: reduceMotion)) {
+            draft.stepIndex = index
+        }
+    }
+
+    /// Back walks the computed flow, so it handles n children with no special
+    /// cases: from `kid(0)` it lands on `kidCount`, from `mind` it lands on the
+    /// LAST child (or on `kidCount` when there are none).
+    private func goBack() {
+        guard draft.stepIndex > 0 else { return }
+        dismissKeyboard()
+        // A parent who jumped splash → sign-in never walked the funnel, so the
+        // step physically before `.signIn` (`.mind`) is not where they came
+        // from. Stepping back by index would strand them mid-questionnaire.
+        if cameToSignInFromSplash, currentStep == .signIn {
+            cameToSignInFromSplash = false
+            goTo(.splash)
+            return
+        }
+        withAnimation(.hearth(.hearthSlow, reduceMotion: reduceMotion)) {
+            draft.stepIndex -= 1
+        }
+    }
+
+    // MARK: - Body
+
     var body: some View {
         ZStack {
-            Color.bgCanvas
-                .ignoresSafeArea()
+            Color.bgCanvas.ignoresSafeArea()
 
             Group {
-                switch step {
-                case 0: welcomeScreen
-                case 1: nameScreen
-                case 2: aboutYouScreen
-                case 3: kidsScreen
-                case 4: worldScreen
-                case 5: energyScreen
-                case 6: challengesScreen
-                case 7: goalsScreen
-                case 8: previewScreen
-                default: welcomeScreen
+                switch currentStep {
+                case .splash:      splashScreen
+                case .acquainted:  acquaintedScreen
+                case .kidCount:    kidCountScreen
+                case .kid(let i):  kidScreen(i)
+                case .freeTime:    freeTimeScreen
+                case .mind:        mindScreen
+                case .signIn:      signInScreen
+                case .warmup:      warmupScreen
+                case .allSet:      allSetScreen
                 }
             }
             .transition(.asymmetric(
@@ -294,1040 +297,1113 @@ struct OnboardingView: View {
                 removal: .opacity.combined(with: .move(edge: .leading))
             ))
         }
-        // Phase 1: light mode locked. Dark-mode tokens arrive in Phase 2.
+        // beta-v1 is light-locked; the only dark surface is bg/voice.
         .preferredColorScheme(.light)
-        .onAppear { withAnimation(.hearthSlow) { appearAnimation = true } }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-            withAnimation(.easeOut(duration: 0.2)) { keyboardVisible = true }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            withAnimation(.easeOut(duration: 0.2)) { keyboardVisible = false }
-        }
-    }
-
-    // MARK: - Progress Indicator
-
-    private func progressDots(current: Int) -> some View {
-        HStack(spacing: 6) {
-            ForEach(1..<totalSteps, id: \.self) { i in
-                Capsule()
-                    .fill(i <= current ? Color.accentDefault : Color.accentDefault.opacity(0.2))
-                    .frame(width: i == current ? 24 : 8, height: 4)
-                    .animation(.easeInOut(duration: 0.3), value: current)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { dismissKeyboard() }
+                    .font(.hearthTitleMD)
+                    .foregroundColor(.accentOnCanvas)
             }
         }
-        .padding(.top, 12)
+        // THE durability hook: one write per mutation, covering every field.
+        .onChange(of: draft) { _, updated in updated.save() }
+        .task { resumeIfNeeded() }
     }
 
-    // MARK: - Screen 0: Welcome
-    //
-    // Editorial magazine-cover composition: full-bleed Hearth photo hero
-    // on the upper ~55% of the screen, ink-on-cream content card below
-    // with wordmark + tagline + CTAs. No emoji decorations, no wavy
-    // underlines — the photo carries the warmth, type carries the brand.
-    //
-    // The hero image lives in Assets.xcassets/WelcomeHero.imageset and
-    // is swappable: drop a different MJ generation at the same name and
-    // path, rebuild, no code changes.
+    /// Clamps a resumed `stepIndex` back onto a screen it is safe to land on.
+    /// Two hazards, both only reachable by relaunching mid-funnel:
+    ///
+    ///  1. **Never past the ring.** The ring screen is what fires the seed. A
+    ///     draft saved at `.allSet`, or one whose index drifted because this
+    ///     launch no longer needs the sign-in screen (the flow is one shorter),
+    ///     would otherwise land on the landing page with the family never
+    ///     POSTed. Re-entering the ring is cheap and idempotent: a confirmed
+    ///     seed flushes as a no-op and the warm-up dedupes onto its live run.
+    ///  2. **Never past sign-in without an account.** Nothing downstream has an
+    ///     identity to authenticate with.
+    private func resumeIfNeeded() {
+        guard !didResume else { return }
+        didResume = true
 
-    private var welcomeScreen: some View {
-        GeometryReader { geo in
-            VStack(spacing: 0) {
-                // ─── Hero photo (full-bleed, top 55%) ──────────────
-                Image("WelcomeHero")
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: geo.size.width, height: geo.size.height * 0.55)
-                    .clipped()
-                    .opacity(appearAnimation ? 1 : 0)
-
-                // ─── Cream content card (bottom 45%) ───────────────
-                VStack(spacing: 0) {
-                    Spacer(minLength: 32)
-
-                    // Wordmark — Fraunces ExtraBold, sits centered above the tagline
-                    MVPLogoView(variant: .lockup, size: 200, tint: .inkPrimary)
-
-                    Spacer(minLength: 20)
-
-                    // Tagline — Fraunces italic display, ink/secondary on cream
-                    Text("Every parent deserves\nsomeone in their corner.")
-                        .font(.custom("Fraunces", size: 22).italic())
-                        .foregroundColor(.inkSecondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                        .lineSpacing(4)
-
-                    Spacer()
-
-                    // CTAs
-                    if isReturningUser {
-                        VStack(spacing: 12) {
-                            onboardingTextField(placeholder: "Your name", text: $returningUserName)
-                                .padding(.horizontal, .hearth700)
-
-                            brandButton(label: "Continue", disabled: returningUserName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
-                                let trimmed = returningUserName.trimmingCharacters(in: .whitespacesAndNewlines)
-                                guard !trimmed.isEmpty else { return }
-                                onComplete(OnboardingData(
-                                    parentName: trimmed, kids: [], household: "",
-                                    supportSystem: "", energyPattern: "", dreadedMoment: "",
-                                    challenges: [], goals: [],
-                                    postalCode: "", country: "", primaryLanguage: "",
-                                    parentAgeRange: "", adultsInHousehold: nil,
-                                    employment: "", culturalBackground: "", pronouns: ""
-                                ))
-                            }
-                            .padding(.horizontal, .hearth700)
-                        }
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    } else {
-                        VStack(spacing: 10) {
-                            brandButton(label: "I'm new here") {
-                                advance(to: 1)
-                            }
-                            .padding(.horizontal, .hearth700)
-
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.3)) { isReturningUser = true }
-                            } label: {
-                                Text("Welcome back")
-                                    .font(.custom("Inter", size: 15).weight(.semibold))
-                                    .foregroundColor(.inkPrimary)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 14)
-                                    .overlay(Capsule().stroke(Color.borderStrong, lineWidth: 1))
-                            }
-                            .padding(.horizontal, .hearth700)
-                        }
-                    }
-
-                    Spacer().frame(height: 40)
-                }
-                .frame(width: geo.size.width, height: geo.size.height * 0.45)
-                .background(Color.bgCanvas)
-            }
-            .ignoresSafeArea(edges: .top)
+        if let warmupIndex = flow.firstIndex(of: .warmup), draft.stepIndex > warmupIndex {
+            draft.stepIndex = warmupIndex
         }
-        .trackScreen("onboarding")
-    }
-
-    // MARK: - Screen 1: Name
-
-    private var nameScreen: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            onboardingHeader(backTo: 0, step: 1)
-
-            // Editorial hero — replaces the previous emoji collage. The
-            // photo lives in Assets.xcassets/OnboardingStep1.imageset; swap
-            // the PNG at the same path to refresh without code changes.
-            onboardingStepImage("OnboardingStep1")
-                .padding(.top, 8)
-                .padding(.bottom, 16)
-
-            onboardingHeading("What should we\ncall you?", subtitle: "Just a first name is perfect.")
-
-            Spacer().frame(height: .hearth700)
-
-            onboardingTextField(placeholder: "Your name", text: $parentName)
-                .padding(.horizontal, .hearth700)
-
-            Spacer()
-
-            brandButton(label: "Next", disabled: parentName.trimmed.isEmpty) {
-                advance(to: 2)
-            }
-            .padding(.horizontal, .hearth700)
-            .padding(.bottom, 48)
+        if accountID.isEmpty, includesSignInStep,
+           let signInIndex = flow.firstIndex(of: .signIn),
+           draft.stepIndex > signInIndex {
+            draft.stepIndex = signInIndex
         }
     }
 
-    // MARK: - Screen 2: About You (demographics)
-
-    private var aboutYouScreen: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack {
-                onboardingHeader(backTo: 1, step: 2)
-                HStack {
-                    Spacer()
-                    Button { advance(to: 3) } label: {
-                        Text("Skip")
-                            .font(.hearthBodyMD.weight(.medium))
-                            .foregroundColor(.accentDefault)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-            }
-
-            onboardingStepImage("OnboardingStep2")
-                .padding(.top, 4)
-                .padding(.bottom, 12)
-
-            onboardingHeading("A little about\nyou", subtitle: "All optional. Helps us tailor advice to your world.")
-
-            Spacer().frame(height: 16)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    // Zip + Country row
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Where you are")
-                            .font(.hearthLabel)
-                            .foregroundColor(.inkMuted)
-                            .tracking(0.66)
-                            .textCase(.uppercase)
-
-                        HStack(spacing: 12) {
-                            onboardingTextField(
-                                placeholder: "Zip / postal",
-                                text: $postalCode,
-                                keyboardType: .numbersAndPunctuation
-                            )
-
-                            Menu {
-                                ForEach(countryOptions, id: \.label) { option in
-                                    Button {
-                                        country = option.label
-                                    } label: {
-                                        Label(option.label, systemImage: option.symbol)
-                                    }
-                                }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: countryOptions.first(where: { $0.label == country })?.symbol ?? "globe")
-                                        .font(.system(size: 14, weight: .regular))
-                                    Text(country.isEmpty ? "Country" : country)
-                                        .font(.hearthBodyMD)
-                                    Image(systemName: "chevron.down")
-                                        .font(.caption)
-                                }
-                                .foregroundColor(.inkPrimary)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 14)
-                                .background(Color.bgElevated)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(Color.borderHairline, style: StrokeStyle(lineWidth: 1, dash: [6]))
-                                )
-                            }
-                        }
-                    }
-
-                    // Primary language
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Primary language at home")
-                            .font(.hearthLabel)
-                            .foregroundColor(.inkMuted)
-                            .tracking(0.66)
-                            .textCase(.uppercase)
-
-                        singleSelectGrid(options: languageOptions, selection: $primaryLanguage)
-                    }
-
-                    // Parent age range
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Your age range")
-                            .font(.hearthLabel)
-                            .foregroundColor(.inkMuted)
-                            .tracking(0.66)
-                            .textCase(.uppercase)
-
-                        singleSelectGrid(options: parentAgeOptions, selection: $parentAgeRange)
-                    }
-
-                    // Adults in household
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Adults in your household")
-                            .font(.hearthLabel)
-                            .foregroundColor(.inkMuted)
-                            .tracking(0.66)
-                            .textCase(.uppercase)
-
-                        // Pill stepper — one visual unit, single color family,
-                        // sans-serif numeral matches the SF Symbol icon
-                        // language. Min/max enforced via button disabled state.
-                        HStack(spacing: 0) {
-                            HStack(spacing: 0) {
-                                Button {
-                                    if adultsInHousehold > 1 { adultsInHousehold -= 1 }
-                                } label: {
-                                    Image(systemName: "minus")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(adultsInHousehold > 1 ? .inkPrimary : .inkMuted)
-                                        .frame(width: 44, height: 44)
-                                        .contentShape(Rectangle())
-                                }
-                                .disabled(adultsInHousehold <= 1)
-
-                                Text("\(adultsInHousehold)")
-                                    .font(.hearthBodyMD.weight(.medium))
-                                    .foregroundColor(.inkPrimary)
-                                    .frame(minWidth: 24)
-                                    .monospacedDigit()
-
-                                Button {
-                                    if adultsInHousehold < 4 { adultsInHousehold += 1 }
-                                } label: {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(adultsInHousehold < 4 ? .inkPrimary : .inkMuted)
-                                        .frame(width: 44, height: 44)
-                                        .contentShape(Rectangle())
-                                }
-                                .disabled(adultsInHousehold >= 4)
-                            }
-                            .background(Color.bgElevated)
-                            .clipShape(Capsule())
-                            .overlay(Capsule().stroke(Color.borderHairline, lineWidth: 1))
-
-                            Spacer()
-                        }
-                    }
-
-                    // Employment
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Work pattern")
-                            .font(.hearthLabel)
-                            .foregroundColor(.inkMuted)
-                            .tracking(0.66)
-                            .textCase(.uppercase)
-
-                        singleSelectGrid(options: employmentOptions, selection: $employment)
-                    }
-
-                    // Pronouns
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Your pronouns")
-                            .font(.hearthLabel)
-                            .foregroundColor(.inkMuted)
-                            .tracking(0.66)
-                            .textCase(.uppercase)
-
-                        singleSelectGrid(options: parentPronounsOptions, selection: $pronouns)
-                    }
-
-                    // Cultural background
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Cultural background (optional)")
-                            .font(.hearthLabel)
-                            .foregroundColor(.inkMuted)
-                            .tracking(0.66)
-                            .textCase(.uppercase)
-
-                        onboardingTextField(
-                            placeholder: "e.g., Mexican-American, South Asian",
-                            text: $culturalBackground
-                        )
-                    }
-                }
-                .padding(.horizontal, .hearth700)
-                .padding(.bottom, 16)
-            }
-
-            Spacer()
-
-            brandButton(label: "Next") { advance(to: 3) }
-                .padding(.horizontal, .hearth700)
-                .padding(.bottom, 48)
-        }
-    }
-
-    // MARK: - Screen 3: Kids
-
-    private var kidsScreen: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            onboardingHeader(backTo: 2, step: 3)
-
-            onboardingStepImage("OnboardingStep3")
-                .padding(.top, 4)
-                .padding(.bottom, 12)
-
-            onboardingHeading("Tell us about your\nlittle ones", subtitle: "Names, ages, and a peek at their personality.")
-
-            Spacer().frame(height: 24)
-
-            ScrollView {
-                VStack(spacing: 20) {
-                    ForEach(Array(kids.enumerated()), id: \.element.id) { index, _ in
-                        kidCard(index: index)
-                    }
-
-                    Button {
-                        kids.append(KidEntry())
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "plus.circle")
-                                .font(.body.weight(.medium))
-                            Text("Add another child")
-                                .font(.hearthBodyMD.weight(.medium))
-                        }
-                        .foregroundColor(.accentDefault)
-                    }
-                    .padding(.top, 4)
-                }
-                .padding(.horizontal, .hearth700)
-            }
-
-            Spacer()
-
-            brandButton(
-                label: "Next",
-                disabled: !kids.contains(where: { !$0.name.trimmed.isEmpty })
-            ) {
-                advance(to: 4)
-            }
-            .padding(.horizontal, .hearth700)
-            .padding(.bottom, 48)
-        }
-    }
-
-    // MARK: - Screen 4: Your World
-
-    private var worldScreen: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            onboardingHeader(backTo: 3, step: 4)
-
-            // Illustration: home & family collage
-            onboardingStepImage("OnboardingStep4")
-                .padding(.top, 4)
-                .padding(.bottom, 12)
-
-            onboardingHeading("Paint us a picture\nof your world", subtitle: "No right answers. Just your reality.")
-
-            Spacer().frame(height: 24)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    // Household
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Your household")
-                            .font(.hearthLabel)
-                            .foregroundColor(.inkMuted)
-                            .tracking(0.66)
-                            .textCase(.uppercase)
-
-                        multiSelectGrid(options: householdOptions, selection: $household)
-                    }
-
-                    // Support system
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Your support crew")
-                            .font(.hearthLabel)
-                            .foregroundColor(.inkMuted)
-                            .tracking(0.66)
-                            .textCase(.uppercase)
-
-                        multiSelectGrid(options: supportOptions, selection: $supportSystem)
-                    }
-                }
-                .padding(.horizontal, .hearth700)
-            }
-
-            Spacer()
-
-            brandButton(label: "Next") { advance(to: 5) }
-                .padding(.horizontal, .hearth700)
-                .padding(.bottom, 48)
-        }
-    }
-
-    // MARK: - Screen 5: Energy & Dread
-
-    private var energyScreen: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            onboardingHeader(backTo: 4, step: 5)
-
-            onboardingStepImage("OnboardingStep5")
-                .padding(.top, 4)
-                .padding(.bottom, 12)
-
-            onboardingHeading("When do you feel\nmost yourself?", subtitle: "And when does it all feel like... a lot?")
-
-            Spacer().frame(height: 24)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    // Energy pattern
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Your energy sweet spot")
-                            .font(.hearthLabel)
-                            .foregroundColor(.inkMuted)
-                            .tracking(0.66)
-                            .textCase(.uppercase)
-
-                        singleSelectGrid(options: energyOptions, selection: $energyPattern)
-                    }
-
-                    // Dreaded moment
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("The part of the day you dread")
-                            .font(.hearthLabel)
-                            .foregroundColor(.inkMuted)
-                            .tracking(0.66)
-                            .textCase(.uppercase)
-
-                        singleSelectGrid(options: dreadedOptions, selection: $dreadedMoment)
-                    }
-                }
-                .padding(.horizontal, .hearth700)
-            }
-
-            Spacer()
-
-            brandButton(label: "Next") { advance(to: 6) }
-                .padding(.horizontal, .hearth700)
-                .padding(.bottom, 48)
-        }
-    }
-
-    // MARK: - Screen 6: Challenges
-
-    private var challengesScreen: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            onboardingHeader(backTo: 5, step: 6)
-
-            onboardingStepImage("OnboardingStep6")
-                .padding(.top, 4)
-                .padding(.bottom, 12)
-
-            onboardingHeading("What feels hardest\nright now?", subtitle: "Pick as many as you want. No judgment here.")
-
-            Spacer().frame(height: 24)
-
-            ScrollView {
-                chipGrid(options: challengeOptions, selection: $challenges)
-                    .padding(.horizontal, .hearth700)
-            }
-
-            Spacer()
-
-            brandButton(label: "Next") { advance(to: 7) }
-                .padding(.horizontal, .hearth700)
-                .padding(.bottom, 48)
-        }
-    }
-
-    // MARK: - Screen 7: Goals
-
-    private var goalsScreen: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            onboardingHeader(backTo: 6, step: 7)
-
-            onboardingStepImage("OnboardingStep7")
-                .padding(.top, 4)
-                .padding(.bottom, 12)
-
-            onboardingHeading("What are you\nhoping for?", subtitle: "This helps us point you in the right direction.")
-
-            Spacer().frame(height: 24)
-
-            ScrollView {
-                chipGrid(options: goalOptions, selection: $goals)
-                    .padding(.horizontal, .hearth700)
-            }
-
-            Spacer()
-
-            brandButton(label: "Next") { advance(to: 8) }
-                .padding(.horizontal, .hearth700)
-                .padding(.bottom, 48)
-        }
-    }
-
-    // MARK: - Screen 8: Preview / Launch
-
-    /// Builds compact chips of filled-in parent demographics. Empty array if nothing is set
-    /// (e.g., returning user who bypassed the demographic step).
-    private func parentSummaryChips() -> [String] {
-        var parts: [String] = []
-        // Summary chips are plain strings (no SF Symbol — they render in
-        // the recap view as Fraunces text). Drop the icon entirely; the
-        // country code or postal code alone is informative.
-        if !postalCode.trimmed.isEmpty {
-            parts.append(postalCode.trimmed)
-        } else if !country.isEmpty && country != "US" {
-            parts.append(country)
-        }
-        if !primaryLanguage.isEmpty { parts.append(primaryLanguage) }
-        if !parentAgeRange.isEmpty { parts.append(parentAgeRange) }
-        if !employment.isEmpty { parts.append(employment) }
-        if !pronouns.isEmpty { parts.append(pronouns) }
-        if !culturalBackground.trimmed.isEmpty { parts.append(culturalBackground.trimmed) }
-        if !household.isEmpty { parts.append(household.sorted().joined(separator: ", ")) }
-        // Only surface the adults count if the user touched any other field on the About-you step
-        if !parts.isEmpty { parts.append("\(adultsInHousehold) adult\(adultsInHousehold == 1 ? "" : "s")") }
-        return parts
-    }
-
-    private func kidSummaryLine(_ kid: KidEntry) -> String {
-        var head = kid.name.trimmed
-        if !kid.age.trimmed.isEmpty { head += " (\(kid.age.trimmed))" }
-        var tail: [String] = []
-        if !kid.temperament.isEmpty { tail.append(kid.temperament) }
-        if !kid.pronouns.isEmpty { tail.append(kid.pronouns) }
-        if !kid.gradeBand.isEmpty { tail.append("\(kid.gradeBand) grade") }
-        return tail.isEmpty ? head : "\(head) · \(tail.joined(separator: " · "))"
-    }
-
-    @ViewBuilder
-    private var personalizedSummary: some View {
-        let parentChips = parentSummaryChips()
-        let filledKids = kids.filter { !$0.name.trimmed.isEmpty }
-        let hasAnything = !parentChips.isEmpty || !filledKids.isEmpty
-
-        if hasAnything {
-            VStack(alignment: .leading, spacing: 12) {
-                sectionLabel("Here's what we have")
-
-                if !parentChips.isEmpty {
-                    Text(parentChips.joined(separator: " · "))
-                        .font(.system(.subheadline, design: .serif))
-                        .foregroundColor(.inkPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                ForEach(filledKids) { kid in
-                    HStack(alignment: .top, spacing: 10) {
-                        Text("\u{1F33F}")
-                            .font(.system(size: 14))
-                        Text(kidSummaryLine(kid))
-                            .font(.system(.subheadline, design: .serif))
-                            .foregroundColor(.inkPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.bgElevated.opacity(0.5))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.borderHairline, lineWidth: 1)
+    // MARK: - Screen: splash
+
+    /// The splash is a FORK, not a timed interstitial.
+    ///
+    /// It used to auto-advance into the funnel after 1.7s. That stranded every
+    /// returning parent: sign-in now lives at the END of the funnel, so a
+    /// reinstall, a new device, or a sign-out left no way to reach it without
+    /// re-answering the whole questionnaire first. The second CTA jumps
+    /// straight to the sign-in step.
+    private var splashScreen: some View {
+        ZStack {
+            RadialGradient(
+                colors: [Color.bgElevated, Color.bgCanvas],
+                center: .center, startRadius: 0, endRadius: 300
             )
-        }
-    }
+            .ignoresSafeArea()
 
-    /// Blocking agree-checkbox on the final step. The doc links open the
-    /// CMS-published pages on the dashboard; the base URL resolves through the
-    /// same chain as the seed (never a hardcoded host).
-    private var legalAgreementRow: some View {
-        let base = UserDefaults.standard.string(forKey: "chat.base_url") ?? ServerConfiguration.defaultURL
-        return HStack(alignment: .top, spacing: 12) {
-            Button {
-                agreedToLegal.toggle()
-            } label: {
-                Image(systemName: agreedToLegal ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundColor(agreedToLegal ? .accentDefault : .inkMuted)
-            }
-            .accessibilityLabel(agreedToLegal ? "Agreed to terms" : "Agree to terms")
+            VStack(spacing: 0) {
+                Spacer()
 
-            if let agreement = try? AttributedString(
-                markdown: "I agree to the [Privacy Policy](\(base)/dashboard/docs/privacy-policy) "
-                    + "and [Terms of Service](\(base)/dashboard/docs/terms)"
-            ) {
-                Text(agreement)
-                    .font(.hearthBodySM)
-                    .foregroundColor(.inkMuted)
-                    .tint(.accentDefault)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
+                VStack(spacing: .hearth400) {
+                    MVPLogoView(variant: .lockup, size: 240, tint: .inkPrimary)
+                    Text("Most Valuable Parent")
+                        .font(.hearthLabel)
+                        .tracking(0.66)
+                        .foregroundColor(.inkSecondary)
+                }
 
-    private var previewScreen: some View {
-        let features: [(String, String)] = [
-            ("\u{1F9E0}", "AI coach that knows your family"),
-            ("\u{1F4AC}", "Strategies personalized to you"),
-            ("\u{1F4DA}", "Library of expert articles"),
-            ("\u{1F91D}", "Real parent community"),
-            ("\u{1F331}", "Gets smarter the more you share"),
-            ("\u{1F49B}", "No judgment, ever")
-        ]
+                Spacer()
 
-        return VStack(alignment: .leading, spacing: 0) {
-            onboardingHeader(backTo: 7, step: 8)
+                VStack(spacing: .hearth400) {
+                    primaryButton("Get started", disabled: false) {
+                        goTo(.acquainted)
+                    }
 
-            // Celebration collage
-            onboardingStepImage("OnboardingStep8")
-                .padding(.top, 4)
-                .padding(.bottom, 12)
-
-            onboardingHeading("And here's a peek\nat the goodness")
-
-            Spacer().frame(height: .hearth700)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    personalizedSummary
-
-                    VStack(alignment: .leading, spacing: 20) {
-                        ForEach(features, id: \.1) { emoji, text in
-                            HStack(spacing: 14) {
-                                Text(emoji)
-                                    .font(.system(size: 24))
-
-                                Text(text)
-                                    .font(.system(.body, design: .serif).weight(.medium))
-                                    .foregroundColor(.inkPrimary)
-                            }
+                    // Only offered when signing in is actually reachable. When
+                    // `signInRequired` is false the parent already has an
+                    // account and is mid-onboarding — there is no `.signIn`
+                    // step in `flow`, so this would jump nowhere.
+                    if includesSignInStep {
+                        Button {
+                            cameToSignInFromSplash = true
+                            goTo(.signIn)
+                        } label: {
+                            Text("I already have an account")
+                                .font(.hearthTitleMD)
+                                .foregroundColor(.accentOnCanvas)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, .hearth500)
                         }
                     }
                 }
                 .padding(.horizontal, .hearth700)
-                .padding(.bottom, 16)
-            }
-
-            let displayName = parentName.trimmed
-            legalAgreementRow
-                .padding(.horizontal, .hearth700)
-                .padding(.bottom, .hearth400)
-            brandButton(label: "Let's go, \(displayName)!", disabled: !agreedToLegal) {
-                UserDefaults.standard.set(true, forKey: LegalService.acceptPendingKey)
-                let kidData = kids
-                    .filter { !$0.name.trimmed.isEmpty }
-                    .map { (
-                        name: $0.name.trimmed,
-                        age: $0.age.trimmed,
-                        temperament: $0.temperament,
-                        pronouns: $0.pronouns,
-                        gradeBand: $0.gradeBand
-                    ) }
-                onComplete(OnboardingData(
-                    parentName: displayName,
-                    kids: kidData,
-                    household: household.sorted().joined(separator: ", "),
-                    supportSystem: supportSystem.sorted().joined(separator: ", "),
-                    energyPattern: energyPattern,
-                    dreadedMoment: dreadedMoment,
-                    challenges: Array(challenges),
-                    goals: Array(goals),
-                    postalCode: postalCode.trimmed,
-                    country: country,
-                    primaryLanguage: primaryLanguage,
-                    parentAgeRange: parentAgeRange,
-                    adultsInHousehold: adultsInHousehold,
-                    employment: employment,
-                    culturalBackground: culturalBackground.trimmed,
-                    pronouns: pronouns
-                ))
-            }
-            .padding(.horizontal, .hearth700)
-            .padding(.bottom, 48)
-        }
-    }
-
-    // MARK: - Reusable Components
-
-    private func advance(to target: Int) {
-        withAnimation(.easeInOut(duration: 0.3)) { step = target }
-    }
-
-    /// Shared section-label style — UPPERCASE caption-mono, ink/muted,
-    /// tracked. Used above every chip grid (Your household / Your support
-    /// crew / Your energy sweet spot / etc.). Matches the section-label
-    /// pattern in LibraryView + HomeView for cross-screen consistency.
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.hearthLabel)
-            .foregroundColor(.inkMuted)
-            .tracking(0.66)
-            .textCase(.uppercase)
-    }
-
-    /// Shared frame for the editorial photo at the top of each onboarding
-    /// step. Centered on the page. 180pt square, soft rounded corners,
-    /// hairline border. Headings are centered to match (see
-    /// `onboardingHeading` helper); form fields below stay leading-aligned.
-    /// Each step references its own image asset by name so a designer can
-    /// swap any one screen's photo without touching the other 8.
-    @ViewBuilder
-    private func onboardingStepImage(_ assetName: String) -> some View {
-        if !keyboardVisible {
-            HStack {
-                Spacer()
-                Image(assetName)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 180, height: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                            .stroke(Color.borderHairline, lineWidth: 1)
-                    )
-                Spacer()
+                .padding(.bottom, .hearth900)
             }
         }
+        .trackScreen("onboarding_splash")
     }
 
-    /// Centered heading + optional subtitle pair. Used at the top of every
-    /// onboarding funnel step so the title block visually aligns with the
-    /// centered editorial photo above it. Form fields below the heading
-    /// remain leading-aligned (chip grids + inputs scan better that way).
-    private func onboardingHeading(_ title: String, subtitle: String? = nil) -> some View {
-        VStack(spacing: keyboardVisible ? 2 : 6) {
-            Text(title)
-                .font(keyboardVisible ? .hearthTitleLG : .hearthDisplayMD)
-                .foregroundColor(.inkPrimary)
-                .multilineTextAlignment(.center)
+    // MARK: - Screen: "Let's get acquainted"
 
-            if !keyboardVisible, let subtitle = subtitle {
-                Text(subtitle)
-                    .font(.hearthBodyMD.italic())
-                    .foregroundColor(.inkSecondary)
-                    .multilineTextAlignment(.center)
+    private var acquaintedScreen: some View {
+        funnelScreen(
+            caption: nil,
+            showsHeader: false,
+            hint: "Next: Your Children",
+            continueDisabled: draft.parentName.trimmed.isEmpty,
+            onContinue: { goTo(.kidCount) }
+        ) {
+            funnelTitle("Let's get acquainted")
+            funnelSubtitle("A few quick questions so we can make MVP feel like it was made for your family.")
+            centeredRule
+
+            fieldGroup("What should we call you?", helper: "Your first name") {
+                pillField("Name", text: $draft.parentName, textContentType: .givenName)
             }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, .hearth700)
-    }
 
-    private func onboardingHeader(backTo target: Int, step current: Int) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button { advance(to: target) } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.inkPrimary)
-                        .frame(width: 44, height: 44)
+            fieldGroup("Your household") {
+                pillSelect(
+                    placeholder: "Select your situation",
+                    value: draft.household,
+                    options: householdOptions
+                ) { draft.household = $0 }
+            }
+
+            fieldGroup("Language at home") {
+                VStack(spacing: .hearth400) {
+                    pillSelect(
+                        placeholder: "Primary language",
+                        value: draft.primaryLanguage,
+                        options: languageOptions
+                    ) { draft.primaryLanguage = $0 }
+                    pillSelect(
+                        placeholder: "Secondary language (optional)",
+                        value: draft.secondaryLanguage,
+                        options: languageOptions
+                    ) { draft.secondaryLanguage = $0 }
                 }
-                Spacer()
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
 
-            progressDots(current: current)
+            fieldGroup("Location", helper: "Helps us find local camps and activities near you") {
+                pillField(
+                    "ZIP / postal code",
+                    text: $draft.postalCode,
+                    keyboard: .numbersAndPunctuation,
+                    textContentType: .postalCode
+                )
+            }
+
+            fieldGroup("Education style") {
+                pillSelect(
+                    placeholder: "Select your approach",
+                    value: draft.educationStyle,
+                    options: educationStyleOptions
+                ) { draft.educationStyle = $0 }
+            }
+
+            Text("You can update any of this later in your profile.")
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.top, .hearth300)
+        }
+        .trackScreen("onboarding_acquainted")
+    }
+
+    // MARK: - Screen: "Hi {name}!"
+
+    private var kidCountScreen: some View {
+        funnelScreen(
+            caption: "\(firstName)'s children",
+            hint: "Next: Child One",
+            continueDisabled: !(1...12).contains(kidCountValue),
+            onContinue: {
+                syncKidsToCount()
+                goTo(.kid(0))
+            }
+        ) {
+            Spacer(minLength: .hearth900)
+            funnelTitle("Hi \(firstName)!")
+            funnelSubtitle("Now let's meet your kids. We just need their names, ages, and a sense of who they are.")
+
+            pillField("0", text: $draft.kidCountText, keyboard: .numberPad)
+                .padding(.top, .hearth600)
+
+            Text("How many children?")
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkSecondary)
+                .frame(maxWidth: .infinity)
+
+            Spacer(minLength: .hearth900)
+        }
+        .trackScreen("onboarding_kid_count")
+    }
+
+    private var kidCountValue: Int { Int(draft.kidCountText.trimmed) ?? 0 }
+
+    /// Grow/shrink the collected children to match the typed count, preserving
+    /// anything already entered. Called on the way OUT of the count screen, so
+    /// `flow` only ever reshapes between screens.
+    private func syncKidsToCount() {
+        let target = min(max(kidCountValue, 0), 12)
+        if draft.kids.count < target {
+            draft.kids.append(contentsOf: (draft.kids.count..<target).map { _ in OnboardingDraft.Kid() })
+        } else if draft.kids.count > target {
+            draft.kids.removeLast(draft.kids.count - target)
         }
     }
 
-    private func onboardingTextField(placeholder: String, text: Binding<String>, keyboardType: UIKeyboardType = .default, width: CGFloat? = nil) -> some View {
-        TextField("", text: text, prompt: Text(placeholder).foregroundColor(.inkMuted))
-            .font(.hearthBodyLG)
-            .foregroundColor(.inkPrimary)
-            .keyboardType(keyboardType)
+    // MARK: - Screen: one per child
+
+    private func kidScreen(_ index: Int) -> some View {
+        // Defensive: `flow` and `draft.kids` are derived from the same array, so
+        // this can only trip if state is mutated between the two reads.
+        let safeIndex = min(index, max(draft.kids.count - 1, 0))
+
+        return funnelScreen(
+            caption: Self.childLabel(safeIndex),
+            hint: safeIndex + 1 < draft.kids.count
+                ? "Next: \(Self.childLabel(safeIndex + 1))"
+                : "Next: Free time",
+            continueDisabled: draft.kids.indices.contains(safeIndex)
+                ? draft.kids[safeIndex].name.trimmed.isEmpty
+                : true,
+            onContinue: {
+                if safeIndex + 1 < draft.kids.count {
+                    goTo(.kid(safeIndex + 1))
+                } else {
+                    goTo(.mind)
+                }
+            }
+        ) {
+            funnelTitle("Tell us about\nyour \(Self.ordinalWord(safeIndex))")
+            funnelSubtitle(safeIndex == 0
+                ? "Just the basics for now — we'll learn more as we go."
+                : "Same deal — name, age, and a little of their personality.")
+            centeredRule
+
+            if draft.kids.indices.contains(safeIndex) {
+                Text(Self.childLabel(safeIndex))
+                    .font(.hearthDisplayMD)
+                    .foregroundColor(.inkPrimary)
+                    .frame(maxWidth: .infinity)
+
+                subFieldLabel("What should we call them?")
+                pillField("Name", text: $draft.kids[safeIndex].name, textContentType: .givenName)
+
+                subFieldLabel("How old are they?")
+                    .padding(.top, .hearth500)
+                pillField("0", text: $draft.kids[safeIndex].age, keyboard: .numberPad)
+
+                subFieldLabel("Gender")
+                    .padding(.top, .hearth500)
+                HStack(spacing: .hearth300) {
+                    genderChip(label: "Boy", index: safeIndex)
+                    genderChip(label: "Girl", index: safeIndex)
+                }
+
+                Text("Personality or vibe")
+                    .font(.hearthBodySM.weight(.semibold))
+                    .foregroundColor(.inkPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, .hearth600)
+
+                FlowLayout(spacing: .hearth300) {
+                    gradeChip(index: safeIndex)
+                    ForEach(temperamentOptions, id: \.label) { option in
+                        let selected = draft.kids[safeIndex].temperament == option.label
+                        chip(label: option.label, symbol: option.symbol, selected: selected) {
+                            draft.kids[safeIndex].temperament = selected ? "" : option.label
+                        }
+                    }
+                }
+            }
+        }
+        .trackScreen("onboarding_child")
+    }
+
+    /// Phase-3 Figma delta — the "boy" / "girl" tag choice on each child
+    /// screen. Single-select, stored lowercase; tapping the active tag clears
+    /// it, matching the temperament chip's toggle behavior.
+    private func genderChip(label: String, index: Int) -> some View {
+        let value = label.lowercased()
+        let selected = draft.kids[index].gender == value
+        return chip(label: label, symbol: "", selected: selected) {
+            draft.kids[index].gender = selected ? "" : value
+        }
+    }
+
+    private func gradeChip(index: Int) -> some View {
+        Menu {
+            ForEach(gradeBandOptions, id: \.self) { band in
+                Button(band) { draft.kids[index].gradeBand = band }
+            }
+        } label: {
+            HStack(spacing: .hearth300) {
+                Image(systemName: "graduationcap.fill")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(.inkPrimary)
+                Text(draft.kids[index].gradeBand.isEmpty ? "Grade" : draft.kids[index].gradeBand)
+                    .font(.hearthBodyMD.weight(.medium))
+                    .foregroundColor(.inkPrimary)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.inkMuted)
+            }
             .padding(.horizontal, .hearth500)
             .padding(.vertical, .hearth400)
             .background(Color.bgElevated)
-            .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
-                    .stroke(Color.borderStrong, lineWidth: 1)
-            )
-            .frame(width: width)
+            .clipShape(Capsule())
+            .hearthCardElevation()
+        }
     }
 
-    private func brandButton(label: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
+    // MARK: - Screen: "What do you do in your free time?" (Phase-3 Figma delta)
+    //
+    // Greg's frame reads "What do you in your free time?" — missing a word.
+    // This reproduces the intent, not the typo. Feeds Chief-of-Staff activity
+    // discovery via `family_activities` in the seed body. Unlike every other
+    // funnel screen this one has a Skip alongside Continue, so it gets its own
+    // footer rather than reusing `funnelScreen`.
+
+    private var freeTimeScreen: some View {
+        VStack(spacing: 0) {
+            funnelHeader(caption: "Almost there")
+
+            ScrollView {
+                VStack(spacing: .hearth500) {
+                    funnelTitle("What do you do in your free time?")
+                    funnelSubtitle("Looking for more? Select what describes your family routine.")
+                    centeredRule
+
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: .hearth300), count: 3),
+                        spacing: .hearth300
+                    ) {
+                        ForEach(freeTimeOptions, id: \.label) { option in
+                            let selected = draft.familyActivities.contains(option.label)
+                            activityTile(label: option.label, symbol: option.symbol, selected: selected) {
+                                if selected {
+                                    draft.familyActivities.removeAll { $0 == option.label }
+                                } else {
+                                    draft.familyActivities.append(option.label)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, .hearth700)
+                .padding(.top, .hearth700)
+                .padding(.bottom, .hearth700)
+            }
+            .scrollDismissesKeyboard(.interactively)
+
+            VStack(spacing: .hearth400) {
+                primaryButton("Continue", disabled: draft.familyActivities.isEmpty) {
+                    goTo(.mind)
+                }
+                Button("Skip") { goTo(.mind) }
+                    .font(.hearthBodyMD.weight(.medium))
+                    .foregroundColor(.accentOnCanvas)
+                Text("Next: Meet the coach")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkSecondary)
+            }
+            .padding(.horizontal, .hearth700)
+            .padding(.top, .hearth400)
+            .padding(.bottom, .hearth800)
+        }
+        .trackScreen("onboarding_free_time")
+    }
+
+    /// The free-time grid tile. Selected = teal fill + white icon/label
+    /// (matches the primary-button pass ratio). Unselected = white card with
+    /// teal icon/label — `accentDefault` is the correct token here (not
+    /// `accentOnCanvas`): the tile sits on `bg/elevated` (white), not the cream
+    /// canvas, and "accent/default as text on paper" is a declared AA pass.
+    /// Unselected tiles also carry a small ⊕ badge per the design.
+    private func activityTile(
+        label: String,
+        symbol: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            withAnimation(.hearth(.hearthFast, reduceMotion: reduceMotion)) { action() }
+        } label: {
+            VStack(spacing: .hearth300) {
+                Image(systemName: symbol)
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundColor(selected ? .inkOnPhotoLight : .accentDefault)
+                Text(label)
+                    .font(.hearthBodySM.weight(.medium))
+                    .foregroundColor(selected ? .inkOnPhotoLight : .inkPrimary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity, minHeight: 88)
+            .padding(.hearth400)
+            .background(selected ? Color.accentDefault : Color.bgElevated)
+            .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
+            .hearthCardElevation()
+            .overlay(alignment: .topTrailing) {
+                if !selected {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.accentDefault)
+                        .background(Circle().fill(Color.bgElevated))
+                        .padding(.hearth300)
+                }
+            }
+        }
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
+    // MARK: - Screen: "What's on your mind?"
+
+    private var mindScreen: some View {
+        funnelScreen(
+            caption: "Almost there",
+            hint: "Next: Meet the coach",
+            continueDisabled: false,
+            onContinue: { goTo(includesSignInStep ? .signIn : .warmup) }
+        ) {
+            funnelTitle("What's on your mind?")
+            funnelSubtitle("Pick what feels true right now. No right answers — just your reality.")
+            centeredRule
+
+            Text("What's hardest?")
+                .font(.hearthDisplayMD)
+                .foregroundColor(.inkPrimary)
+                .frame(maxWidth: .infinity)
+
+            multiSelectGrid(options: challengeOptions, selection: $draft.challenges)
+
+            Text("What would help")
+                .font(.hearthDisplayMD)
+                .foregroundColor(.inkPrimary)
+                .frame(maxWidth: .infinity)
+                .padding(.top, .hearth500)
+
+            multiSelectGrid(options: goalOptions, selection: $draft.goals)
+        }
+        .trackScreen("onboarding_mind")
+    }
+
+    // MARK: - Screen: sign in
+    //
+    // Greg's "Securing your family's space" beat. `SignInView` keeps ALL of its
+    // auth logic (Apple nonce, the Google ASWebAuthenticationSession flow, the
+    // legacy-account claim); only its chrome moved onto the Hearth tokens.
+
+    private var signInScreen: some View {
+        VStack(spacing: 0) {
+            funnelHeader(
+                caption: cameToSignInFromSplash ? nil : "Almost there",
+                showsProgress: !cameToSignInFromSplash
+            )
+
+            SignInView(
+                onSignedIn: { outcome in
+                    onSignedIn(outcome)
+                    // A profile already on the account means this is a returning
+                    // parent — SwayApp flips `onboarding_completed` and tears
+                    // this whole view down, so there is nothing to route.
+                    guard !outcome.hasProfile else { return }
+                    // No profile — so this account has nothing to restore and
+                    // the funnel still has to be answered. Route on what is
+                    // actually IN THE DRAFT, not on `cameToSignInFromSplash`:
+                    // that flag is @State and does not survive a relaunch, so a
+                    // parent who jumped splash → sign-in and then killed the app
+                    // would come back with it false and get sent to the ring —
+                    // seeding a family with no parent and no kids. The draft is
+                    // the only trustworthy answer to "did they fill this in?".
+                    goTo(draft.parentName.trimmed.isEmpty ? .acquainted : .warmup)
+                },
+                titleOverride: cameToSignInFromSplash
+                    ? "Welcome back."
+                    : "One last thing, \(firstName).",
+                subtitleOverride: cameToSignInFromSplash
+                    ? "Sign in and we'll pick up your family right where you left off."
+                    : "Sign in to secure your family's space and keep everything in sync across your devices."
+            )
+        }
+    }
+
+    // MARK: - Screen: the progress ring
+
+    private var warmupScreen: some View {
+        VStack(spacing: .hearth700) {
+            Spacer(minLength: .hearth500)
+
+            progressRing
+
+            Text("Getting everything\nready for you, \(firstName).")
+                .font(.hearthDisplayMD)
+                .foregroundColor(.inkPrimary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(.hearthLineDisplayMD)
+                .minimumScaleFactor(0.7)
+
+            VStack(spacing: .hearth600) {
+                ForEach(ringSteps) { step in
+                    warmupRow(step)
+                }
+            }
+
+            Spacer(minLength: .hearth500)
+        }
+        .padding(.horizontal, .hearth700)
+        .task { await runWarmup() }
+        .trackScreen("onboarding_warmup")
+    }
+
+    private var progressRing: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.bgElevated, lineWidth: 10)
+            Circle()
+                .trim(from: 0, to: max(0.02, Double(ringPercent) / 100.0))
+                .stroke(Color.accentOnCanvas, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+
+            HStack(alignment: .lastTextBaseline, spacing: 0) {
+                Text("\(ringPercent)")
+                    .font(.hearthDisplayHero)
+                Text("%")
+                    .font(.hearthDisplayMD)
+            }
+            .foregroundColor(.inkPrimary)
+            .monospacedDigit()
+        }
+        .frame(width: 220, height: 220)
+        .animation(.hearth(.hearthSlow, reduceMotion: reduceMotion), value: ringPercent)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Setting up your family, \(ringPercent) percent complete")
+    }
+
+    private func warmupRow(_ step: WarmupStep) -> some View {
+        VStack(alignment: .leading, spacing: .hearth300) {
+            HStack(spacing: .hearth400) {
+                Text(step.label)
+                    .font(.hearthBodyMD)
+                    .foregroundColor(.inkPrimary)
+                Spacer(minLength: .hearth300)
+                if step.isSucceeded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundColor(.statusInfo)
+                }
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.borderHairline)
+                    Capsule()
+                        .fill(Color.accentOnCanvas)
+                        .frame(width: geo.size.width * rowFraction(step))
+                }
+            }
+            .frame(height: 4)
+        }
+        .animation(.hearth(.hearthBase, reduceMotion: reduceMotion), value: step)
+    }
+
+    private func rowFraction(_ step: WarmupStep) -> Double {
+        if step.isFinished { return 1 }
+        if step.isRunning { return 0.35 }
+        return 0
+    }
+
+    /// Drives the ring. Built failure-first: EVERY branch below falls through
+    /// to the same landing, and an absolute deadline bounds the whole screen —
+    /// a missing endpoint, a dead network, or a wedged LLM call all end with
+    /// the parent on "You're all set".
+    private func runWarmup() async {
+        guard !warmupStarted else { return }
+        warmupStarted = true
+
+        let started = Date()
+        let deadline = started.addingTimeInterval(Self.ringDeadline)
+
+        // Beat 1 IS the durable seed — mark it running so the ring shows real
+        // motion (12%, the same maths the server uses) rather than a fake one.
+        setLocalStep("family", to: "running")
+        let seeded = await onSeed(collectedData())
+        setLocalStep("family", to: seeded ? "done" : "failed")
+
+        // Beats 2-4 are server-side. From here the payload drives the ring.
+        if Date() < deadline, !accountID.isEmpty,
+           let runID = await OnboardingWarmupService.enqueue(userID: accountID) {
+            while Date() < deadline {
+                if let status = await OnboardingWarmupService.status(runID: runID, userID: accountID) {
+                    if !status.steps.isEmpty { ringSteps = status.steps }
+                    ringPercent = status.percent
+                    if status.isTerminal { break }
+                }
+                try? await Task.sleep(nanoseconds: UInt64(Self.ringPollInterval * 1_000_000_000))
+            }
+        }
+
+        let elapsed = Date().timeIntervalSince(started)
+        if elapsed < Self.ringMinimumDwell {
+            try? await Task.sleep(nanoseconds: UInt64((Self.ringMinimumDwell - elapsed) * 1_000_000_000))
+        }
+
+        // Land at 100 whatever happened. This mirrors the backend, which also
+        // reports 100 for a terminal run with failed beats: ONBOARDING is
+        // complete either way — a degraded Home is the accepted failure mode.
+        ringPercent = 100
+        try? await Task.sleep(nanoseconds: 450_000_000)
+        goTo(.allSet)
+    }
+
+    /// Local, pre-server step bookkeeping. Recomputes the percentage with the
+    /// server's own formula (finished = 1, running = ½) so the number never
+    /// jumps when the real payload takes over.
+    private func setLocalStep(_ key: String, to state: String) {
+        guard let index = ringSteps.firstIndex(where: { $0.key == key }) else { return }
+        ringSteps[index] = WarmupStep(key: ringSteps[index].key, label: ringSteps[index].label, state: state)
+        var score = 0.0
+        for step in ringSteps {
+            if step.isFinished { score += 1 } else if step.isRunning { score += 0.5 }
+        }
+        ringPercent = Int((100 * score / Double(max(ringSteps.count, 1))).rounded())
+    }
+
+    // MARK: - Screen: "You're all set"
+
+    private var allSetScreen: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: .hearth500) {
+                    funnelTitle("You're all set, \(firstName).")
+                    funnelSubtitle("Here's what we've got — and what's waiting for you.")
+                    centeredRule
+
+                    Text("Your family")
+                        .font(.hearthTitleLG)
+                        .tracking(0.52)
+                        .textCase(.uppercase)
+                        .foregroundColor(.inkPrimary)
+
+                    if !familyLine.isEmpty {
+                        recapLine(familyLine)
+                    }
+                    if !kidsLine.isEmpty {
+                        recapLine(kidsLine)
+                    }
+
+                    centeredRule
+                        .padding(.vertical, .hearth400)
+
+                    Text("Here's what's waiting for you")
+                        .font(.hearthDisplayMD)
+                        .foregroundColor(.inkPrimary)
+                        .multilineTextAlignment(.center)
+                        .textCase(.uppercase)
+                        .lineSpacing(.hearthLineDisplayMD)
+
+                    VStack(spacing: .hearth500) {
+                        ForEach(waitingForYou, id: \.self) { line in
+                            recapLine(line)
+                        }
+                    }
+                    .padding(.top, .hearth300)
+
+                    centeredRule
+                        .padding(.vertical, .hearth400)
+
+                    Text("Set up how you want the coach to respond")
+                        .font(.hearthTitleLG)
+                        .foregroundColor(.inkPrimary)
+                        .multilineTextAlignment(.center)
+
+                    VStack(spacing: .hearth400) {
+                        pillSelect(
+                            placeholder: "Voice",
+                            value: draft.coachVoice,
+                            options: coachVoiceOptions
+                        ) { draft.coachVoice = $0 }
+                        pillSelect(
+                            placeholder: "Personality",
+                            value: draft.coachPersonality,
+                            options: coachPersonalityOptions
+                        ) { draft.coachPersonality = $0 }
+                    }
+                    .padding(.top, .hearth300)
+                }
+                .padding(.horizontal, .hearth700)
+                .padding(.top, .hearth900)
+                .padding(.bottom, .hearth700)
+            }
+
+            VStack(spacing: 0) {
+                primaryButton("Take me home", disabled: false) { onFinish() }
+            }
+            .padding(.horizontal, .hearth700)
+            .padding(.bottom, .hearth800)
+            .padding(.top, .hearth400)
+        }
+        .trackScreen("onboarding_all_set")
+    }
+
+    private func recapLine(_ text: String) -> some View {
+        Text(text)
+            .font(.hearthBodyLG)
+            .foregroundColor(.inkSecondary)
+            .multilineTextAlignment(.center)
+            .lineSpacing(.hearthLineBodyLG)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+    }
+
+    /// "Single parent · English"
+    private var familyLine: String {
+        [draft.household, draft.primaryLanguage]
+            .map { $0.trimmed }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
+    /// "Ben, 5 · Lily, 2"
+    private var kidsLine: String {
+        draft.kids
+            .filter { !$0.name.trimmed.isEmpty }
+            .map { kid in
+                let age = kid.age.trimmed
+                return age.isEmpty ? kid.name.trimmed : "\(kid.name.trimmed), \(age)"
+            }
+            .joined(separator: " · ")
+    }
+
+    private var waitingForYou: [String] {
+        let names = draft.kids.map { $0.name.trimmed }.filter { !$0.isEmpty }
+        let coachLine: String
+        switch names.count {
+        case 0:  coachLine = "A coach who already knows your family"
+        case 1:  coachLine = "A coach who already knows \(names[0])"
+        case 2:  coachLine = "A coach who already knows \(names[0]) and \(names[1])"
+        default: coachLine = "A coach who already knows \(names.dropLast().joined(separator: ", ")) and \(names[names.count - 1])"
+        }
+        return [
+            coachLine,
+            "Expert-backed articles, filtered for your family",
+            "A community of parents who get it",
+            "Advice built around what you're actually dealing with"
+        ]
+    }
+
+    // MARK: - Shared scaffold
+
+    /// The common question-screen composition: header (back chevron + progress
+    /// bar + caption), a scrolling body, then the CTA and Greg's quiet
+    /// "Next: …" hint.
+    private func funnelScreen<Content: View>(
+        caption: String?,
+        showsHeader: Bool = true,
+        hint: String,
+        continueDisabled: Bool,
+        onContinue: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 0) {
+            if showsHeader {
+                funnelHeader(caption: caption)
+            }
+
+            ScrollView {
+                VStack(spacing: .hearth500) {
+                    content()
+                }
+                .padding(.horizontal, .hearth700)
+                .padding(.top, showsHeader ? .hearth700 : .hearth1000)
+                .padding(.bottom, .hearth700)
+            }
+            .scrollDismissesKeyboard(.interactively)
+
+            VStack(spacing: .hearth400) {
+                primaryButton("Continue", disabled: continueDisabled) {
+                    dismissKeyboard()
+                    onContinue()
+                }
+                Text(hint)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkSecondary)
+            }
+            .padding(.horizontal, .hearth700)
+            .padding(.top, .hearth400)
+            .padding(.bottom, .hearth800)
+        }
+    }
+
+    /// `showsProgress: false` is for screens that are NOT a funnel step — the
+    /// returning-parent sign-in reached from the splash. It sits at the same
+    /// index as the funnel's own sign-in step, so the bar would read 100% and
+    /// the caption "Almost there" to someone who has not answered a single
+    /// question. Back chevron stays; the progress affordance goes.
+    private func funnelHeader(caption: String?, showsProgress: Bool = true) -> some View {
+        VStack(spacing: .hearth300) {
+            HStack(spacing: .hearth400) {
+                Button(action: goBack) {
+                    Image(systemName: "arrow.left")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.accentOnCanvas)
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(Color.bgElevated))
+                }
+                .accessibilityLabel("Back")
+
+                if showsProgress {
+                    progressBar
+                } else {
+                    Spacer()
+                }
+            }
+
+            if let caption {
+                Text(caption)
+                    .font(.hearthBodySM.weight(.semibold))
+                    .foregroundColor(.inkPrimary)
+            }
+        }
+        .padding(.horizontal, .hearth700)
+        .padding(.top, .hearth400)
+    }
+
+    /// Replaces the pre-beta `progressDots`. The denominator is the LAST
+    /// question screen ("What's on your mind?"), not the flow length — the
+    /// ring and the landing aren't questions, so Greg's bar reads full by the
+    /// time the parent is done answering.
+    private var progressBar: some View {
+        let steps = flow
+        let denominator = Double(steps.firstIndex(of: .mind) ?? 1)
+        let fraction = min(1.0, max(0.04, Double(draft.stepIndex) / max(denominator, 1)))
+        return GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.bgElevated)
+                Capsule()
+                    .fill(Color.accentOnCanvas)
+                    .frame(width: geo.size.width * fraction)
+            }
+        }
+        .frame(height: 16)
+        .animation(.hearth(.hearthSlow, reduceMotion: reduceMotion), value: fraction)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Step \(draft.stepIndex) of \(Int(denominator))")
+    }
+
+    // MARK: - Shared components
+
+    private func funnelTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.hearthDisplayLG)
+            .foregroundColor(.inkPrimary)
+            .multilineTextAlignment(.center)
+            .lineSpacing(.hearthLineDisplayLG)
+            .lineLimit(3)
+            .minimumScaleFactor(0.6)
+            .frame(maxWidth: .infinity)
+    }
+
+    private func funnelSubtitle(_ text: String) -> some View {
+        Text(text)
+            .font(.hearthBodyMD)
+            .foregroundColor(.inkSecondary)
+            .multilineTextAlignment(.center)
+            .lineSpacing(.hearthLineBodyMD)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+    }
+
+    private var centeredRule: some View {
+        Rectangle()
+            .fill(Color.inkPlaceholder)
+            .frame(width: 44, height: 1)
+            .padding(.vertical, .hearth300)
+    }
+
+    @ViewBuilder
+    private func fieldGroup<Content: View>(
+        _ label: String,
+        helper: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: .hearth400) {
+            Text(label)
+                .font(.hearthTitleLG)
+                .foregroundColor(.inkPrimary)
+                .multilineTextAlignment(.center)
+            content()
+            if let helper {
+                Text(helper)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkSecondary)
+            }
+        }
+        .padding(.top, .hearth400)
+    }
+
+    private func subFieldLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.hearthBodyMD)
+            .foregroundColor(.inkSecondary)
+            .frame(maxWidth: .infinity)
+    }
+
+    private func pillField(
+        _ placeholder: String,
+        text: Binding<String>,
+        keyboard: UIKeyboardType = .default,
+        textContentType: UITextContentType? = nil
+    ) -> some View {
+        TextField("", text: text, prompt: Text(placeholder).foregroundColor(.inkPlaceholder))
+            .font(.hearthBodyLG)
+            .foregroundColor(.inkPrimary)
+            .multilineTextAlignment(.center)
+            .keyboardType(keyboard)
+            .textContentType(textContentType)
+            .autocorrectionDisabled()
+            .padding(.horizontal, .hearth600)
+            .padding(.vertical, .hearth500)
+            .frame(maxWidth: .infinity)
+            .background(Color.bgElevated)
+            .clipShape(Capsule())
+            .hearthCardElevation()
+    }
+
+    private func pillSelect(
+        placeholder: String,
+        value: String,
+        options: [String],
+        onPick: @escaping (String) -> Void
+    ) -> some View {
+        Menu {
+            ForEach(options, id: \.self) { option in
+                Button(option) { onPick(option) }
+            }
+        } label: {
+            HStack(spacing: .hearth400) {
+                Spacer(minLength: 0)
+                Text(value.isEmpty ? placeholder : value)
+                    .font(.hearthBodyLG)
+                    .foregroundColor(value.isEmpty ? .inkPlaceholder : .inkPrimary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.inkMuted)
+            }
+            .padding(.horizontal, .hearth600)
+            .padding(.vertical, .hearth500)
+            .frame(maxWidth: .infinity)
+            .background(Color.bgElevated)
+            .clipShape(Capsule())
+            .hearthCardElevation()
+        }
+        .accessibilityLabel(value.isEmpty ? placeholder : value)
+    }
+
+    /// The disabled CTA uses `bg/disabled` + `ink/secondary`. White on that
+    /// fill is 2.07:1 — never pair them.
+    private func primaryButton(
+        _ label: String,
+        disabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Text(label)
                 .font(.hearthTitleMD)
-                .foregroundColor(.inkOnPhotoLight)
+                .foregroundColor(disabled ? .inkSecondary : .inkOnPhotoLight)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, .hearth500)
-                .background(Color.accentDefault)
-                .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
+                .background(disabled ? Color.bgDisabled : Color.accentDefault)
+                .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous))
         }
         .disabled(disabled)
-        .opacity(disabled ? 0.5 : 1.0)
     }
 
-    private func kidCard(index: Int) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                onboardingTextField(placeholder: "Name", text: $kids[index].name)
-
-                onboardingTextField(
-                    placeholder: "Age",
-                    text: $kids[index].age,
-                    keyboardType: .numberPad,
-                    width: 72
-                )
-
-                if kids.count > 1 {
-                    Button { kids.remove(at: index) } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundColor(.inkSecondary)
-                    }
-                }
-            }
-
-            // Temperament picker (inline)
-            if !kids[index].name.trimmed.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("What's \(kids[index].name.trimmed.isEmpty ? "their" : kids[index].name.trimmed)'s vibe?")
-                        .font(.system(.caption, design: .serif).italic())
-                        .foregroundColor(.inkSecondary)
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(temperamentOptions, id: \.label) { option in
-                                let isSelected = kids[index].temperament == option.label
-                                Button {
-                                    withAnimation(.easeInOut(duration: 0.15)) {
-                                        kids[index].temperament = isSelected ? "" : option.label
-                                    }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        if !option.symbol.isEmpty {
-                                            Image(systemName: option.symbol)
-                                                .font(.system(size: 12, weight: .regular))
-                                                .symbolRenderingMode(.monochrome)
-                                        }
-                                        Text(option.label)
-                                            .font(.hearthBodySM.weight(.medium))
-                                            .lineLimit(1)
-                                            .fixedSize(horizontal: true, vertical: false)
-                                    }
-                                    .foregroundColor(isSelected ? .inkOnPhotoLight : .inkPrimary)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(isSelected ? Color.accentDefault : Color.bgElevated)
-                                    .clipShape(Capsule())
-                                    .overlay(
-                                        Capsule().stroke(isSelected ? Color.clear : Color.borderHairline, lineWidth: 1)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Pronouns + Grade band row
-                HStack(spacing: 10) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(kidPronounsOptions, id: \.label) { option in
-                                let isSelected = kids[index].pronouns == option.label
-                                Button {
-                                    withAnimation(.easeInOut(duration: 0.15)) {
-                                        kids[index].pronouns = isSelected ? "" : option.label
-                                    }
-                                } label: {
-                                    Text(option.label)
-                                        .font(.hearthBodySM.weight(.medium))
-                                        .lineLimit(1)
-                                        .fixedSize(horizontal: true, vertical: false)
-                                        .foregroundColor(isSelected ? .inkOnPhotoLight : .inkPrimary)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
-                                        .background(isSelected ? Color.accentDefault : Color.bgElevated)
-                                        .clipShape(Capsule())
-                                        .overlay(
-                                            Capsule().stroke(isSelected ? Color.clear : Color.borderHairline, lineWidth: 1)
-                                        )
-                                }
-                            }
-                        }
-                    }
-
-                    Menu {
-                        ForEach(gradeBandOptions, id: \.self) { band in
-                            Button { kids[index].gradeBand = band } label: { Text(band) }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "graduationcap")
-                                .font(.caption)
-                            Text(kids[index].gradeBand.isEmpty ? "Grade" : kids[index].gradeBand)
-                                .font(.system(.caption2, design: .serif).weight(.medium))
-                            Image(systemName: "chevron.down")
-                                .font(.caption2)
-                        }
-                        .foregroundColor(.inkPrimary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.bgElevated)
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule().stroke(Color.borderHairline, lineWidth: 1)
-                        )
+    private func multiSelectGrid(
+        options: [(label: String, symbol: String)],
+        selection: Binding<[String]>
+    ) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.flexible(), spacing: .hearth300), GridItem(.flexible(), spacing: .hearth300)],
+            spacing: .hearth300
+        ) {
+            ForEach(options, id: \.label) { option in
+                let selected = selection.wrappedValue.contains(option.label)
+                chip(label: option.label, symbol: option.symbol, selected: selected, fills: true) {
+                    if selected {
+                        selection.wrappedValue.removeAll { $0 == option.label }
+                    } else {
+                        selection.wrappedValue.append(option.label)
                     }
                 }
             }
         }
-        .padding(16)
-        .background(Color.bgElevated.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.borderHairline, lineWidth: 1)
+    }
+
+    /// Greg's chip: white pill, teal leading icon, ink label. Selected flips to
+    /// the accent FILL (white on it is 5.25:1 — the one place the fill token is
+    /// allowed under text).
+    private func chip(
+        label: String,
+        symbol: String,
+        selected: Bool,
+        fills: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            withAnimation(.hearth(.hearthFast, reduceMotion: reduceMotion)) { action() }
+        } label: {
+            HStack(spacing: .hearth300) {
+                if !symbol.isEmpty {
+                    Image(systemName: symbol)
+                        .font(.system(size: 13, weight: .regular))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundColor(selected ? .inkOnPhotoLight : .accentOnCanvas)
+                }
+                Text(label)
+                    .font(.hearthBodyMD.weight(.medium))
+                    .foregroundColor(selected ? .inkOnPhotoLight : .inkPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .padding(.horizontal, .hearth500)
+            .padding(.vertical, .hearth400)
+            .frame(maxWidth: fills ? .infinity : nil)
+            .background(selected ? Color.accentDefault : Color.bgElevated)
+            .clipShape(Capsule())
+            .hearthCardElevation()
+        }
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
+    // MARK: - Derived values
+
+    private var firstName: String {
+        let trimmed = draft.parentName.trimmed
+        return trimmed.isEmpty ? "there" : trimmed
+    }
+
+    /// Builds the `/profile/seed` payload. The fields the funnel stopped asking
+    /// go out EMPTY rather than disappearing — the contract test pins the keys.
+    private func collectedData() -> OnboardingData {
+        let kidData = draft.kids
+            .filter { !$0.name.trimmed.isEmpty }
+            .map { kid in
+                (
+                    name: kid.name.trimmed,
+                    age: kid.age.trimmed,
+                    temperament: kid.temperament,
+                    pronouns: "",
+                    gradeBand: kid.gradeBand,
+                    gender: kid.gender
+                )
+            }
+        return OnboardingData(
+            parentName: draft.parentName.trimmed,
+            kids: kidData,
+            household: draft.household,
+            supportSystem: "",
+            energyPattern: "",
+            dreadedMoment: "",
+            challenges: draft.challenges,
+            goals: draft.goals,
+            postalCode: draft.postalCode.trimmed,
+            country: "",
+            primaryLanguage: draft.primaryLanguage,
+            parentAgeRange: "",
+            adultsInHousehold: nil,
+            employment: "",
+            culturalBackground: "",
+            pronouns: "",
+            secondaryLanguage: draft.secondaryLanguage,
+            educationStyle: draft.educationStyle,
+            familyActivities: draft.familyActivities,
+            coachVoice: draft.coachVoice,
+            coachPersonality: draft.coachPersonality
         )
     }
 
-    private func singleSelectGrid(options: [(label: String, symbol: String)], selection: Binding<String>) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            ForEach(options, id: \.label) { option in
-                let isSelected = selection.wrappedValue == option.label
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        selection.wrappedValue = isSelected ? "" : option.label
-                    }
-                } label: {
-                    chipLabel(symbol: option.symbol, label: option.label, isSelected: isSelected)
-                }
-            }
-        }
+    private static let childWords = [
+        "One", "Two", "Three", "Four", "Five", "Six",
+        "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"
+    ]
+
+    private static let ordinalWords = [
+        "first", "second", "third", "fourth", "fifth", "sixth",
+        "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"
+    ]
+
+    static func childLabel(_ index: Int) -> String {
+        childWords.indices.contains(index) ? "Child \(childWords[index])" : "Child \(index + 1)"
     }
 
-    /// Multi-select variant of singleSelectGrid. Tapping toggles each option
-    /// independently — used on screens like "Your household" and "Your
-    /// support crew" where multiple answers are realistic.
-    private func multiSelectGrid(options: [(label: String, symbol: String)], selection: Binding<Set<String>>) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            ForEach(options, id: \.label) { option in
-                let isSelected = selection.wrappedValue.contains(option.label)
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        if isSelected {
-                            selection.wrappedValue.remove(option.label)
-                        } else {
-                            selection.wrappedValue.insert(option.label)
-                        }
-                    }
-                } label: {
-                    chipLabel(symbol: option.symbol, label: option.label, isSelected: isSelected)
-                }
-            }
-        }
+    static func ordinalWord(_ index: Int) -> String {
+        ordinalWords.indices.contains(index) ? ordinalWords[index] : "child number \(index + 1)"
     }
 
-    /// Alias for the 2-col multi-select grid kept distinct in name for
-    /// caller-readability (challenges / goals read more naturally as
-    /// `chipGrid` than `multiSelectGrid`).
-    private func chipGrid(options: [(label: String, symbol: String)], selection: Binding<Set<String>>) -> some View {
-        multiSelectGrid(options: options, selection: selection)
-    }
-
-    /// Shared chip-button label — keeps colors + spacing consistent across
-    /// all chip grids. Renders an SF Symbol prefix when `symbol` is
-    /// non-empty; otherwise the chip is text-only (used for pronouns and
-    /// other label-primary options where an icon would be noise).
-    private func chipLabel(symbol: String, label: String, isSelected: Bool) -> some View {
-        HStack(spacing: 8) {
-            if !symbol.isEmpty {
-                Image(systemName: symbol)
-                    .font(.system(size: 14, weight: .regular))
-                    .symbolRenderingMode(.monochrome)
-            }
-            Text(label)
-                .font(.hearthBodyMD.weight(.medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-        .foregroundColor(isSelected ? .inkOnPhotoLight : .inkPrimary)
-        .padding(.horizontal, .hearth500)
-        .padding(.vertical, .hearth400)
-        .frame(maxWidth: .infinity)
-        .background(isSelected ? Color.accentDefault : Color.bgElevated)
-        .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
-                .stroke(isSelected ? Color.clear : Color.borderHairline, lineWidth: 1)
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
         )
     }
 }

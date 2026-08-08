@@ -1,5 +1,12 @@
 import SwiftUI
 
+/// Identifiable wrapper so `.sheet(item:)` can carry the kid's STABLE profile
+/// key (the server's dictionary key), never a list index.
+struct KidSheetTarget: Identifiable, Hashable {
+    let key: String
+    var id: String { key }
+}
+
 /// Settings → Profile hub. Loads the full family profile via GET /profile and
 /// drills into editors: the parent's Basics ("You"), each kid's Basics, an
 /// "Add a kid" sheet, and the family-wide "What we've learned" screen (the
@@ -12,6 +19,8 @@ struct ProfileSettingsView: View {
     @State private var family = FamilyProfileDTO()
     @State private var kidKeys: [String] = []
     @State private var showAddKid = false
+    /// The kid whose settings sheet is open (beta-v1's `Ben's settings`).
+    @State private var kidSettingsTarget: KidSheetTarget?
     @State private var pendingDeleteKey: String?
     @State private var errorMessage: String?
     // Legacy users (issued a token before sign-in existed) have no v1 credential.
@@ -59,12 +68,16 @@ struct ProfileSettingsView: View {
 
                 Section("Kids") {
                     ForEach(kidKeys, id: \.self) { key in
-                        NavigationLink {
-                            KidProfileEditor(
-                                baseURL: configuration.baseURL, userID: userID,
-                                kidKey: key, kid: family.children?[key] ?? ChildProfileDTO()
-                            ) { apply($0) }
-                        } label: { kidRow(key) }
+                        Button { kidSettingsTarget = KidSheetTarget(key: key) } label: {
+                            HStack {
+                                kidRow(key)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(.inkPlaceholder)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
                                 pendingDeleteKey = key
@@ -101,6 +114,20 @@ struct ProfileSettingsView: View {
         .background(Color.bgCanvas.ignoresSafeArea())
         .sheet(isPresented: $showAddKid) {
             AddKidSheet(baseURL: configuration.baseURL, userID: userID) { apply($0) }
+        }
+        .sheet(item: $kidSettingsTarget) { target in
+            KidSettingsSheet(
+                baseURL: configuration.baseURL,
+                userID: userID,
+                kidKey: target.key,
+                kid: family.children?[target.key] ?? ChildProfileDTO()
+            ) { apply($0) }
+        }
+        // The sheet edits this list's source of truth (and can delete the kid
+        // from inside its Basics editor), so the hub re-fetches on return
+        // rather than trusting the state it had when the sheet opened.
+        .onChange(of: kidSettingsTarget?.key) { _, key in
+            if key == nil { Task { await load() } }
         }
         .sheet(isPresented: $showSecureAccount) {
             // SignInView auto-forwards the legacy user_id + token, so a

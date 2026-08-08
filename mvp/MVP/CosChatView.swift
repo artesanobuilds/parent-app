@@ -94,102 +94,47 @@ struct CosChatView: View {
                 )
 
             VStack(alignment: .leading, spacing: .hearth300) {
-                Text("Ask your chief of staff")
+                Text("Ask the coach")
                     .font(.hearthDisplayMD)
                     .foregroundColor(.inkPrimary)
-                Text("Track an activity, sort out coverage gaps, or get help deciding between camps. The chief of staff sees your family's plan.")
+                Text("Find camps, sort out coverage gaps, or decide between options. I see the whole family plan.")
                     .font(.hearthBodyMD)
                     .foregroundColor(.inkSecondary)
             }
 
-            // The entry doors, as starter cards (one per vertical, copy from
-            // the registry). Tap = door_opened + door_converted in one step —
-            // in chat the tap IS the conversion.
-            if !doors.isEmpty {
-                VStack(alignment: .leading, spacing: .hearth300) {
-                    Text("PLAN SOMETHING")
-                        .font(.hearthBodySM)
-                        .foregroundColor(.inkMuted)
-                        .tracking(0.6)
-                        .padding(.top, .hearth300)
-
-                    ForEach(doors) { door in
-                        Button {
-                            Analytics.capture("door_opened", ["door": door.key])
-                            sendSuggestion(door.starterPrompt)
-                            Analytics.capture("door_converted", ["door": door.key])
-                        } label: {
-                            HStack(spacing: .hearth400) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(door.title)
-                                        .font(.hearthBodyMD.weight(.semibold))
-                                        .foregroundColor(.inkPrimary)
-                                    Text(door.subtitle)
-                                        .font(.hearthBodySM)
-                                        .foregroundColor(.inkSecondary)
-                                        .multilineTextAlignment(.leading)
-                                }
-                                Spacer(minLength: 0)
-                                Image(systemName: "arrow.up.right")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.inkMuted)
-                            }
-                            .padding(.horizontal, .hearth500)
-                            .padding(.vertical, .hearth400)
-                            .background(
-                                RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                                    .fill(Color.bgElevated)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                                            .stroke(Color.borderHairline, lineWidth: 1)
-                                    )
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.isSending || viewModel.isUserIDMissing)
-                    }
-                }
-            }
-
+            // Sprint-2: four hardcoded starter prompts from the spec
             VStack(alignment: .leading, spacing: .hearth300) {
-                Text("TRY ASKING")
-                    .font(.hearthBodySM)
-                    .foregroundColor(.inkMuted)
-                    .tracking(0.6)
-                    .padding(.top, .hearth300)
-
-                ForEach(Self.starterPrompts, id: \.text) { prompt in
-                    Button {
-                        sendSuggestion(prompt.text)
-                    } label: {
-                        HStack(spacing: .hearth400) {
-                            Image(systemName: prompt.icon)
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(.accentDefault)
-                                .frame(width: 22)
-                            Text(prompt.text)
-                                .font(.hearthBodyMD)
-                                .foregroundColor(.inkPrimary)
-                                .multilineTextAlignment(.leading)
-                            Spacer(minLength: 0)
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.inkMuted)
-                        }
-                        .padding(.horizontal, .hearth500)
-                        .padding(.vertical, .hearth400)
-                        .background(
-                            RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                                .fill(Color.bgElevated)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                                        .stroke(Color.borderHairline, lineWidth: 1)
-                                )
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(viewModel.isSending || viewModel.isUserIDMissing)
+                Button {
+                    sendSuggestion("Camps & school breaks")
+                } label: {
+                    starterButton("Camps & school breaks")
                 }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isSending || viewModel.isUserIDMissing)
+
+                Button {
+                    sendSuggestion("Classes & sports")
+                } label: {
+                    starterButton("Classes & sports")
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isSending || viewModel.isUserIDMissing)
+
+                Button {
+                    sendSuggestion("Weekend outings")
+                } label: {
+                    starterButton("Weekend outings")
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isSending || viewModel.isUserIDMissing)
+
+                Button {
+                    sendSuggestion("Family trips — dates, packing, not bookings")
+                } label: {
+                    starterButton("Family trips — dates, packing, not bookings")
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isSending || viewModel.isUserIDMissing)
             }
         }
         .padding(.horizontal, .hearth700)
@@ -343,5 +288,25 @@ struct CosChatView: View {
         if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             messageText = ""
         }
+    }
+
+    private func starterButton(_ text: String) -> some View {
+        HStack {
+            Text(text)
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkPrimary)
+                .multilineTextAlignment(.leading)
+            Spacer()
+        }
+        .padding(.horizontal, .hearth500)
+        .padding(.vertical, .hearth400)
+        .background(
+            RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                .fill(Color.bgElevated)
+                .overlay(
+                    RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                        .stroke(Color.borderHairline, lineWidth: 1)
+                )
+        )
     }
 }

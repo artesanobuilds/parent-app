@@ -1,265 +1,403 @@
 import SwiftUI
 
+/// Circle — beta-v1 sprint 2 redesign. Replaces the public community board
+/// AND the 1:1 DM inbox with one surface: mutual-link GROUP conversations
+/// scoped to a parent's own circle (grandparents, sitters, close friends).
+///
+/// Empty state is picked on ROSTER count, not conversation count — Circle-000
+/// ("Gather your circle") when the household roster is empty, Circle-001
+/// ("Start the conversation") when the roster is non-empty but there are no
+/// conversations yet. These are deliberately different states.
 struct CircleView: View {
     @EnvironmentObject private var contentVM: ContentViewModel
     // Unread count lives on AppSession — the tab-bar badge reads the SAME
     // value, so the two signal levels can never disagree.
     @EnvironmentObject private var session: AppSession
-    @State private var selectedCategory: String? = nil
-    @State private var showingNewPost = false
-    @State private var showingMessages = false
 
-    private var filteredPosts: [APICommunityPost] {
-        if let selected = selectedCategory {
-            return contentVM.communityPosts.filter { $0.category == selected }
-        }
-        return contentVM.communityPosts
-    }
+    @State private var conversations: [CircleConversation] = []
+    @State private var roster: [HouseholdMember] = []
+    @State private var loading = true
+    @State private var errorMessage: String?
+    @State private var showingNewConversation = false
+    @State private var showingInvite = false
+    @State private var showingAddToTeam: CircleConversation?
+    @State private var pendingDelete: CircleConversation?
+    @State private var navPath = NavigationPath()
 
-    /// Categories that actually have community posts.
-    private var activeCategories: [APICategory] {
-        let postCategoryIds = Set(contentVM.communityPosts.map { $0.category })
-        return contentVM.categories.filter { postCategoryIds.contains($0.id) }
-    }
+    private var userID: String { contentVM.userId }
+    private var baseURL: URL? { contentVM.baseURL }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Header text
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Real parents. Real questions.")
-                            .font(.title3.weight(.bold))
-                            .foregroundColor(.inkPrimary)
-                        Text("You're not alone in this.")
-                            .font(.subheadline)
-                            .foregroundColor(.brandGray)
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 4)
-
-                    // Category filter chips
-                    categoryChips
-
-                    // Posts
-                    if filteredPosts.isEmpty {
-                        emptyState
-                    } else {
-                        LazyVStack(spacing: 12) {
-                            ForEach(filteredPosts) { post in
-                                NavigationLink(value: PostRoute(id: post.id)) {
-                                    CirclePostCard(post: post)
-                                        .padding(.horizontal)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    Spacer(minLength: 20)
+        NavigationStack(path: $navPath) {
+            Group {
+                if loading && conversations.isEmpty && roster.isEmpty {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if roster.isEmpty {
+                    noCircleEmptyState
+                } else if conversations.isEmpty {
+                    noConversationsEmptyState
+                } else {
+                    conversationList
                 }
-                .padding(.top, 8)
             }
-            .background(Color.brandBackground.ignoresSafeArea())
+            .background(Color.bgCanvas.ignoresSafeArea())
             .navigationTitle("Circle")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.brandBackground, for: .navigationBar)
+            .toolbarBackground(Color.bgCanvas, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    // Level-2 unread signal: markedly louder than the tab
-                    // badge — filled accent envelope + a legible count pill.
-                    // Zero unread keeps the quiet outline.
                     Button {
-                        showingMessages = true
+                        showingInvite = true
                     } label: {
-                        Image(systemName: session.dmUnread > 0 ? "envelope.badge.fill" : "envelope")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(session.dmUnread > 0 ? .accentDefault : .inkPrimary)
-                            .overlay(alignment: .topTrailing) {
-                                if session.dmUnread > 0 {
-                                    Text(session.dmUnread > 9 ? "9+" : "\(session.dmUnread)")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundColor(.inkOnPhotoLight)
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 2)
-                                        .background(Color.accentDefault)
-                                        .clipShape(Capsule())
-                                        .offset(x: 12, y: -10)
-                                }
-                            }
+                        Image(systemName: "person.badge.plus")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.inkPrimary)
                     }
-                    .accessibilityLabel(session.dmUnread > 0
-                        ? "Messages, \(session.dmUnread) unread" : "Messages")
+                    .accessibilityLabel("Invite someone to your circle")
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
-                        showingNewPost = true
+                        showingNewConversation = true
                     } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundColor(.brandGold)
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.accentOnCanvas)
+                    }
+                    .accessibilityLabel("New conversation")
+                    .disabled(roster.isEmpty)
+                }
+            }
+            .navigationDestination(for: String.self) { conversationId in
+                CircleThreadView(conversationId: conversationId, userID: userID, baseURL: baseURL,
+                                 onNotFound: {
+                                     // A push for a conversation that no longer exists lands
+                                     // back on the list rather than crashing.
+                                     if !navPath.isEmpty { navPath.removeLast() }
+                                 })
+                    .environmentObject(session)
+            }
+            .sheet(isPresented: $showingNewConversation) {
+                if let baseURL {
+                    NewConversationView(userID: userID, baseURL: baseURL, roster: roster) { created in
+                        showingNewConversation = false
+                        conversations.insert(created, at: 0)
+                        navPath.append(created.id)
                     }
                 }
             }
-            .sheet(isPresented: $showingMessages, onDismiss: { Task { await refreshUnread() } }) {
-                if let url = contentVM.baseURL, !contentVM.userId.isEmpty {
-                    MessagesInboxView(userID: contentVM.userId, baseURL: url)
-                        .environmentObject(session)
+            .sheet(isPresented: $showingInvite) {
+                if let baseURL {
+                    CircleInviteView(userID: userID, baseURL: baseURL)
                 }
             }
-            .task { await refreshUnread() }
-            // A tapped DM push routed here by MainTabView: open the Messages
-            // sheet; the inbox pushes the thread and clears the pending id.
-            .onAppear {
-                if session.pendingDMConversationId != nil { showingMessages = true }
-            }
-            .onChange(of: session.pendingDMConversationId) { _, pending in
-                if pending != nil { showingMessages = true }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .dmPushReceived)) { _ in
-                Task { await refreshUnread() }
-            }
-            .sheet(isPresented: $showingNewPost) {
-                if let url = contentVM.baseURL {
-                    NewPostView(baseURL: url)
-                }
-            }
-            .withContentNavigationDestinations()
-        }
-    }
-
-    // MARK: - Category Chips
-
-    private var categoryChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                chipButton(label: "All", emoji: nil, isSelected: selectedCategory == nil) {
-                    withAnimation(.easeInOut(duration: 0.2)) { selectedCategory = nil }
-                }
-
-                ForEach(activeCategories) { category in
-                    chipButton(label: category.name, emoji: category.emoji, isSelected: selectedCategory == category.id) {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            selectedCategory = selectedCategory == category.id ? nil : category.id
+            .sheet(item: $showingAddToTeam) { conversation in
+                if let baseURL {
+                    AddToTeamSheet(conversation: conversation, userID: userID, baseURL: baseURL, roster: roster) { updated in
+                        if let idx = conversations.firstIndex(where: { $0.id == updated.id }) {
+                            conversations[idx] = updated
                         }
+                        showingAddToTeam = nil
                     }
                 }
             }
-            .padding(.horizontal)
-        }
-    }
-
-    private func chipButton(label: String, emoji: String?, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                if let emoji = emoji {
-                    Text(emoji).font(.system(size: 14))
+            .alert("Delete this conversation?", isPresented: Binding(
+                get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }
+            )) {
+                Button("Delete", role: .destructive) {
+                    if let conversation = pendingDelete { Task { await delete(conversation) } }
                 }
-                Text(label)
-                    .font(.caption.weight(.medium))
-                    .lineLimit(1)
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+            } message: {
+                Text("This removes it for everyone in the conversation.")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(isSelected ? Color.accentDefault : Color.bgElevated)
-            .foregroundColor(isSelected ? .inkOnPhotoLight : .inkPrimary)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(isSelected ? Color.clear : Color.brandStroke, lineWidth: 1)
-            )
+            .refreshable { await load() }
+            .task { await load() }
+            .onChange(of: session.pendingCircleConversationId) { _, pending in
+                guard let pending else { return }
+                session.pendingCircleConversationId = nil
+                if navPath.isEmpty { navPath.append(pending) }
+            }
+            .onAppear {
+                if let pending = session.pendingCircleConversationId {
+                    session.pendingCircleConversationId = nil
+                    if navPath.isEmpty { navPath.append(pending) }
+                }
+            }
+            .trackScreen("circle_list")
         }
     }
 
-    // MARK: - Empty State
+    // MARK: - Empty states
 
-    private var emptyState: some View {
-        VStack(spacing: 12) {
+    /// Circle-000 — the roster itself is empty.
+    private var noCircleEmptyState: some View {
+        VStack(spacing: .hearth500) {
+            Spacer()
+            Image(systemName: "person.2.circle")
+                .font(.system(size: 48, weight: .light))
+                .foregroundColor(.inkMuted)
+            Text("Gather your circle")
+                .font(.hearthTitleLG)
+                .foregroundColor(.inkPrimary)
+            Text("Your circle are the people who show up for your kids — grandparents, sitters, close friends. Bring them into one place.")
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkMuted)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, .hearth800)
+            Button { showingInvite = true } label: {
+                Text("Invite someone")
+                    .font(.hearthTitleMD)
+                    .foregroundColor(.inkOnPhotoLight)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, .hearth500)
+                    .background(Color.accentDefault)
+                    .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous))
+            }
+            .padding(.horizontal, .hearth700)
+            .padding(.top, .hearth300)
+            Spacer()
+            Spacer()
+        }
+    }
+
+    /// Circle-001 — roster exists, no conversations yet.
+    private var noConversationsEmptyState: some View {
+        VStack(spacing: .hearth500) {
+            Spacer()
             Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 32))
-                .foregroundColor(.brandGray.opacity(0.5))
-            Text("No posts in this category yet")
-                .font(.subheadline)
-                .foregroundColor(.brandGray)
+                .font(.system(size: 48, weight: .light))
+                .foregroundColor(.inkMuted)
+            Text("Start the conversation")
+                .font(.hearthTitleLG)
+                .foregroundColor(.inkPrimary)
+            Text("Ask your circle for advice, share a win, or just check in.")
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkMuted)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, .hearth800)
+            Button { showingNewConversation = true } label: {
+                Text("Start a discussion")
+                    .font(.hearthTitleMD)
+                    .foregroundColor(.inkOnPhotoLight)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, .hearth500)
+                    .background(Color.accentDefault)
+                    .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous))
+            }
+            .padding(.horizontal, .hearth700)
+            .padding(.top, .hearth300)
+            Spacer()
+            Spacer()
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
     }
 
-    private func refreshUnread() async {
-        await session.refreshDMUnread(userID: contentVM.userId, baseURL: contentVM.baseURL)
+    // MARK: - List
+
+    private var conversationList: some View {
+        ScrollView {
+            LazyVStack(spacing: .hearth400) {
+                if let errorMessage {
+                    Text(errorMessage).font(.hearthBodySM).foregroundColor(.statusError)
+                }
+                ForEach(conversations) { conversation in
+                    Button {
+                        navPath.append(conversation.id)
+                    } label: {
+                        CircleConversationRow(conversation: conversation, userID: userID)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu { rowMenu(conversation) }
+                    .overlay(alignment: .topTrailing) {
+                        Menu { rowMenu(conversation) } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.inkMuted)
+                                .frame(width: 32, height: 32)
+                        }
+                        .accessibilityLabel("Conversation options")
+                    }
+                }
+            }
+            .padding(.horizontal, .hearth500)
+            .padding(.vertical, .hearth500)
+        }
+    }
+
+    @ViewBuilder
+    private func rowMenu(_ conversation: CircleConversation) -> some View {
+        if conversation.isOwned(by: userID) {
+            Button("Edit") { navPath.append(conversation.id) }
+            Button("Delete", role: .destructive) { pendingDelete = conversation }
+        }
+        Button("Send message") { navPath.append(conversation.id) }
+        Button("Add to team") { showingAddToTeam = conversation }
+    }
+
+    // MARK: - Actions
+
+    private func load() async {
+        guard let baseURL, !userID.isEmpty else { loading = false; return }
+        loading = true
+        defer { loading = false }
+        async let fetchedRoster = try? CircleService.householdMembers(userID: userID, baseURL: baseURL)
+        async let fetchedConversations = try? CircleService.conversations(userID: userID, baseURL: baseURL)
+        roster = (await fetchedRoster) ?? roster
+        if let convos = await fetchedConversations {
+            conversations = convos
+            errorMessage = nil
+        } else {
+            errorMessage = "Couldn't load Circle. Pull to retry."
+        }
+        await session.refreshCircleUnread(userID: userID, baseURL: baseURL)
+    }
+
+    private func delete(_ conversation: CircleConversation) async {
+        guard let baseURL else { return }
+        pendingDelete = nil
+        do {
+            try await CircleService.deleteConversation(id: conversation.id, userID: userID, baseURL: baseURL)
+            conversations.removeAll { $0.id == conversation.id }
+            Analytics.capture("circle_conversation_deleted", [:])
+        } catch {
+            errorMessage = "Couldn't delete that conversation. Try again."
+        }
     }
 }
 
-// MARK: - Circle Post Card (full-width community card)
+// MARK: - Row
 
-struct CirclePostCard: View {
-    let post: APICommunityPost
-    @EnvironmentObject private var contentVM: ContentViewModel
+struct CircleConversationRow: View {
+    let conversation: CircleConversation
+    let userID: String
 
-    private var category: APICategory? {
-        contentVM.categories.first { $0.id == post.category }
+    private var subtitle: String {
+        let count = conversation.replyCount ?? 0
+        let word = count == 1 ? "reply" : "replies"
+        if conversation.starterIsMe ?? true {
+            if let from = conversation.lastReplyFrom, count > 0 {
+                return "\(count) \(word) · last from \(from)"
+            }
+            return count > 0 ? "\(count) \(word)" : "No replies yet"
+        } else {
+            let starter = conversation.starterName ?? "Someone"
+            return count > 0 ? "\(starter) started this — \(count) \(word)" : "\(starter) started this"
+        }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Author row
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(Color.brandGold.opacity(0.15))
-                    .frame(width: 40, height: 40)
-                    .overlay(
-                        Text(post.initials)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.brandGold)
-                    )
+        VStack(alignment: .leading, spacing: .hearth300) {
+            Text(conversation.title)
+                .font(.hearthTitleMD)
+                .foregroundColor(.inkPrimary)
+                .lineLimit(1)
+                .padding(.trailing, 32)   // room for the overlaid ⋯ menu
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(post.name)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.brandNavy)
+            Text(subtitle)
+                .font(.hearthBodySM)
+                .foregroundColor(.inkMuted)
 
-                    if let category = category {
-                        Text("\(category.emoji) \(category.name)")
-                            .font(.caption2)
-                            .foregroundColor(.brandGray)
-                    }
-                }
-
-                Spacer()
-            }
-
-            // Title
-            Text(post.title)
-                .font(.headline)
-                .foregroundColor(.brandNavy)
-                .multilineTextAlignment(.leading)
-
-            // Preview
-            Text(post.preview)
-                .font(.subheadline)
-                .foregroundColor(.brandNavy.opacity(0.75))
-                .lineSpacing(2)
-                .multilineTextAlignment(.leading)
-
-            // Engagement row
-            HStack(spacing: 20) {
-                let count = post.replyCount ?? 0
-                Label(count > 0 ? "\(count) \(count == 1 ? "reply" : "replies")" : "Reply", systemImage: "bubble.left")
-                Label("Support", systemImage: "heart")
-            }
-            .font(.caption)
-            .foregroundColor(.brandGray)
-            .padding(.top, 2)
+            avatarStack
         }
-        .padding(16)
-        .background(Color.brandCardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: Color.black.opacity(0.3), radius: 8, y: 3)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.brandStroke, lineWidth: 1)
-        )
+        .padding(.hearth500)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.bgElevated)
+        .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous))
+        .hearthCardElevation()
+    }
+
+    private var avatarStack: some View {
+        HStack(spacing: -10) {
+            ForEach(Array((conversation.participants ?? []).prefix(4).enumerated()), id: \.element.id) { pair in
+                Circle()
+                    .fill(Color.accentTint)
+                    .frame(width: 28, height: 28)
+                    .overlay(
+                        Text(pair.element.initials)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.accentOnCanvas)
+                    )
+                    .overlay(Circle().stroke(Color.bgElevated, lineWidth: 2))
+                    .zIndex(Double(-pair.offset))
+            }
+        }
+    }
+}
+
+// MARK: - "Add to team" sheet (row context menu → participant picker)
+
+/// Adds household roster members to an EXISTING conversation. Reuses the same
+/// checklist idiom as `NewConversationView`'s invite list, scoped to members
+/// not already participating.
+struct AddToTeamSheet: View {
+    let conversation: CircleConversation
+    let userID: String
+    let baseURL: URL
+    let roster: [HouseholdMember]
+    var onUpdated: (CircleConversation) -> Void
+
+    @State private var selected: Set<String> = []
+    @State private var saving = false
+    @Environment(\.dismiss) private var dismiss
+
+    private var alreadyIn: Set<String> {
+        Set((conversation.participants ?? []).map(\.memberId))
+    }
+    private var candidates: [HouseholdMember] { roster.filter { !alreadyIn.contains($0.id) } }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if candidates.isEmpty {
+                    Text("Everyone in your circle is already in this conversation.")
+                        .font(.hearthBodyMD)
+                        .foregroundColor(.inkMuted)
+                        .multilineTextAlignment(.center)
+                        .padding(.hearth700)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(candidates) { member in
+                        Button {
+                            if selected.contains(member.id) { selected.remove(member.id) }
+                            else { selected.insert(member.id) }
+                        } label: {
+                            HStack(spacing: .hearth400) {
+                                Circle()
+                                    .fill(Color.accentTint)
+                                    .frame(width: 36, height: 36)
+                                    .overlay(Text(member.resolvedInitials).font(.hearthLabel).foregroundColor(.accentOnCanvas))
+                                Text(member.displayName).font(.hearthBodyMD).foregroundColor(.inkPrimary)
+                                Spacer()
+                                if selected.contains(member.id) {
+                                    Image(systemName: "checkmark.circle.fill").foregroundColor(.accentDefault)
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .background(Color.bgCanvas.ignoresSafeArea())
+            .navigationTitle("Add to team")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(saving ? "Adding…" : "Add") { Task { await add() } }
+                        .disabled(selected.isEmpty || saving)
+                }
+            }
+        }
+    }
+
+    private func add() async {
+        saving = true
+        defer { saving = false }
+        if let updated = try? await CircleService.addParticipants(
+            conversationId: conversation.id, memberIds: Array(selected), userID: userID, baseURL: baseURL
+        ) {
+            onUpdated(updated)
+            dismiss()
+        }
     }
 }

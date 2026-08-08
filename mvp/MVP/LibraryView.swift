@@ -18,7 +18,12 @@ struct LibraryView: View {
 
 
     var body: some View {
-        NavigationStack {
+        // No NavigationStack of its own. beta-v1 moved Library out of the tab
+        // bar and behind Settings, which already supplies a stack — nesting a
+        // second one renders two stacked nav bars (a back-chevron bar sitting
+        // on top of this view's own inline title bar). The title and the
+        // destination registrations below attach to the enclosing stack.
+        Group {
             ScrollView {
                 VStack(alignment: .leading, spacing: .hearth1000) {
                     heroCard

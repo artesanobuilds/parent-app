@@ -71,6 +71,14 @@ struct BoardCardView: View {
                         .foregroundColor(.inkSecondary)
                 }
                 Spacer(minLength: 0)
+                if let fit = activity.fitScore {
+                    Text("\(Int((fit * 100).rounded()))% Match")
+                        .font(.hearthCaptionMono)
+                        .foregroundColor(.accentDefault)
+                        .padding(.horizontal, .hearth400)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Color.accentTint))
+                }
                 if let price = activity.priceAmount {
                     Text("$\(Int(price))")
                         .font(.hearthCaptionMono)
@@ -82,6 +90,19 @@ struct BoardCardView: View {
                 Text(when)
                     .font(.hearthBodySM)
                     .foregroundColor(.inkSecondary)
+            }
+            // Sprint-2: overlaps
+            if let overlaps = activity.overlaps, !overlaps.isEmpty {
+                ForEach(overlaps) { overlap in
+                    HStack(spacing: .hearth300) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.statusWarning)
+                        Text("Overlaps \(overlap.name), \(overlap.range)")
+                            .font(.hearthBodySM)
+                            .foregroundColor(.statusWarning)
+                    }
+                }
             }
             // Registration watchlist line (Phase 4) — watching is never invisible.
             if let window = activity.registrationWindow {
@@ -245,20 +266,23 @@ struct BoardCardView: View {
 
     private func todoRow(_ todo: PlanTodo) -> some View {
         let todoBusy = busyTodoIds.contains(todo.id)
+        let isDone = todo.done == true
         return HStack(spacing: .hearth300) {
             Button {
                 onCompleteTodo(todo.id)
             } label: {
-                Image(systemName: "circle")
+                Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 15))
-                    .foregroundColor(.accentDefault)
+                    .foregroundColor(isDone ? .inkMuted : .accentDefault)
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Mark done: \(todo.title)")
+            .accessibilityLabel(isDone ? "Done: \(todo.title)" : "Mark done: \(todo.title)")
+            .disabled(isDone)
             Text(todo.title)
                 .font(.hearthBodySM)
-                .foregroundColor(.inkSecondary)
+                .foregroundColor(isDone ? .inkMuted : .inkSecondary)
+                .strikethrough(isDone)
             Spacer(minLength: 0)
             if let due = todo.dueDate {
                 Text(due)

@@ -26,36 +26,44 @@ final class AppSession: ObservableObject {
     /// Set while a sign-out or delete is in flight so the UI can disable buttons.
     @Published var isWorking = false
 
-    // MARK: - DMs (Phase 8.1)
+    // MARK: - Circle (beta-v1 sprint 2)
+    //
+    // The 1:1 DM stack (dmUnread / activeDMConversationId /
+    // pendingDMConversationId / refreshDMUnread) is gone. It survived only to
+    // serve the community board's "message this parent" button, and the board
+    // was retired with the board itself. Circle conversations replace both.
 
     /// The AppDelegate's window into the session — notification callbacks
     /// arrive before any view exists and can't use the environment. Set once
     /// at init (there is exactly one AppSession, owned by MVPApp).
     static weak var current: AppSession?
 
-    /// Total unread DM count. The SINGLE source both signal levels read —
-    /// the Circle tab-bar badge and the in-Circle envelope — so they can
-    /// never disagree.
-    @Published var dmUnread = 0
+    /// Conversation currently open in `CircleThreadView` (set on appear,
+    /// cleared on disappear). The AppDelegate suppresses the push banner for
+    /// THIS thread — you're already looking at it; the push becomes the refresh.
+    @Published var activeCircleConversationId: String?
 
-    /// Conversation currently open in ConversationView (set on appear, cleared
-    /// on disappear). The AppDelegate suppresses the push banner for THIS
-    /// thread — you're already looking at it; the push becomes the refresh.
-    @Published var activeDMConversationId: String?
+    /// Total unread count across Circle conversations — the SINGLE source
+    /// both signal levels read (the tab-bar badge and the in-Circle envelope
+    /// used to read a separate DM count; that badge now reads this too), so they
+    /// can never disagree.
+    @Published var circleUnread = 0
 
-    /// A tapped DM push waiting to be routed into its thread. MainTabView
-    /// switches to Circle; CircleView opens the Messages sheet; the inbox
-    /// pushes the thread and clears this.
-    @Published var pendingDMConversationId: String?
+    /// A tapped Circle push (or any deferred deep link) waiting to be routed
+    /// into its thread. `MainTabView` switches to the Circle tab and sets
+    /// this; `CircleView` pushes the thread by id and clears it. If the
+    /// conversation 404s (deleted, stale link), `CircleThreadView` pops back
+    /// to the list instead of crashing.
+    @Published var pendingCircleConversationId: String?
 
     init() {
         AppSession.current = self
     }
 
-    func refreshDMUnread(userID: String, baseURL: URL?) async {
+    func refreshCircleUnread(userID: String, baseURL: URL?) async {
         guard let baseURL, !userID.isEmpty else { return }
-        if let result = try? await DMService.inbox(userID: userID, baseURL: baseURL) {
-            dmUnread = result.totalUnread
+        if let conversations = try? await CircleService.conversations(userID: userID, baseURL: baseURL) {
+            circleUnread = conversations.reduce(0) { $0 + ($1.unread ?? 0) }
         }
     }
 
@@ -118,11 +126,14 @@ final class AppSession: ObservableObject {
         // it anyway — the ownership boundary — but don't even carry it over).
         defaults.removeObject(forKey: BlobService.pendingAttachKey)
         legalStatus = nil
-        // DM state is the outgoing user's — never carry a badge count or a
-        // pending deep link across to the next account on this device.
-        dmUnread = 0
-        activeDMConversationId = nil
-        pendingDMConversationId = nil
+        // DM + Circle state is the outgoing user's — never carry a badge
+        // count or a pending deep link across to the next account on this
+        // device.
+        circleUnread = 0
+        activeCircleConversationId = nil
+        pendingCircleConversationId = nil
+        circleUnread = 0
+        pendingCircleConversationId = nil
         defaults.removeObject(forKey: AppDelegate.pendingDMDeeplinkKey)
 
         // Flip the gate LAST — this is what re-renders the app to SignInView.

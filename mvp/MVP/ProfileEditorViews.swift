@@ -31,6 +31,33 @@ extension Binding where Value == [String]? {
 // MARK: - Enum option lists (inferred from the backend field comments)
 
 enum ProfileOptions {
+    /// Temperament chips shown in the kid-settings sheet. Same labels + symbols
+    /// the onboarding funnel offers, so a kid's vibe reads identically wherever
+    /// it's set (see `patterns_onboarding_parity`). Single-select: the backend
+    /// field `temperament` is one string, not a list.
+    static let temperamentChips: [(label: String, symbol: String)] = [
+        ("Spirited", "flame"),
+        ("Sensitive", "heart"),
+        ("Easy-going", "cloud.sun"),
+        ("Strong-willed", "bolt"),
+        ("Shy/cautious", "tortoise"),
+        ("Social butterfly", "figure.wave")
+    ]
+
+    /// The onboarding "free time" grid AND the account sheet's "Family
+    /// interests" grid (Sprint-1 gap). Single source so a selection made at
+    /// either surface reads identically at the other (see
+    /// `patterns_onboarding_parity`). Backend field: `family_activities`.
+    static let familyActivityOptions: [(label: String, symbol: String)] = [
+        ("Arts & crafts", "paintpalette"),
+        ("Museums", "building.columns"),
+        ("Hiking", "figure.hiking"),
+        ("Gardens", "leaf"),
+        ("Nature", "tree"),
+        ("Parks", "sportscourt"),
+        ("Science", "atom")
+    ]
+
     static let ageRange = ["", "<25", "25-34", "35-44", "45-54", "55+", "prefer_not_to_say"]
     static let employment = ["", "stay-at-home", "part-time", "full-time", "shift", "other"]
     static let household = ["", "single", "co-parenting", "two-parent", "divorced", "widowed", "blended", "multigenerational"]
@@ -435,6 +462,104 @@ struct AddKidSheet: View {
                 dismiss()
             } catch {
                 self.error = "Couldn't add. Check your connection and try again."
+            }
+            saving = false
+        }
+    }
+}
+
+// MARK: - One learned list, for one kid (the kid-settings sheet's rows)
+
+/// The three list fields beta-v1's `WHAT WE'VE LEARNED` rows expose per kid.
+/// Each maps to exactly one snake_case key on PATCH /profile/kids/{name}.
+enum KidLearnedField: String, CaseIterable, Hashable {
+    case interests, strengths, challenges
+
+    var title: String {
+        switch self {
+        case .interests:  return "Interests"
+        case .strengths:  return "Strengths"
+        case .challenges: return "Challenges"
+        }
+    }
+
+    /// The ONLY key this editor sends. Everything else the coach has learned is
+    /// left out of the payload on purpose — PATCH only touches keys that are
+    /// present, which is what stops one edit from wiping the rest
+    /// (`test_saving_basics_does_not_wipe_learned_fields`).
+    var payloadKey: String { rawValue }
+
+    func values(of kid: ChildProfileDTO) -> [String] {
+        switch self {
+        case .interests:  return kid.interests ?? []
+        case .strengths:  return kid.strengths ?? []
+        case .challenges: return kid.challenges ?? []
+        }
+    }
+}
+
+/// Edits a single learned list for a single kid. Pushed from the kid-settings
+/// sheet's `WHAT WE'VE LEARNED` rows.
+struct KidLearnedListEditor: View {
+    let baseURL: URL?
+    let userID: String
+    let kidKey: String          // the server's dictionary key, not the draft name
+    let kidDisplayName: String
+    let field: KidLearnedField
+    var onSaved: (FamilyProfileDTO) -> Void
+
+    @State private var items: [String]
+    @State private var saving = false
+    @State private var error: String?
+    @Environment(\.dismiss) private var dismiss
+
+    init(baseURL: URL?, userID: String, kidKey: String, kidDisplayName: String,
+         field: KidLearnedField, kid: ChildProfileDTO,
+         onSaved: @escaping (FamilyProfileDTO) -> Void) {
+        self.baseURL = baseURL
+        self.userID = userID
+        self.kidKey = kidKey
+        self.kidDisplayName = kidDisplayName
+        self.field = field
+        _items = State(initialValue: field.values(of: kid))
+        self.onSaved = onSaved
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                ChipEditor(title: field.title, items: $items)
+            } footer: {
+                Text("Gathered from \(kidDisplayName)'s conversations. Edit or remove anything that's off.")
+                    .font(.hearthBodySM).foregroundColor(.inkMuted)
+            }
+            if let error { Text(error).font(.hearthBodySM).foregroundColor(.statusError) }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Color.bgCanvas.ignoresSafeArea())
+        .trackScreen("kid_learned_\(field.rawValue)")
+        .navigationTitle(field.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(saving ? "Saving…" : "Save") { save() }.disabled(saving)
+            }
+        }
+    }
+
+    private func save() {
+        guard let baseURL else { return }
+        saving = true; error = nil
+        Task {
+            do {
+                let fam = try await ProfileService.updateKid(
+                    baseURL: baseURL, userID: userID, name: kidKey,
+                    fields: [field.payloadKey: items]
+                )
+                onSaved(fam)
+                dismiss()
+            } catch {
+                self.error = "Couldn't save. Check your connection and try again."
             }
             saving = false
         }

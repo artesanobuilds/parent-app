@@ -130,7 +130,7 @@ struct IntegrationsSettingsView: View {
             Text("Connect Google")
                 .font(.hearthBodyLG.weight(.semibold))
                 .foregroundColor(.inkPrimary)
-            Text("Let your chief of staff read camp emails and keep your calendar in sync. Read-only — nothing is sent on your behalf, and you can disconnect anytime.")
+            Text("Let your coach read camp emails and keep your calendar in sync. Read-only — nothing is sent on your behalf, and you can disconnect anytime.")
                 .font(.hearthBodyMD)
                 .foregroundColor(.inkSecondary)
         }

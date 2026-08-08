@@ -1,52 +1,5 @@
 import SwiftUI
 
-// MARK: - Community Post Card
-//
-// `post` variant per the cards spec: bg/elevated + border/hairline (no shadow),
-// author row in body-sm semibold, body in body-md, lifts via hairline + paper.
-
-struct CommunityPostCard: View {
-    let post: APICommunityPost
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: .hearth400) {
-            // Avatar + name row
-            HStack(spacing: .hearth300) {
-                Circle()
-                    .fill(Color.accentTint)
-                    .frame(width: 32, height: 32)
-                    .overlay(
-                        Text(post.initials)
-                            .font(.hearthLabel)
-                            .foregroundColor(.accentDefault)
-                    )
-                Text(post.name)
-                    .font(.hearthTitleMD)
-                    .foregroundColor(.inkPrimary)
-            }
-
-            // Title
-            Text(post.title)
-                .font(.hearthTitleMD)
-                .foregroundColor(.inkPrimary)
-                .lineLimit(2)
-
-            // Preview text
-            Text(post.preview)
-                .font(.hearthBodySM)
-                .foregroundColor(.inkSecondary)
-                .lineLimit(4)
-        }
-        .padding(.hearth500)
-        .background(Color.bgElevated)
-        .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                .stroke(Color.borderHairline, lineWidth: 1)
-        )
-    }
-}
-
 // MARK: - Library Item Card
 //
 // `article` md variant — feed card with hero block + title + meta. We render
@@ -100,33 +53,6 @@ struct LibraryItemCard: View {
 
 // MARK: - Content Sections
 
-struct CommunitySection: View {
-    let posts: [APICommunityPost]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: .hearth400) {
-            Text("Connect in the community")
-                .font(.hearthLabel)
-                .foregroundColor(.inkMuted)
-                .tracking(0.66)
-                .textCase(.uppercase)
-                .padding(.leading, .hearth300)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: .hearth400) {
-                    ForEach(posts) { post in
-                        NavigationLink(value: PostRoute(id: post.id)) {
-                            CommunityPostCard(post: post)
-                                .frame(width: 240)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-    }
-}
-
 struct LibrarySection: View {
     let items: [APIArticle]
 
@@ -162,8 +88,11 @@ extension View {
             .navigationDestination(for: ArticleRoute.self) { route in
                 ArticleDetailView(articleId: route.id)
             }
-            .navigationDestination(for: PostRoute.self) { route in
-                CommunityPostDetailView(postId: route.id)
+            // `FOR YOU → See all`. Payload-free route (see ContentStore.swift):
+            // registered here so Home, Library and any future surface inherit
+            // the destination from one place.
+            .navigationDestination(for: ForYouRoute.self) { _ in
+                ForYouView()
             }
             // Category tile taps push a category id (String). Registered
             // here so both HomeView and LibraryView (and any future

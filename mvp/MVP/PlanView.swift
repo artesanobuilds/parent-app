@@ -1,23 +1,35 @@
 import SwiftUI
 import UIKit
 
-/// The "Plan" tab: trigger a camp/activity discovery run and browse ranked
-/// candidates, see the chief-of-staff plan summary (cost, coverage gaps,
-/// pending-eligibility, open to-dos), and open the chief-of-staff chat.
-/// Mirrors the app's other tabs: self-contained `NavigationStack`, Hearth tokens,
-/// view model injected from `MainTabView`.
+/// The "Plan" tab: the activity plan (board, calendar, discovery) plus "Ask the
+/// coach". Mirrors the app's other tabs: self-contained `NavigationStack`,
+/// Hearth tokens, view model injected from `MainTabView`.
+///
+/// Sprint-2 restructure: two top-level segments (`Plan | Ask the coach`) replace
+/// the old four (`Chat / Discover / Activities / Calendar`) — Discover collapsed
+/// into a search row, Activities became the board, Calendar became the Timeline
+/// view mode. **"Chief of Staff" is retired from user-facing copy**: coach and
+/// planner are ONE agent now, so the UI stops implying two. Backend `/cos/*`
+/// paths keep their names.
 struct PlanView: View {
     @ObservedObject var viewModel: PlanViewModel
     @ObservedObject var cosVM: CosChatViewModel
     let configuration: ServerConfiguration
     let userID: String
 
-    @State private var segment: PlanSegment = .chat
+    @State private var segment: PlanSegment = .plan
     @State private var showIngest = false
     @State private var showSortFilter = false
     // Vertical chip filter on the board (attribute, never navigation) and the
     // "Plan something" door sheet (the five doors behind ONE disclosure).
     @State private var typeFilter: String?
+    /// Selected lifecycle-stage key from the status chips (nil = All). Separate
+    /// axis from `typeFilter` — see `statusFilterChips`.
+    @State private var stageFilter: String?
+    /// "Edit kids and interests" on the empty state opens the profile hub.
+    @State private var isShowingProfileHub = false
+    /// The summary strip's "View" expands the callouts inline.
+    @State private var isShowingSummaryDetail = false
     @State private var showDoors = false
     // One-time board explainer (self-documenting first run) — persists dismissal.
     @AppStorage("plan_board_explainer_seen") private var boardExplainerSeen = false
@@ -36,20 +48,32 @@ struct PlanView: View {
         let url: URL
     }
 
-    /// The Plan hub's sub-views. The Chief of Staff (chat) is the front door;
-    /// the structured views hang off it one tap away.
+    /// Sprint-2: top-level Plan | Ask the coach toggle.
     enum PlanSegment: String, CaseIterable, Identifiable {
-        case chat, discover, shortlist, calendar
+        case plan, coach
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .chat: return "Chat"
-            case .discover: return "Discover"
-            case .shortlist: return "Activities"
-            case .calendar: return "Calendar"
+            case .plan: return "Plan"
+            case .coach: return "Ask the coach"
             }
         }
     }
+
+    /// Sprint-2: List | Timeline view mode under Plan.
+    enum ViewMode: String, CaseIterable, Identifiable {
+        case list, timeline
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .list: return "List"
+            case .timeline: return "Timeline"
+            }
+        }
+    }
+
+    @State private var viewMode: ViewMode = .list
+    @State private var searchCollapsed = true
 
     var body: some View {
         NavigationStack {
@@ -61,6 +85,15 @@ struct PlanView: View {
             .background(Color.bgCanvas.ignoresSafeArea())
             .sheet(isPresented: $showIngest) {
                 IngestView(viewModel: viewModel)
+            }
+            .sheet(isPresented: $isShowingProfileHub, onDismiss: {
+                // Kids and interests drive discovery, so the plan re-fetches on
+                // return rather than trusting what it had before the edit.
+                Task { await viewModel.loadPlan() }
+            }) {
+                NavigationStack {
+                    ProfileSettingsView(configuration: configuration, userID: userID)
+                }
             }
             .sheet(isPresented: $showDoors) {
                 doorSheet
@@ -123,6 +156,14 @@ struct PlanView: View {
             .navigationDestination(for: CandidateRoute.self) { route in
                 CandidateDetailView(candidate: route.candidate)
             }
+            .navigationDestination(for: BoardActivityRoute.self) { route in
+                BoardActivityDetailView(
+                    activity: route.activity,
+                    onCompleteTodo: { todoId in
+                        Task { await viewModel.completeTodo(todoId) }
+                    }
+                )
+            }
             .task {
                 viewModel.userId = userID
                 viewModel.baseURL = configuration.baseURL
@@ -136,12 +177,9 @@ struct PlanView: View {
                 viewModel.baseURL = configuration.baseURL
                 cosVM.setUserID(userID)
             }
-            // Keep the plan-derived segments fresh. They only loaded once on first
-            // appear, so the chief-of-staff chat (which can track activities, add or
-            // complete to-dos, etc. via its tools) left the Shortlist/Calendar stale.
-            // Reload when the parent lands on a plan-derived segment …
+            // Keep the plan segment fresh. Reload when switching to it.
             .onChange(of: segment) { _, newValue in
-                if newValue == .shortlist || newValue == .calendar {
+                if newValue == .plan {
                     Task { await viewModel.loadPlan() }
                 }
             }
@@ -158,30 +196,14 @@ struct PlanView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: .hearth300) {
-                Text("PLAN")
-                    .font(.hearthLabel)
-                    .tracking(0.66)
-                    .foregroundColor(.inkMuted)
-                Text("Chief of Staff")
-                    .font(.hearthDisplayMD)
-                    .foregroundColor(.inkPrimary)
-            }
+        HStack(spacing: .hearth400) {
+            Image(systemName: "calendar")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundColor(.accentDefault)
+            Text("MVP Planner")
+                .font(.hearthDisplayMD)
+                .foregroundColor(.inkPrimary)
             Spacer()
-            if !viewModel.doors.isEmpty {
-                Button {
-                    showDoors = true
-                } label: {
-                    Label("Plan something", systemImage: "plus")
-                        .font(.hearthBodySM.weight(.semibold))
-                        .foregroundColor(.inkOnPhotoLight)
-                        .padding(.horizontal, .hearth400)
-                        .padding(.vertical, .hearth300)
-                        .background(Capsule().fill(Color.accentDefault))
-                }
-                .buttonStyle(.plain)
-            }
             planMenu
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -262,70 +284,47 @@ struct PlanView: View {
     @ViewBuilder
     private var segmentBody: some View {
         switch segment {
-        case .chat:
-            // The chat owns its own pinned input bar + scroll; MainTabView's
-            // bottom padding already lifts the whole tab clear of the tab bar.
+        case .coach:
             CosChatView(viewModel: cosVM, doors: viewModel.doors)
 
-        case .discover:
+        case .plan:
             ScrollView {
-                VStack(alignment: .leading, spacing: .hearth900) {
-                    ingestEntry
-                    discoverySection
-                }
-                .padding(.horizontal, .hearth700)
-                .padding(.top, .hearth500)
-                .padding(.bottom, .hearth900)
-            }
-            // The numeric ZIP keyboard has no return key; any drag dismisses it.
-            .scrollDismissesKeyboard(.immediately)
-
-        case .shortlist:
-            ScrollView {
-                VStack(alignment: .leading, spacing: .hearth900) {
-                    boardSection
+                VStack(alignment: .leading, spacing: .hearth700) {
                     if let summary = viewModel.summary {
-                        planSummarySection(summary)
+                        summaryStrip(summary)
                     }
-                    todosSection
-                    if shortlistIsEmpty {
-                        emptyState(
-                            icon: "bookmark",
-                            title: "No activities yet",
-                            message: "Save ideas from Discover, decide with “We'll do it”, register — then I watch the camp's emails and track payments & forms for you."
-                        )
-                    }
-                }
-                .padding(.horizontal, .hearth700)
-                .padding(.top, .hearth500)
-                .padding(.bottom, .hearth900)
-            }
-            .refreshable { await viewModel.loadPlan() }
-
-        case .calendar:
-            ScrollView {
-                VStack(alignment: .leading, spacing: .hearth900) {
-                    calendarSection
-                    if viewModel.calendarWeeks.isEmpty {
-                        emptyState(
-                            icon: "calendar",
-                            title: "Your calendar is empty",
-                            message: "Once you confirm camps and activities, your week-by-week plan appears here."
-                        )
+                    viewModeToggle
+                    statusFilterChips
+                    collapsedSearchRow
+                    if viewMode == .list {
+                        if boardIsEmpty {
+                            planEmptyState
+                        } else {
+                            boardSection
+                            planSomethingNewButton
+                        }
+                    } else {
+                        calendarSection
+                        if viewModel.calendarWeeks.isEmpty {
+                            emptyState(
+                                icon: "calendar",
+                                title: "Your calendar is empty",
+                                message: "Once you confirm camps and activities, your week-by-week plan appears here."
+                            )
+                        }
                     }
                 }
                 .padding(.horizontal, .hearth700)
                 .padding(.top, .hearth500)
                 .padding(.bottom, .hearth900)
             }
+            .scrollDismissesKeyboard(.immediately)
             .refreshable { await viewModel.loadPlan() }
         }
     }
 
-    private var shortlistIsEmpty: Bool {
-        (viewModel.board?.stages.allSatisfy { $0.activities.isEmpty } ?? viewModel.exploringActivities.isEmpty)
-            && viewModel.todos.isEmpty
-            && viewModel.summary == nil
+    private var boardIsEmpty: Bool {
+        viewModel.board?.stages.allSatisfy { $0.activities.isEmpty } ?? true
     }
 
     private func emptyState(icon: String, title: String, message: String) -> some View {
@@ -343,6 +342,291 @@ struct PlanView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, .hearth1000)
+    }
+
+    // MARK: - Sprint-2 Components
+
+    @ViewBuilder
+    private func summaryStrip(_ summary: PlanSummary) -> some View {
+        VStack(alignment: .leading, spacing: .hearth400) {
+            summaryStripLine(summary)
+            if isShowingSummaryDetail {
+                summaryStripDetail(summary)
+            }
+        }
+        .padding(.hearth500)
+        .background(
+            RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                .fill(Color.bgElevated)
+        )
+    }
+
+    /// The three callouts the strip's numbers stand for. Reuses the summary the
+    /// server already computes (`planning.build_plan_summary`) — pending
+    /// eligibility, coverage gaps and schedule conflicts were each their own
+    /// section before the sprint-2 re-order and would otherwise be lost.
+    @ViewBuilder
+    private func summaryStripDetail(_ summary: PlanSummary) -> some View {
+        Divider().background(Color.borderHairline)
+        VStack(alignment: .leading, spacing: .hearth300) {
+            // Same field mapping as the original `planSummarySection` — neither
+            // PendingEligibility nor CoverageGap carries a server-rendered line,
+            // so the label is composed here exactly as it always was.
+            calloutList(
+                "Pending eligibility",
+                items: (summary.pendingEligibility ?? []).map { $0.name ?? "Activity" },
+                tone: .statusWarning
+            )
+            calloutList(
+                "Coverage gaps",
+                items: (summary.coverageGaps ?? []).map { gap in
+                    [gap.kidName, gap.task].compactMap { $0 }.joined(separator: " · ")
+                        + (gap.reason.map { " — \($0)" } ?? "")
+                },
+                tone: .statusError
+            )
+            calloutList(
+                "Schedule conflicts",
+                items: (summary.conflicts ?? []).compactMap { $0.detail ?? $0.reason },
+                tone: .statusError
+            )
+            if !viewModel.todos.isEmpty {
+                calloutList("Follow-ups",
+                            items: viewModel.todos.prefix(5).map { $0.title },
+                            tone: .accentOnCanvas)
+            }
+            if summaryDetailIsEmpty(summary) {
+                Text("Nothing needs your attention right now.")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkSecondary)
+            }
+        }
+    }
+
+    private func summaryDetailIsEmpty(_ summary: PlanSummary) -> Bool {
+        (summary.pendingEligibility?.isEmpty ?? true)
+            && (summary.coverageGaps?.isEmpty ?? true)
+            && (summary.conflicts?.isEmpty ?? true)
+            && viewModel.todos.isEmpty
+    }
+
+    private func summaryStripLine(_ summary: PlanSummary) -> some View {
+        HStack(spacing: .hearth300) {
+            let confirmedTotal = summary.cost?.confirmedTotal ?? 0
+            let tbdCount = summary.cost?.tbdCount ?? 0
+            let tracked = viewModel.activities.count
+            let nextSteps = viewModel.board?.stages
+                .flatMap { $0.activities }
+                .filter { $0.nextStep.action != "none" }
+                .count ?? 0
+
+            Text("\(nextSteps) next steps this week · $\(Int(confirmedTotal)) confirmed · \(tbdCount) cost TBD · \(tracked) tracked")
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+            Spacer(minLength: 0)
+            // "N next steps this week" is a count of follow-ups, so View shows
+            // them. It expands inline rather than pushing a screen — the detail
+            // is three lines, and a push would leave the board behind.
+            Button {
+                withAnimation(.hearthBase) { isShowingSummaryDetail.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(isShowingSummaryDetail ? "Hide" : "View")
+                        .font(.hearthBodySM.weight(.semibold))
+                        .foregroundColor(.accentOnCanvas)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.accentOnCanvas)
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var viewModeToggle: some View {
+        Picker("View", selection: $viewMode) {
+            ForEach(ViewMode.allCases) { mode in
+                Text(mode.label).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    /// `All / New / Deciding (3) / Needs action (1)` — filters the board to ONE
+    /// lifecycle stage.
+    ///
+    /// This is a separate axis from `typeFilter`, which filters by *vertical*
+    /// (camp/class/outing/trip). Both were briefly wired to `typeFilter`, which
+    /// made "All" clear the vertical filter and the stage chips do nothing at
+    /// all — a chip showing a live count that ignores your tap.
+    private var statusFilterChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: .hearth300) {
+                statusChip("All", count: nil, selected: stageFilter == nil) {
+                    stageFilter = nil
+                }
+                if let board = viewModel.board {
+                    ForEach(board.stages) { stage in
+                        let count = stage.activities.count
+                        if count > 0 {
+                            statusChip(stage.title, count: count,
+                                       selected: stageFilter == stage.key) {
+                                // Tapping the selected chip clears it, so the
+                                // row never traps you in one stage.
+                                stageFilter = stageFilter == stage.key ? nil : stage.key
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func statusChip(_ label: String, count: Int?, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(label)
+                    .font(.hearthBodySM)
+                    .foregroundColor(selected ? .inkOnPhotoLight : .inkPrimary)
+                if let c = count {
+                    Text("(\(c))")
+                        .font(.hearthBodySM)
+                        .foregroundColor(selected ? .inkOnPhotoLight : .inkSecondary)
+                }
+            }
+            .padding(.horizontal, .hearth400)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(selected ? Color.accentDefault : Color.accentTint))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var collapsedSearchRow: some View {
+        Button {
+            withAnimation(.hearthBase) { searchCollapsed.toggle() }
+        } label: {
+            HStack(spacing: .hearth400) {
+                if searchCollapsed {
+                    let zip = viewModel.locationQuery.isEmpty ? "98332" : viewModel.locationQuery
+                    let radius = viewModel.radiusMiles
+                    Text("\(zip) · \(radius) mi · camps, classes & more")
+                        .font(.hearthBodyMD)
+                        .foregroundColor(.inkSecondary)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.inkMuted)
+                } else {
+                    VStack(alignment: .leading, spacing: .hearth400) {
+                        discoverPrompt
+                    }
+                }
+            }
+            .padding(.hearth500)
+            .background(
+                RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                    .fill(Color.bgElevated)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var planEmptyState: some View {
+        VStack(alignment: .leading, spacing: .hearth700) {
+            VStack(alignment: .leading, spacing: .hearth400) {
+                Text("Nothing planned yet?")
+                    .font(.hearthDisplayMD)
+                    .foregroundColor(.inkPrimary)
+                Text("Find a few options — nothing is booked or shared until you say so.")
+                    .font(.hearthBodyMD)
+                    .foregroundColor(.inkSecondary)
+            }
+
+            if !searchCollapsed {
+                // Search card already shown above
+            } else {
+                Button {
+                    withAnimation(.hearthBase) { searchCollapsed = false }
+                } label: {
+                    HStack(spacing: .hearth400) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.accentDefault)
+                        Text("Find activities")
+                            .font(.hearthBodyMD.weight(.semibold))
+                            .foregroundColor(.inkPrimary)
+                        Spacer()
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.inkMuted)
+                    }
+                    .padding(.hearth500)
+                    .background(
+                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                            .fill(Color.bgElevated)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                                    .stroke(Color.borderHairline, lineWidth: 1)
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            ingestEntry
+
+            VStack(alignment: .leading, spacing: .hearth300) {
+                if let firstKid = viewModel.calendarKids.first {
+                    let kids = viewModel.calendarKids.joined(separator: " & ")
+                    Text("Planning for \(kids)")
+                        .font(.hearthBodyMD.weight(.semibold))
+                        .foregroundColor(.inkPrimary)
+                } else {
+                    Text("Planning for your kids")
+                        .font(.hearthBodyMD.weight(.semibold))
+                        .foregroundColor(.inkPrimary)
+                }
+                // Opens the profile hub rather than a single kid's sheet:
+                // `KidSettingsSheet` needs one kid as its target and this copy
+                // is plural ("kids and interests"), so the hub — which lists
+                // every kid and their interests — is the honest destination.
+                Button { isShowingProfileHub = true } label: {
+                    Text("Edit kids and interests")
+                        .font(.hearthBodySM)
+                        .foregroundColor(.accentOnCanvas)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var planSomethingNewButton: some View {
+        Button {
+            showDoors = true
+        } label: {
+            HStack(spacing: .hearth400) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(.accentDefault)
+                Text("Plan something new")
+                    .font(.hearthBodyMD.weight(.semibold))
+                    .foregroundColor(.inkPrimary)
+            }
+            .padding(.hearth500)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                    .fill(Color.bgElevated)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                            .stroke(Color.borderHairline, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Ingest entry
@@ -741,7 +1025,7 @@ struct PlanView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: .hearth700) {
                     VStack(alignment: .leading, spacing: .hearth300) {
-                        Text("SORT").font(.hearthLabel).tracking(0.6).foregroundColor(.inkMuted)
+                        Text("SORT").font(.hearthLabel).tracking(0.66).foregroundColor(.inkMuted)
                         VStack(spacing: 0) {
                             ForEach(SortKey.allCases) { key in
                                 Button { withAnimation(.hearthFast) { viewModel.sortKey = key } } label: {
@@ -771,7 +1055,7 @@ struct PlanView: View {
                     let kids = viewModel.availableKids
                     if cities.count >= 2 || cats.count >= 2 || kids.count >= 2 {
                         VStack(alignment: .leading, spacing: .hearth500) {
-                            Text("FILTER").font(.hearthLabel).tracking(0.6).foregroundColor(.inkMuted)
+                            Text("FILTER").font(.hearthLabel).tracking(0.66).foregroundColor(.inkMuted)
                             if cities.count >= 2 { facetGroup("City", cities, selection: $viewModel.selectedCities) }
                             if cats.count >= 2 { facetGroup("Type", cats, selection: $viewModel.selectedCategories) }
                             if kids.count >= 2 { facetGroup("Kid", kids, selection: $viewModel.selectedKids) }
@@ -869,6 +1153,9 @@ struct PlanView: View {
             let typeCounts = boardTypeCounts(board)
             let multiVertical = typeCounts.count > 1
             let nonEmpty = board.stages
+                // Stage chips narrow to one stage; vertical chips narrow within
+                // it. The two filters compose.
+                .filter { stageFilter == nil || $0.key == stageFilter }
                 .map { stage in
                     BoardStage(
                         key: stage.key, title: stage.title, blurb: stage.blurb,
@@ -894,9 +1181,9 @@ struct PlanView: View {
                 if let considering = nonEmpty.first(where: { $0.key == "considering" }),
                    considering.activities.count >= 2 {
                     Button {
-                        // Flip to the chat segment and seed a triage request into
+                        // Flip to the coach segment and seed a triage request into
                         // the same (hoisted) conversation.
-                        withAnimation(.hearthFast) { segment = .chat }
+                        withAnimation(.hearthFast) { segment = .coach }
                         cosVM.send("Help me decide between the camps on my shortlist. Walk me through the tradeoffs (cost, eligibility, schedule conflicts, coverage) and recommend picks per kid.")
                     } label: {
                         Label("Help me decide", systemImage: "arrow.left.arrow.right")
@@ -924,7 +1211,7 @@ struct PlanView: View {
             Text("Plan something")
                 .font(.hearthDisplayMD)
                 .foregroundColor(.inkPrimary)
-            Text("Pick a door — the chief of staff takes it from there.")
+            Text("Pick a door — the coach takes it from there.")
                 .font(.hearthBodySM)
                 .foregroundColor(.inkSecondary)
             ForEach(viewModel.doors) { door in
@@ -971,7 +1258,7 @@ struct PlanView: View {
     private func openDoor(_ door: VerticalDoor) {
         Analytics.capture("door_opened", ["door": door.key])
         showDoors = false
-        withAnimation(.hearthFast) { segment = .chat }
+        withAnimation(.hearthFast) { segment = .coach }
         cosVM.send(door.starterPrompt)
         Analytics.capture("door_converted", ["door": door.key])
     }
@@ -1023,25 +1310,28 @@ struct PlanView: View {
                 .font(.hearthBodySM)
                 .foregroundColor(.inkSecondary)
             ForEach(stage.activities) { activity in
-                BoardCardView(
-                    activity: activity,
-                    gmailConnected: gmailConnected,
-                    busy: viewModel.mutatingIds.contains(activity.id),
-                    showVerticalChip: showVerticalChip,
-                    busyTodoIds: viewModel.mutatingIds,
-                    onAdvance: { a, status, rationale in
-                        Task { await viewModel.advance(a, to: status, rationale: rationale) }
-                    },
-                    onCompleteTodo: { todoId in
-                        Task { await viewModel.completeTodo(todoId) }
-                    },
-                    onResolveInChat: { a, label in
-                        withAnimation(.hearthFast) { segment = .chat }
-                        cosVM.send("Help me resolve this for \(a.name): \(label)")
-                    },
-                    onPassConfirm: { a in passTarget = a },
-                    onDeleteConfirm: { a in deleteTarget = a }
-                )
+                NavigationLink(value: BoardActivityRoute(activity: activity)) {
+                    BoardCardView(
+                        activity: activity,
+                        gmailConnected: gmailConnected,
+                        busy: viewModel.mutatingIds.contains(activity.id),
+                        showVerticalChip: showVerticalChip,
+                        busyTodoIds: viewModel.mutatingIds,
+                        onAdvance: { a, status, rationale in
+                            Task { await viewModel.advance(a, to: status, rationale: rationale) }
+                        },
+                        onCompleteTodo: { todoId in
+                            Task { await viewModel.completeTodo(todoId) }
+                        },
+                        onResolveInChat: { a, label in
+                            withAnimation(.hearthFast) { segment = .coach }
+                            cosVM.send("Help me resolve this for \(a.name): \(label)")
+                        },
+                        onPassConfirm: { a in passTarget = a },
+                        onDeleteConfirm: { a in deleteTarget = a }
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -1329,6 +1619,19 @@ struct PlanView: View {
     }
 }
 
+// MARK: - Navigation Routes
+
+// `CandidateRoute` is NOT declared here — it lives with the other route types in
+// ContentStore.swift, which is where every navigationDestination value is
+// defined so the set stays greppable in one place.
+
+/// Routes a board card to its activity detail screen. Carries the full model
+/// for the same reason `CandidateRoute` does: a board entry is a server-composed
+/// projection (stage, next_step, overlaps) and isn't re-fetchable by id alone.
+struct BoardActivityRoute: Hashable {
+    let activity: BoardActivity
+}
+
 // MARK: - Candidate Row
 
 private struct CandidateRow: View {
@@ -1497,6 +1800,208 @@ struct CandidateDetailView: View {
         case let (start?, end?): return "\(start) – \(end)"
         case let (start?, nil): return start
         default: return nil
+        }
+    }
+}
+
+// MARK: - Board Activity Detail
+
+struct BoardActivityDetailView: View {
+    let activity: BoardActivity
+    let onCompleteTodo: (String) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: .hearth600) {
+                // Header
+                VStack(alignment: .leading, spacing: .hearth300) {
+                    if let type = activity.activityType {
+                        let label = BoardCardView.chipLabels[type] ?? type
+                        Text("\(label.uppercased()) FOR \(activity.kidName?.uppercased() ?? "KID")")
+                            .font(.hearthLabel)
+                            .tracking(0.66)
+                            .foregroundColor(.inkMuted)
+                    }
+                    Text(activity.name)
+                        .font(.hearthDisplayMD)
+                        .foregroundColor(.inkPrimary)
+                    if let provider = activity.provider {
+                        Text(provider)
+                            .font(.hearthBodyMD)
+                            .foregroundColor(.inkSecondary)
+                    }
+                }
+
+                // Chips row (kid, status, fit score)
+                HStack(spacing: .hearth300) {
+                    if let kid = activity.kidName {
+                        Text(kid)
+                            .font(.hearthBodySM)
+                            .foregroundColor(.inkSecondary)
+                            .padding(.horizontal, .hearth400)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(Color.accentTint))
+                    }
+                    Text(activity.status.capitalized)
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkSecondary)
+                        .padding(.horizontal, .hearth400)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Color.bgCanvas))
+                    if let fit = activity.fitScore {
+                        Text("\(Int((fit * 100).rounded()))% Match")
+                            .font(.hearthCaptionMono)
+                            .foregroundColor(.accentDefault)
+                            .padding(.horizontal, .hearth400)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(Color.accentTint))
+                    }
+                }
+
+                // Detail rows
+                detailRows
+
+                // Why it matched
+                if let reason = activity.fitReason {
+                    VStack(alignment: .leading, spacing: .hearth400) {
+                        Text("Why it matched")
+                            .font(.hearthBodyLG.weight(.semibold))
+                            .foregroundColor(.inkPrimary)
+                        Text(reason)
+                            .font(.hearthBodyMD)
+                            .foregroundColor(.inkSecondary)
+                    }
+                    .padding(.hearth500)
+                    .background(
+                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                            .fill(Color.bgElevated)
+                    )
+                }
+
+                // Still to do
+                if !activity.openTodos.isEmpty {
+                    VStack(alignment: .leading, spacing: .hearth400) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Still to do")
+                                .font(.hearthBodyLG.weight(.semibold))
+                                .foregroundColor(.inkPrimary)
+                            Spacer()
+                            if let fit = activity.fitScore {
+                                Text("\(Int((fit * 100).rounded()))%")
+                                    .font(.hearthCaptionMono)
+                                    .foregroundColor(.accentDefault)
+                            }
+                        }
+
+                        ForEach(activity.openTodos) { todo in
+                            todoRow(todo)
+                        }
+
+                        Button {
+                            if let first = activity.openTodos.first(where: { $0.done != true }) {
+                                onCompleteTodo(first.id)
+                            }
+                        } label: {
+                            Text("Mark next step done")
+                                .font(.hearthBodyMD.weight(.semibold))
+                                .foregroundColor(.inkOnPhotoLight)
+                                .padding(.horizontal, .hearth500)
+                                .padding(.vertical, .hearth400)
+                                .frame(maxWidth: .infinity)
+                                .background(Color.accentDefault)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(activity.openTodos.allSatisfy { $0.done == true })
+
+                        Text("Moves to All set once nothing is left.")
+                            .font(.hearthBodySM)
+                            .foregroundColor(.inkMuted)
+                    }
+                    .padding(.hearth500)
+                    .background(
+                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                            .fill(Color.bgElevated)
+                    )
+                }
+            }
+            .padding(.horizontal, .hearth700)
+            .padding(.vertical, .hearth700)
+        }
+        .background(Color.bgCanvas.ignoresSafeArea())
+        .navigationTitle("Activity")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var detailRows: some View {
+        VStack(alignment: .leading, spacing: .hearth400) {
+            if let kid = activity.kidName {
+                detailRow("FOR", kid)
+            }
+            if let when = activity.when {
+                VStack(alignment: .leading, spacing: .hearth300) {
+                    detailRow("DATES", when)
+                    if let overlaps = activity.overlaps, !overlaps.isEmpty {
+                        ForEach(overlaps) { overlap in
+                            HStack(spacing: .hearth300) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.statusWarning)
+                                Text("Overlaps \(overlap.name), \(overlap.range)")
+                                    .font(.hearthBodySM)
+                                    .foregroundColor(.statusWarning)
+                            }
+                        }
+                    }
+                }
+            }
+            if let price = activity.priceAmount {
+                detailRow("COST", "$\(Int(price))")
+            } else {
+                detailRow("COST", "TBD — I'll track it once you register")
+            }
+        }
+        .padding(.hearth600)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                .fill(Color.bgElevated)
+        )
+    }
+
+    @ViewBuilder
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: .hearth500) {
+            Text(label)
+                .font(.hearthLabel)
+                .tracking(0.66)
+                .foregroundColor(.inkMuted)
+                .frame(width: 80, alignment: .leading)
+            Text(value)
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkPrimary)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func todoRow(_ todo: PlanTodo) -> some View {
+        let isDone = todo.done == true
+        return HStack(spacing: .hearth300) {
+            Button {
+                onCompleteTodo(todo.id)
+            } label: {
+                Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15))
+                    .foregroundColor(isDone ? .inkMuted : .accentDefault)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .disabled(isDone)
+            Text(todo.title)
+                .font(.hearthBodySM)
+                .foregroundColor(isDone ? .inkMuted : .inkSecondary)
+                .strikethrough(isDone)
+            Spacer(minLength: 0)
         }
     }
 }

@@ -10,6 +10,10 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var configuration: ServerConfiguration
     let userID: String
+    /// Switches the app to the Plan tab. SavedView's "In Plan" rows hand off to
+    /// it. Defaults to a no-op so callers that don't own the tab selection
+    /// (e.g. a sheet presentation) keep compiling unchanged.
+    var onOpenPlan: () -> Void = {}
 
     @EnvironmentObject private var session: AppSession
     @AppStorage("parent_display_name") private var parentDisplayName = ""
@@ -56,6 +60,20 @@ struct SettingsView: View {
                     IntegrationsSettingsView(configuration: configuration, userID: userID)
                 } label: {
                     Label("Connections", systemImage: "link")
+                }
+            }
+
+            // beta-v1: Library left the tab bar (6 tabs → 5) and lives here. Pushed
+            // UNCHANGED — it owns its own NavigationStack, so this row's own
+            // nav bar stays title-less to keep the chrome to a single back
+            // chevron. Saved moved to the Home-header avatar sheet
+            // (`AccountSheetView`, Sprint-1 gap) and no longer lives here.
+            Section("Reading") {
+                NavigationLink {
+                    LibraryView()
+                        .navigationBarTitleDisplayMode(.inline)
+                } label: {
+                    Label("Library", systemImage: "books.vertical")
                 }
             }
 
@@ -112,7 +130,10 @@ struct SettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Color.bgCanvas.ignoresSafeArea())
-        .trackScreen("settings")
+        // No `.trackScreen("settings")` here: Settings is a TAB now, and
+        // MainTabView already emits `screen_viewed{screen:settings}` on tab
+        // change like it does for every other tab. Keeping both double-counted
+        // every Settings open.
         .sheet(isPresented: $showingReport) {
             if let url = configuration.baseURL { ReportProblemView(baseURL: url) }
         }

@@ -14,11 +14,28 @@ struct SignInView: View {
     /// it already has a profile (returning user → skip onboarding).
     var onSignedIn: (AuthService.SignInOutcome) -> Void
 
+    /// beta-v1: sign-in moved INSIDE the onboarding funnel (Greg's "Securing
+    /// your family's space"), where the parent's name is already known and the
+    /// generic "Welcome" reads wrong. Both default to nil so the standalone
+    /// gate — and the DEBUG harness — keep their original copy.
+    var titleOverride: String? = nil
+    var subtitleOverride: String? = nil
+
     @State private var errorMessage: String?
     @State private var busy = false
     /// Current raw nonce for an in-flight Apple request (we send its sha256 to
     /// Apple and the raw value to our backend to verify).
     @State private var currentNonce: String?
+
+    /// Blocking legal consent. beta-v1 deleted the funnel screen that used to
+    /// carry this checkbox, and the first pass replaced it with "by continuing
+    /// you agree…" fine print — which quietly downgraded an affirmative act to
+    /// implied consent as a side effect of a visual redesign. Product decision
+    /// (2026-08-07) is to keep consent EXPLICIT: this app holds children's
+    /// profile data, ships CMS-versioned legal docs, and has a re-acceptance
+    /// flow that only means something if the original acceptance was affirmative.
+    /// Both sign-in buttons stay disabled until this is ticked.
+    @State private var agreedToLegal = false
 
     private var baseURL: URL {
         URL(string: UserDefaults.standard.string(forKey: "chat.base_url") ?? ServerConfiguration.defaultURL)
@@ -43,19 +60,33 @@ struct SignInView: View {
     @AppStorage("parent_display_name") private var parentDisplayName = ""
 
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            Text(parentDisplayName.isEmpty ? "Welcome" : "Welcome back, \(parentDisplayName)")
-                .font(.largeTitle.bold())
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
-            Text("Sign in to keep your family's plan in sync across your devices.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+        VStack(spacing: .hearth600) {
+            Spacer(minLength: .hearth700)
 
-            Spacer()
+            Text(titleOverride ?? (parentDisplayName.isEmpty ? "Welcome" : "Welcome back, \(parentDisplayName)"))
+                .font(.hearthDisplayLG)
+                .foregroundColor(.inkPrimary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(.hearthLineDisplayLG)
+                .lineLimit(3)
+                .minimumScaleFactor(0.6)
+                .padding(.horizontal, .hearth700)
+
+            Text(subtitleOverride ?? "Sign in to keep your family's plan in sync across your devices.")
+                .font(.hearthBodyMD)
+                .foregroundColor(.inkSecondary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(.hearthLineBodyMD)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, .hearth700)
+
+            Spacer(minLength: .hearth500)
+
+            // Consent sits ABOVE the buttons it gates — a checkbox below two
+            // greyed-out buttons reads as an afterthought and hides the reason
+            // they're disabled.
+            legalConsentRow
+                .padding(.horizontal, .hearth700)
 
             SignInWithAppleButton(.signIn) { request in
                 let nonce = Self.randomNonce()
@@ -66,33 +97,77 @@ struct SignInView: View {
                 handleApple(result)
             }
             .signInWithAppleButtonStyle(.black)
-            .frame(height: 50)
-            .padding(.horizontal, 32)
-            .disabled(busy)
+            .frame(height: 52)
+            .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous))
+            .padding(.horizontal, .hearth700)
+            .disabled(busy || !agreedToLegal)
+            .opacity(agreedToLegal ? 1 : 0.4)
 
             Button(action: signInWithGoogle) {
-                HStack {
+                HStack(spacing: .hearth400) {
                     Image(systemName: "globe")
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundColor(.accentOnCanvas)
                     Text("Continue with Google")
+                        .font(.hearthTitleMD)
+                        .foregroundColor(.inkPrimary)
                 }
-                .frame(maxWidth: .infinity, minHeight: 50)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .background(Color.bgElevated)
+                .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous))
+                .hearthCardElevation()
             }
-            .padding(.horizontal, 32)
-            .disabled(busy)
+            .padding(.horizontal, .hearth700)
+            .disabled(busy || !agreedToLegal)
+            .opacity(agreedToLegal ? 1 : 0.4)
 
             if let errorMessage {
                 Text(errorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.statusError)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+                    .padding(.horizontal, .hearth700)
             }
-            Spacer()
+
+            Spacer(minLength: .hearth700)
         }
-        .overlay { if busy { ProgressView() } }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.bgCanvas)
+        .overlay { if busy { ProgressView().tint(.accentOnCanvas) } }
         .trackScreen("sign_in")
+    }
+
+    /// Blocking consent row — a real checkbox the parent must tick, not "by
+    /// continuing you agree". Ticking it is what enables both sign-in buttons;
+    /// the caller stashes `legal_accept_pending` on a successful sign-in, which
+    /// `AppSession.refreshLegal` flushes on the next launch task.
+    ///
+    /// The doc links resolve through the same chain as the seed — never a
+    /// hardcoded host.
+    private var legalConsentRow: some View {
+        let base = UserDefaults.standard.string(forKey: "chat.base_url") ?? ServerConfiguration.defaultURL
+        return HStack(alignment: .top, spacing: .hearth400) {
+            Button {
+                agreedToLegal.toggle()
+            } label: {
+                Image(systemName: agreedToLegal ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundColor(agreedToLegal ? .accentOnCanvas : .inkMuted)
+            }
+            .accessibilityLabel("I agree to the Privacy Policy and Terms of Service")
+            .accessibilityAddTraits(agreedToLegal ? [.isSelected] : [])
+
+            if let agreement = try? AttributedString(
+                markdown: "I agree to the [Privacy Policy](\(base)/dashboard/docs/privacy-policy) "
+                    + "and [Terms of Service](\(base)/dashboard/docs/terms)."
+            ) {
+                Text(agreement)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+                    .tint(.accentOnCanvas)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     // MARK: - Apple

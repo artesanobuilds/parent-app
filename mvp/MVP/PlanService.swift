@@ -212,6 +212,12 @@ struct BoardActivity: Codable, Identifiable, Hashable {
     let when: String?
     /// A watching registration window joined onto the card (Phase 4).
     let registrationWindow: RegistrationWindowInfo?
+    /// Sprint-2 fit score (0..1, render as whole percent). Nil = older row.
+    let fitScore: Double?
+    /// Sprint-2 one-sentence fit reason for "Why it matched" card.
+    let fitReason: String?
+    /// Sprint-2 overlaps — schedule conflicts with other activities.
+    let overlaps: [ActivityOverlap]?
 
     enum CodingKeys: String, CodingKey {
         case id, name, status, provider, watchable, watching, when
@@ -223,6 +229,23 @@ struct BoardActivity: Codable, Identifiable, Hashable {
         case nextStep = "next_step"
         case activityType = "activity_type"
         case registrationWindow = "registration_window"
+        case fitScore = "fit_score"
+        case fitReason = "fit_reason"
+        case overlaps
+    }
+}
+
+/// Sprint-2: one schedule overlap with another activity.
+struct ActivityOverlap: Codable, Hashable, Identifiable {
+    let activityId: String
+    let name: String
+    let range: String
+
+    var id: String { activityId }
+
+    enum CodingKeys: String, CodingKey {
+        case activityId = "activity_id"
+        case name, range
     }
 }
 
@@ -307,7 +330,7 @@ struct CalendarEntry: Codable, Identifiable, Hashable {
     }
 }
 
-/// An open to-do (GET /cos/todos).
+/// An open to-do (GET /cos/todos). Sprint-2 includes completed to-dos.
 struct PlanTodo: Codable, Identifiable, Hashable {
     let id: String
     let title: String
@@ -315,9 +338,11 @@ struct PlanTodo: Codable, Identifiable, Hashable {
     let dueDate: String?
     let kind: String?
     let kidName: String?
+    /// Sprint-2: true = completed (strike through).
+    let done: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, status, kind
+        case id, title, status, kind, done
         case dueDate = "due_date"
         case kidName = "kid_name"
     }

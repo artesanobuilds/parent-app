@@ -72,39 +72,57 @@ struct MVPApp: App {
                     // the prompt lands in context, not on a cold first launch.
                     PushRegistration.requestAndRegister()
                 }
-        } else if userName.isEmpty {
-            // New user: sign in FIRST (native Apple / Google), which resolves a
-            // durable server account id. Replaces the old anonymous
-            // /auth/issue-token path, where the user_id was just the typed parent
-            // name (guessable, unauthenticated). EXISTING onboarded users never
-            // reach here — they go straight to MainTabView on their legacy token
-            // and migrate whenever they choose to sign in (dual-accept keeps the
-            // legacy token valid meanwhile).
+        } else {
+            // beta-v1 INVERTS the old order. Sign-in used to be a launch gate:
+            // `userName.isEmpty → SignInView`, and nothing could be typed until
+            // an account existed. Greg's funnel asks everything first and
+            // authenticates at the end ("Securing your family's space"), so the
+            // whole pre-account funnel now lives inside OnboardingView.
             //
-            // The BACKEND decides new-vs-returning: `hasProfile` means this
-            // account already has data (e.g. same user on a new device / after
-            // reinstall) → skip onboarding straight to the app. A fresh account
-            // has no profile → onboarding.
-            SignInView { outcome in
-                userName = outcome.userId
-                if outcome.hasProfile {
+            // Only the ORDER changed. `onboarding_completed`, `user_name` and
+            // `parent_display_name` keep exactly their old meanings:
+            //   • user_name           — the server-resolved opaque account id
+            //   • parent_display_name — the greeting name
+            //   • onboarding_completed— the funnel reached "Take me home"
+            //
+            // The safety of asking-before-auth rests entirely on
+            // `OnboardingDraft`: every answer is written to UserDefaults as it
+            // is entered and discarded ONLY when /profile/seed confirms 200
+            // (see flushPendingSeed below). Without that, an abandoned Apple
+            // sheet would lose a family — the same class of bug as the
+            // localhost-fallback seed loss.
+            //
+            // The BACKEND still decides new-vs-returning: `hasProfile` means
+            // this account already has data (same parent, new device or after a
+            // reinstall) → onboarding ends immediately and the app opens.
+            OnboardingView(
+                signInRequired: userName.isEmpty
+                    || AuthService.shared.credential(for: userName) == nil,
+                onSignedIn: { outcome in
+                    userName = outcome.userId
+                    // Consent capture moved onto the sign-in screen's fine
+                    // print (beta-v1 deleted the screen that held the
+                    // agree-checkbox). AppSession.refreshLegal flushes this.
+                    UserDefaults.standard.set(true, forKey: LegalService.acceptPendingKey)
+                    if outcome.hasProfile {
+                        onboardingCompleted = true
+                    }
+                },
+                onSeed: { data in
+                    // Remember the parent's display name for the greeting
+                    // (userName is the opaque account id now).
+                    parentDisplayName = data.parentName
+                    // Stash the seed payload BEFORE attempting it, so even if
+                    // this first POST fails (or the app is killed mid-request)
+                    // the next launch retries it. Seeds under the signed-in
+                    // userName, NOT the display name. Then attempt it now.
+                    stashPendingSeed(data)
+                    return await flushPendingSeed()
+                },
+                onFinish: {
                     onboardingCompleted = true
                 }
-            }
-        } else {
-            // Signed in (userName is the server-resolved id) but not onboarded.
-            OnboardingView { data in
-                onboardingCompleted = true
-                // Remember the parent's display name for the greeting (userName
-                // is the opaque account id now).
-                parentDisplayName = data.parentName
-                // Stash the seed payload BEFORE attempting it, so even if this
-                // first POST fails (or the app is killed mid-request) the next
-                // launch retries it. Seeds under the signed-in userName, NOT the
-                // display name. Then attempt it now.
-                stashPendingSeed(data)
-                Task { await flushPendingSeed() }
-            }
+            )
         }
     }
 
@@ -144,7 +162,9 @@ struct MVPApp: App {
                     "age": $0.age,
                     "temperament": $0.temperament,
                     "pronouns": $0.pronouns,
-                    "grade_band": $0.gradeBand
+                    "grade_band": $0.gradeBand,
+                    // Phase-3 Figma delta: new key, additive — "boy" / "girl" / "".
+                    "gender": $0.gender
                 ]
             },
             "household": data.household,
@@ -159,7 +179,14 @@ struct MVPApp: App {
             "parent_age_range": data.parentAgeRange,
             "employment": data.employment,
             "cultural_background": data.culturalBackground,
-            "pronouns": data.pronouns
+            "pronouns": data.pronouns,
+            // Phase-3 Figma deltas — new keys, additive. The backend tolerates
+            // unknown keys, so these can ship ahead of backend support.
+            "secondary_language": data.secondaryLanguage,
+            "education_style": data.educationStyle,
+            "family_activities": data.familyActivities,
+            "coach_voice": data.coachVoice,
+            "coach_personality": data.coachPersonality
         ]
         if let adults = data.adultsInHousehold {
             body["adults_in_household"] = adults
@@ -185,17 +212,19 @@ struct MVPApp: App {
     /// POST any pending seed; clear it only on a confirmed 200. Retries a few
     /// times this session with backoff so a brief blip heals immediately; if it
     /// still hasn't confirmed, the payload stays pending and the next launch
-    /// retries. No-op when nothing is pending.
+    /// retries. Returns whether the server confirmed. No-op (true) when nothing
+    /// is pending — the caller reads that as "nothing left to do".
+    @discardableResult
     @MainActor
-    private func flushPendingSeed() async {
+    private func flushPendingSeed() async -> Bool {
         let defaults = UserDefaults.standard
         guard let payload = defaults.data(forKey: Self.pendingSeedBodyKey),
               let user = defaults.string(forKey: Self.pendingSeedUserKey), !user.isEmpty else {
-            return
+            return true
         }
         guard let baseURL = URL(string: resolvedBaseURLString()) else {
             print("[profile/seed] invalid base URL: \(resolvedBaseURLString())")
-            return
+            return false
         }
 
         for attempt in 0..<4 {
@@ -203,14 +232,21 @@ struct MVPApp: App {
             if status == 200 {
                 defaults.removeObject(forKey: Self.pendingSeedBodyKey)
                 defaults.removeObject(forKey: Self.pendingSeedUserKey)
-                print("[profile/seed] confirmed for \(user); pending cleared")
-                return
+                // THE one place the onboarding draft is discarded. The parent's
+                // answers are now on the server, so the local copy that carried
+                // them across the pre-account stretch of the funnel is finally
+                // redundant. Clearing it any earlier re-opens the data-loss
+                // hole beta-v1's sign-in relocation created.
+                OnboardingDraft.clear(from: defaults)
+                print("[profile/seed] confirmed for \(user); pending + draft cleared")
+                return true
             }
             print("[profile/seed] attempt \(attempt) status \(status) for \(user); will retry")
             // 1s, 2s, 3s backoff between in-session attempts.
             try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 1_000_000_000)
         }
         print("[profile/seed] still pending for \(user) after retries; will retry next launch")
+        return false
     }
 
     /// Inner helper. Ensures a token (issues one if missing), POSTs, and on
@@ -305,7 +341,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                     name: .dmPushReceived, object: nil,
                     userInfo: ["conversation_id": conversationId]
                 )
-                return AppSession.current?.activeDMConversationId == conversationId
+                return AppSession.current?.activeCircleConversationId == conversationId
             }
             if suppressBanner { return [] }
         }
