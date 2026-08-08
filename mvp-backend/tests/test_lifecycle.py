@@ -309,10 +309,15 @@ def test_grouping_sites_import_lifecycle():
 
 
 def test_chat_agent_knows_planned():
-    """The hub is chat-first — the agent must speak the same lifecycle."""
-    agent_src = (BACKEND_ROOT / "app/cos/agent.py").read_text()
+    """The hub is chat-first — the agent must speak the same lifecycle.
+
+    The planning half of the prompt moved to app/cos/prompt.py when the coach
+    and Chief-of-Staff merged into one agent (app/agent.py); app/cos/agent.py
+    is now a shim.
+    """
+    prompt_src = (BACKEND_ROOT / "app/cos/prompt.py").read_text()
     tools_src = (BACKEND_ROOT / "app/cos/tools.py").read_text()
-    assert '"planned"' in agent_src
+    assert '"planned"' in prompt_src
     assert "planned" in tools_src
 
 

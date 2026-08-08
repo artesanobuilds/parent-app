@@ -6,12 +6,17 @@ Unlike the kid endpoint (app/convai_endpoint.py) this has NO moderation, crisis
 lock, PIN, or end_call — the parent is a consenting adult. Its novel job is
 turning the agent's inline content links into a clean voice experience:
 
-  The parent agent weaves `[Title](mvp://library/{id})` / `mvp://community/{id})`
-  markdown links into its prose. TTS must NOT read a URL aloud, and the app
-  needs a structured trigger to render the card. So as we stream, we:
+  The parent agent weaves `[Title](mvp://library/{id})` markdown links into its
+  prose. TTS must NOT read a URL aloud, and the app needs a structured trigger
+  to render the card. So as we stream, we:
     - emit the human label as spoken text and DROP the `(mvp://…)`
-    - emit an OpenAI tool-call delta (`show_article` / `show_community_post`,
-      arguments `{"id": ...}`) that ElevenLabs forwards to the iOS client tool.
+    - emit an OpenAI tool-call delta (`show_article`, arguments `{"id": ...}`)
+      that ElevenLabs forwards to the iOS client tool.
+
+  `mvp://community/…` is a RETIRED shape (the board is gone; its tables were
+  dropped in migration v21). The regex still recognises it so a stale link can
+  never leak its URL into speech, but it fires NO client tool — `show_article`
+  is the only tool this endpoint emits.
 
 Auth: same shared secret as the kid endpoint (Authorization: Bearer or
 X-ElevenLabs-Secret).
@@ -31,6 +36,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 
 from app.agent import get_agent
+from app import agent as agent_module
 # Reuse the kid endpoint's OpenAI-SSE helpers + the shared secret.
 from app.convai_endpoint import (
     CONVAI_SECRET,
@@ -125,11 +131,15 @@ class _LinkStripper:
         return s
 
 
-def _show_content_tool_delta(kind: str, content_id: str, chat_id: str) -> str:
+def _show_content_tool_delta(content_id: str, chat_id: str) -> str:
     """OpenAI tool-call delta for a display-only client tool. finish_reason stays
     null (non-terminal) so the agent keeps talking — contrast the kid endpoint's
-    end_call which terminates the turn."""
-    name = "show_article" if kind == "library" else "show_community_post"
+    end_call which terminates the turn.
+
+    `show_article` is the ONLY tool name: the community board is retired, iOS
+    has no handler for a post card, and firing a tool the client doesn't
+    implement is how the ElevenLabs turn stalls."""
+    name = "show_article"
     delta = {
         "tool_calls": [{
             "index": 0,
@@ -236,10 +246,14 @@ async def _stream_response(user_id: str, thread_id: str, message: str,
     _voice_cost = CostLoggingCallbackHandler(
         feature="parent_voice", workflow=voice_wf, session=thread_id, user=user_id
     )
-    # NOTE: voice memory is its own thread (thread_id "default") — the text
-    # /chat path uses a per-install UUID thread, so the two do NOT share
-    # history today. Unifying them is a product decision, tracked in the plan.
-    config = {"configurable": {"thread_id": f"{user_id}:{thread_id}"}, "callbacks": [_voice_cost]}
+    # NOTE: voice memory is its own thread. The coach and Chief-of-Staff TEXT
+    # surfaces were merged onto one per-parent thread (`{user}:parent`), but a
+    # spoken turn and a typed turn still pace differently, so voice keeps its
+    # own namespace — unifying it too remains a product decision.
+    config = {
+        "configurable": {"thread_id": agent_module.thread_key(user_id, "voice", thread_id)},
+        "callbacks": [_voice_cost],
+    }
 
     # Self-heal before the turn: a prior cancelled turn (ElevenLabs barge-in /
     # timeout abort) can leave a dangling tool call that would 400 every
@@ -299,6 +313,11 @@ async def _stream_response(user_id: str, thread_id: str, message: str,
                     config=config,
                     version="v2",
                 ):
+                    # A summarization pass inside the harness streams like any
+                    # other model call. Unfiltered it would be SPOKEN to the
+                    # parent — see app/agent.is_internal_event.
+                    if agent_module.is_internal_event(event):
+                        continue
                     if event["event"] != "on_chat_model_stream":
                         # A tool ran before the first spoken token — that turn's
                         # latency belongs in its own bucket, not the plain-answer one.
@@ -319,9 +338,13 @@ async def _stream_response(user_id: str, thread_id: str, message: str,
                         _mark_yield()
                         yield _openai_delta(content=safe, chat_id=chat_id)
                     for kind, cid in tools:
+                        # A retired mvp://community/ link is stripped from speech
+                        # (above) but fires nothing — there is no card to show.
+                        if kind != "library":
+                            continue
                         yielded = True
                         _mark_yield(content=False)
-                        yield _show_content_tool_delta(kind, cid, chat_id)
+                        yield _show_content_tool_delta(cid, chat_id)
 
                 tail = stripper.flush()
                 if tail:

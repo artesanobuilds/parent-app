@@ -44,8 +44,13 @@ def _is_sensitive(param: str) -> bool:
 PUBLIC_ALLOWLIST: dict[tuple[str, str], str] = {
     # Seeded/editorial content — same catalog for every family, no PII.
     ("GET", "/content/articles/{article_id}"): "public editorial content",
-    ("GET", "/content/community/{post_id}"): "public community content",
-    ("GET", "/content/community/{post_id}/replies"): "public community content",
+    # The community board's public routes are RETIRED (beta-v1 Phase 1) —
+    # Circle conversations replaced them and are participant-scoped.
+    # A Circle invite is previewed BEFORE the invitee has an account, so this
+    # one is public by necessity. The token is a 24-byte secret and the payload
+    # is deliberately thin: inviter name, household label, kids' first names —
+    # no user ids, no emails, no roster.
+    ("GET", "/circle/invites/{token}"): "invite preview, pre-account by design",
 }
 
 

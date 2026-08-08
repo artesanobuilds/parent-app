@@ -24,6 +24,10 @@ AUTH_RATE_PER_HOUR = int(os.getenv("RATE_LIMIT_AUTH_PER_HOUR", "60"))
 RESEARCH_RATE_PER_HOUR = int(os.getenv("RATE_LIMIT_RESEARCH_PER_HOUR", "20"))
 # Parent-to-parent DMs: enough for a lively conversation, hostile to spam.
 MESSAGE_RATE_PER_MIN = int(os.getenv("RATE_LIMIT_MESSAGE_PER_MIN", "30"))
+# First-run agent warm-up: one per parent per onboarding, plus headroom for
+# retries/reinstalls. Each run costs an LLM call, so it gets its own bucket
+# rather than sharing (and starving) the discovery one.
+WARMUP_RATE_PER_HOUR = int(os.getenv("RATE_LIMIT_WARMUP_PER_HOUR", "10"))
 
 
 @dataclass
@@ -59,6 +63,9 @@ class _RateLimiter:
                 elif klass == "message":
                     cap = MESSAGE_RATE_PER_MIN
                     refill_per_sec = cap / 60.0
+                elif klass == "warmup":
+                    cap = WARMUP_RATE_PER_HOUR
+                    refill_per_sec = cap / 3600.0
                 else:
                     cap = 60
                     refill_per_sec = 1.0

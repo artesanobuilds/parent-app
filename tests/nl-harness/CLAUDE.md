@@ -121,6 +121,36 @@ no extra cleanup needed.
 - Test file: `test_snake_case.py` (matches the spec name with `-` → `_`)
 - Test function: `test_<verb>_<noun>` — what the test proves, not how
 
+## Adding a spec: three registrations, not one
+
+A spec that only exists as YAML asserts nothing, and a spec that exists but isn't
+routed effectively never runs. `flows/test_selector_map_integrity.py` fails on any
+of these, so it will tell you — but know them up front:
+
+1. **The spec** — `specs/tier-N/<name>.flow.yml`
+2. **The generated test** — `flows/generated/test_<name_with_underscores>.py`
+3. **A route in `lib/selector.py`** — at least one real file path that maps to the
+   spec name, so a targeted CI run selects it. Tier-2 specs matter most here:
+   tier-1 always runs, so an unrouted tier-1 spec still executes, while an
+   unrouted **tier-2** spec runs almost never.
+
+The selector rots silently in two directions and did for months: keys naming
+files that do not exist (`app/auth_service.py`, `app/profiling_service.py`,
+`app/cms.py` — none of these are real, so auth, profiling and CMS changes routed
+NOTHING), and values naming deleted specs. Neither shows up as a failure; CI just
+runs a smaller set and reports green. Verify a key exists before you add it.
+
+## Skip vs fail: a missing dependency is a SKIP
+
+A flow that needs something the machine may not have — OpenAI, the kid-agent
+stack, a local object store — must **skip**, not fail. A red suite on a normal
+dev machine trains people to ignore red.
+
+Guard at the boundary that actually touches the dependency, and remember an
+unreachable service does not always arrive as an HTTP status: the avatar flow
+presigns fine (pure signing) and then raises a bare `httpx.ConnectError` on the
+direct PUT to the bucket. Catch both shapes.
+
 ## Things to NOT do
 
 - Don't decode response JSON through pydantic models in the generated test.

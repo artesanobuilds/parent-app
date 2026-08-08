@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 
 from app.agent import get_agent
+from app import agent as agent_module
 from app.onboarding_agent import get_onboarding_agent
 from app.memory import MemoryRepository
 from app.profiling import profiling_service, ParentProfile, ChildProfile
@@ -100,6 +101,14 @@ async def lifespan(app: FastAPI):
         init_watchlist_worker(storage_backend).start()
     except Exception:
         logger.exception("[watchlist] worker failed to start")
+    # First-run agent warm-up (same durable-job idiom): sweep anything a restart
+    # left 'running' back to 'queued' — steps are idempotent — then start it.
+    try:
+        storage_backend.requeue_stale_warmup_runs()
+        from app.onboarding_warmup import init_worker as init_warmup_worker
+        init_warmup_worker(storage_backend).start()
+    except Exception:
+        logger.exception("[warmup] worker failed to start")
     yield
     try:
         from app.research.worker import research_worker
@@ -125,6 +134,12 @@ async def lifespan(app: FastAPI):
             watchlist_worker.stop()
     except Exception:
         logger.exception("[watchlist] worker failed to stop cleanly")
+    try:
+        from app.onboarding_warmup import warmup_worker
+        if warmup_worker is not None:
+            warmup_worker.stop()
+    except Exception:
+        logger.exception("[warmup] worker failed to stop cleanly")
     persist_state()
     try:
         from app.analytics import shutdown as analytics_shutdown
@@ -153,6 +168,22 @@ from app.email_sync.router import router as email_sync_router
 app.include_router(email_sync_router)
 from app.calendar_sync.router import router as calendar_sync_router
 app.include_router(calendar_sync_router)
+# First-run agent warm-up (the onboarding progress ring) + the coach nudge it
+# writes for Home's COACH card.
+from app.onboarding_warmup import (
+    router as warmup_router, coach_router as coach_nudge_router,
+)
+app.include_router(warmup_router)
+app.include_router(coach_nudge_router)
+# Household members / Circle (beta-v1 Phase 1) — the mutual-link roster that is
+# the authorization source for every Circle conversation.
+from app.household import router as household_router
+app.include_router(household_router)
+# Circle conversations + invites (beta-v1 Phase 1). These private group threads
+# REPLACE both the anonymous community board and 1:1 parent DMs; the
+# community_posts/post_replies/dm_* tables were dropped in migration v21.
+from app.circle import router as circle_router
+app.include_router(circle_router)
 
 # Metrics via OpenTelemetry → Grafana Cloud (gated on OTEL_EXPORTER_OTLP_ENDPOINT —
 # no-op if unset). Instrument after the app + routers exist; register the domain
@@ -315,25 +346,6 @@ class ArticleUpdateRequest(BaseModel):
     content: str | None = None
 
 
-class CommunityPostCreateRequest(BaseModel):
-    id: str
-    category: str
-    initials: str = ""
-    name: str = ""
-    title: str = ""
-    preview: str = ""
-    user_id: str | None = None
-
-
-class CommunityPostUpdateRequest(BaseModel):
-    category: str | None = None
-    initials: str | None = None
-    name: str | None = None
-    title: str | None = None
-    preview: str | None = None
-    user_id: str | None = None
-
-
 class CategoryCreateRequest(BaseModel):
     id: str
     name: str
@@ -350,20 +362,6 @@ class CategoryUpdateRequest(BaseModel):
     # strips keys with v is None before forwarding, so clearing the parent
     # requires a sentinel handled at the route layer (see /cms/categories PUT).
     parent_id: str | None = None
-
-
-class UserPostCreateRequest(BaseModel):
-    category: str
-    title: str
-    preview: str
-    user_id: str
-    author_name: str
-
-
-class ReplyCreateRequest(BaseModel):
-    user_id: str
-    author_name: str
-    body: str
 
 
 def load_persisted_state():
@@ -422,8 +420,10 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f"[chat] start user_id={user_id} thread_id={thread_id} message={message[:200]}")
     agent = get_agent(user_id)
-    # Memory is scoped per user + thread to isolate conversations by user
-    memory_key = f"{user_id}:{thread_id}"
+    # ONE merged thread per parent across the coach and Chief-of-Staff text
+    # surfaces (app.agent.thread_key) — the client's thread_id still scopes the
+    # stored transcript below, just not the agent's memory.
+    memory_key = agent_module.thread_key(user_id, "chat", thread_id)
     # Cost: one coach turn = one workflow; session groups the whole thread.
     cost_cb = CostLoggingCallbackHandler(
         feature="coach", workflow=new_workflow_id(), session=thread_id, user=user_id
@@ -451,6 +451,12 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
             ):
                 # We are interested in chat model stream events to stream tokens back to client
                 kind = event["event"]
+
+                # The harness's own model calls (context summarization) surface
+                # as ordinary model-stream events. Showing them would print the
+                # summary into the parent's chat — see app/agent.py.
+                if agent_module.is_internal_event(event):
+                    continue
 
                 if kind == "on_chat_model_stream":
                     content = event["data"]["chunk"].content
@@ -1018,93 +1024,16 @@ def get_article(article_id: str):
     return article
 
 
-@app.post("/content/community/new")
-def create_user_community_post(req: UserPostCreateRequest, user_id: str = Depends(current_user)):
-    """Create a community post from the mobile app. Authenticated: an
-    unauthenticated write with a caller-chosen user_id/author_name is an
-    impersonation + spam vector (found by tests/test_bola_sweep.py's class
-    of audit; iOS has always sent the bearer token here)."""
-    authorize_user_match(authenticated=user_id, claimed=req.user_id)
-    import uuid
-    words = req.author_name.strip().split()
-    initials = "".join(w[0].upper() for w in words[:2]) if words else "?"
-    post_id = f"cp-{uuid.uuid4().hex[:12]}"
-    data = {
-        "id": post_id,
-        "category": req.category,
-        "title": req.title,
-        "preview": req.preview,
-        "user_id": req.user_id,
-        "name": req.author_name,
-        "initials": initials,
-    }
-    return content_service.create_community_post(data)
-
-
-def _strip_author_ids(items: List[Dict[str, Any]], viewer: Optional[str]) -> List[Dict[str, Any]]:
-    """Author user_ids double as DM peer handles — signed-in parents get them
-    (the Message button needs a target); anonymous readers don't (a user_id is
-    the auth principal and has no business in a public scrape)."""
-    if viewer is not None:
-        return items
-    return [{k: v for k, v in item.items() if k != "user_id"} for item in items]
-
-
-@app.get("/content/community/{post_id}")
-def get_community_post_detail(post_id: str, viewer: Optional[str] = Depends(optional_user)):
-    """Get a single community post with its replies."""
-    post = content_service.get_community_post(post_id)
-    if post is None:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=404, content={"error": "Post not found"})
-    replies = content_service.get_replies_for_post(post_id)
-    post["replies"] = _strip_author_ids(replies, viewer)
-    post["reply_count"] = len(replies)
-    return _strip_author_ids([post], viewer)[0]
-
-
-@app.get("/content/community/{post_id}/replies")
-def get_post_replies(post_id: str, limit: int = 100,
-                     viewer: Optional[str] = Depends(optional_user)):
-    """Get replies for a community post."""
-    return _strip_author_ids(content_service.get_replies_for_post(post_id, limit=limit), viewer)
-
-
-@app.post("/content/community/{post_id}/replies")
-def create_post_reply(post_id: str, req: ReplyCreateRequest, user_id: str = Depends(current_user)):
-    """Create a reply on a community post. Authenticated — see
-    create_user_community_post."""
-    authorize_user_match(authenticated=user_id, claimed=req.user_id)
-    post = content_service.get_community_post(post_id)
-    if post is None:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=404, content={"error": "Post not found"})
-    import uuid
-    words = req.author_name.strip().split()
-    initials = "".join(w[0].upper() for w in words[:2]) if words else "?"
-    data = {
-        "id": str(uuid.uuid4()),
-        "post_id": post_id,
-        "user_id": req.user_id,
-        "author_name": req.author_name,
-        "initials": initials,
-        "body": req.body,
-    }
-    return content_service.create_reply(data)
-
-
-@app.get("/content/community")
-def list_community_posts(category: str | None = None, limit: int = 50,
-                         viewer: Optional[str] = Depends(optional_user)):
-    """Return community posts, optionally filtered by category."""
-    return _strip_author_ids(
-        content_service.get_community_posts(category=category, limit=limit), viewer
-    )
+# The public community board is RETIRED (beta-v1 Phase 1). Circle conversations
+# (app/circle.py) replace it: your actual people, not any-beta-parent-to-any.
+# Its routes went first; the `community_posts` / `post_replies` tables followed
+# in migration v21 (recoverable from data/*.parquet). The coach no longer cites
+# `mvp://community/` links (see app/content.py + tests/test_coach_citation_contract.py).
 
 
 @app.get("/content/search")
 def search_content(q: str, limit: int = 10):
-    """Search articles and community posts by keyword."""
+    """Search library articles by keyword."""
     return content_service.search_content(q, limit=limit)
 
 
@@ -1112,6 +1041,35 @@ def search_content(q: str, limit: int = 10):
 def relevant_content(topic: str, limit: int = 5):
     """Return content relevant to a topic (for contextual recommendations)."""
     return content_service.get_relevant_content(topic, limit=limit)
+
+
+# The ranking word bag moved to app/content.py: the merged parent agent ranks
+# the article shortlist it recommends from with the SAME function this feed
+# uses, and app/agent.py can't import app.server (cycle). Re-exported here
+# under its original name so this module's readers still find it.
+_for_you_word_bag = content_service.for_you_word_bag
+
+
+@app.get("/content/for-you")
+def for_you_content(
+    limit: int = Query(content_service.FOR_YOU_DEFAULT_LIMIT, ge=1,
+                       le=content_service.FOR_YOU_MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    user_id: str = Depends(current_user),
+):
+    """The Home `FOR YOU → See all` feed: the WHOLE library, stack-ranked for
+    this family — not the categorical browse.
+
+    Ranking word bag = the parent's stressors/goals/household_structure plus
+    each kid's challenges/interests/age band. `ranked` is False when the
+    profile yields no usable words or nothing matched; the feed then falls
+    back to the plain library, because a blank Home on first open is worse
+    than an unpersonalised one.
+    """
+    words = _for_you_word_bag(profiling_service.get_family_profile(user_id) or {})
+    feed = content_service.get_for_you_articles(words, limit=limit, offset=offset)
+    feed["signals"] = words
+    return feed
 
 
 @app.get("/profile")
@@ -1210,7 +1168,12 @@ def attach_kid_avatar(kid_name: str, req: AvatarAttachRequest,
 # only copy (coach chat has no durable server row). Activity saves are a
 # read-time projection of the Plan shortlist — never materialized.
 
-SAVED_ITEM_TYPES = ("article", "community_post", "coach_reply")
+# "community_post" is NOT here any more — the board is retired and its tables
+# were dropped (migration v21), so a new save could not be resolved. Existing
+# saved_items rows of that type are deliberately LEFT IN PLACE: they are real
+# users' saves, iOS already skips them on render, and DELETE /saved still
+# accepts any item_type so an old row can be cleared by hand.
+SAVED_ITEM_TYPES = ("article", "coach_reply")
 
 
 class SaveItemRequest(BaseModel):
@@ -1235,14 +1198,6 @@ def save_item(req: SaveItemRequest, user_id: str = Depends(current_user)):
         snippet = article.get("subtitle") or article.get("summary") or ""
         tags = list(article.get("tags") or []) + [article.get("category") or ""]
         source = {"category": article.get("category")}
-    elif req.item_type == "community_post":
-        post = content_service.get_community_post(req.item_ref)
-        if post is None:
-            raise HTTPException(status_code=404, detail="Unknown post")
-        title = post.get("title") or ""
-        snippet = post.get("preview") or ""
-        tags = [post.get("category") or ""]
-        source = {"category": post.get("category")}
     else:  # coach_reply — client-held snapshot (LangGraph memory is ephemeral)
         body = (req.body or "").strip()
         if not body:
@@ -1292,41 +1247,16 @@ def saved_refs(item_type: str, user_id: str = Depends(current_user)):
     return {"refs": storage_backend.saved_refs(user_id, item_type)}
 
 
-# ── Direct messages (parent-to-parent) ───────────────────────────────
+# ── Account display names ────────────────────────────────────────────
 #
-# Simple v1: member directory + one canonical conversation per pair, REST +
-# client polling (no SSE), report/block as the safety model (adults, closed
-# beta — no auto-moderation), pushes via the existing APNs module. Schema is
-# Postgres-portable on purpose; messages ride the eventual store migration.
-
-DM_MAX_BODY_CHARS = 2000
-
-
-class DMStartRequest(BaseModel):
-    peer_user_id: str
+# Parent-to-parent DMs are RETIRED (beta-v1 sprint 2). Circle conversations
+# (app/circle.py) replace them, and the dm_conversations / dm_messages /
+# dm_reactions tables were dropped in migration v21. What survives here is the
+# one piece the DM stack owned that Circle still needs: resolving an account id
+# to a human name.
 
 
-class DMSendRequest(BaseModel):
-    body: str
-
-
-class DMReportRequest(BaseModel):
-    message_id: Optional[str] = None
-    note: Optional[str] = None
-
-
-# The classic six tapbacks. Kept server-side so a hacked client can't attach
-# arbitrary strings that other phones then render.
-DM_REACTION_EMOJI = ("❤️", "\U0001F44D", "\U0001F44E", "\U0001F602",
-                     "‼️", "❓")
-
-
-class DMReactionRequest(BaseModel):
-    message_id: str
-    emoji: Optional[str] = None  # None = remove my reaction
-
-
-def _dm_display_name(user_id: str) -> Optional[str]:
+def _display_name_for_user(user_id: str) -> Optional[str]:
     """COALESCE(user_accounts.display_name, profile parent name). Reads the
     profiling snapshot (never get_family_profile — that CREATES an empty
     family for unknown ids)."""
@@ -1337,169 +1267,6 @@ def _dm_display_name(user_id: str) -> Optional[str]:
     parent = (snapshot.get(user_id) or {}).get("parent") or {}
     pname = (parent.get("name") or "").strip()
     return pname or None
-
-
-def _dm_initials(name: str) -> str:
-    words = name.strip().split()
-    return "".join(w[0].upper() for w in words[:2]) if words else "?"
-
-
-def _dm_conversation_or_404(conversation_id: str, user_id: str) -> Dict[str, Any]:
-    """Participant guard. 404 (not 403) for non-participants — don't confirm
-    the conversation exists (the authorize_user_match resource convention)."""
-    conv = storage_backend.get_dm_conversation(conversation_id)
-    if conv is None or user_id not in (conv["participant_a"], conv["participant_b"]):
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    return conv
-
-
-def _dm_peer_entry(conv: Dict[str, Any], user_id: str) -> Dict[str, Any]:
-    peer_id = conv["participant_b"] if conv["participant_a"] == user_id else conv["participant_a"]
-    peer_name = _dm_display_name(peer_id) or "A parent"
-    return {"peer_id": peer_id, "peer_name": peer_name, "peer_initials": _dm_initials(peer_name)}
-
-
-@app.get("/dm/members")
-def dm_members(user_id: str = Depends(current_user)):
-    """The directory: every member with a resolvable display name, self
-    excluded. Rows with no resolvable name are skipped (test junk)."""
-    accounts = storage_backend.list_account_names()
-    snapshot = profiling_service.export_snapshot()
-    member_ids = set(accounts) | set(snapshot)
-    members = []
-    for mid in member_ids:
-        if mid == user_id:
-            continue
-        name = _dm_display_name(mid)
-        if not name:
-            continue
-        members.append({"user_id": mid, "display_name": name, "initials": _dm_initials(name)})
-    members.sort(key=lambda m: m["display_name"].lower())
-    return {"members": members}
-
-
-@app.post("/dm/conversations")
-def dm_start_conversation(req: DMStartRequest, user_id: str = Depends(current_user)):
-    """Get-or-create the canonical-pair conversation with a peer."""
-    if req.peer_user_id == user_id:
-        raise HTTPException(status_code=400, detail="You can't message yourself")
-    if _dm_display_name(req.peer_user_id) is None:
-        raise HTTPException(status_code=404, detail="Unknown member")
-    conv = storage_backend.get_or_create_dm_conversation(user_id, req.peer_user_id)
-    return {**conv, **_dm_peer_entry(conv, user_id)}
-
-
-@app.get("/dm/conversations")
-def dm_inbox(user_id: str = Depends(current_user)):
-    """The inbox, newest activity first, with peer info + unread counts."""
-    convs = storage_backend.list_dm_conversations(user_id)
-    return {
-        "conversations": [{**c, **_dm_peer_entry(c, user_id)} for c in convs],
-        "total_unread": sum(c["unread_count"] for c in convs),
-    }
-
-
-@app.get("/dm/conversations/{conversation_id}/messages")
-def dm_messages(conversation_id: str, before: Optional[str] = None, limit: int = 50,
-                user_id: str = Depends(current_user)):
-    _dm_conversation_or_404(conversation_id, user_id)
-    msgs = storage_backend.list_dm_messages(
-        conversation_id, before=before, limit=min(max(limit, 1), 100)
-    )
-    return {"messages": msgs}
-
-
-@app.post("/dm/conversations/{conversation_id}/messages")
-def dm_send(conversation_id: str, req: DMSendRequest, user_id: str = Depends(current_user)):
-    rate_limit_enforce(user_id, "message")
-    conv = _dm_conversation_or_404(conversation_id, user_id)
-    if conv["a_blocked"] or conv["b_blocked"]:
-        raise HTTPException(status_code=403, detail="This conversation is blocked")
-    body = req.body.strip()
-    if not body:
-        raise HTTPException(status_code=400, detail="Empty message")
-    if len(body) > DM_MAX_BODY_CHARS:
-        raise HTTPException(status_code=400, detail=f"Message too long ({DM_MAX_BODY_CHARS} max)")
-    msg = storage_backend.add_dm_message(conversation_id, user_id, body)
-    # Sender's own read stamp moves too — your outbound message isn't unread.
-    storage_backend.mark_dm_read(conversation_id, user_id)
-    # Push to the peer, fire-and-forget (the send must not block on APNs).
-    peer = _dm_peer_entry(conv, user_id)["peer_id"]
-    sender_name = _dm_display_name(user_id) or "A parent"
-    import threading
-
-    def _notify() -> None:
-        try:
-            from app import push
-            push.send_push(
-                storage=storage_backend, user_id=peer,
-                title=sender_name, body=body[:120],
-                data={"type": "dm", "conversation_id": conversation_id},
-                interruption_level="active",
-            )
-        except Exception:
-            logger.warning("[dm] push dispatch failed (non-fatal)", exc_info=True)
-
-    threading.Thread(target=_notify, daemon=True).start()
-    return msg
-
-
-@app.post("/dm/conversations/{conversation_id}/reactions")
-def dm_react(conversation_id: str, req: DMReactionRequest,
-             user_id: str = Depends(current_user)):
-    """Tapback: set/replace/remove my one reaction on a message. Same emoji
-    twice (or emoji=null) removes it."""
-    _dm_conversation_or_404(conversation_id, user_id)
-    msg = storage_backend.get_dm_message(req.message_id)
-    if msg is None or msg["conversation_id"] != conversation_id:
-        raise HTTPException(status_code=404, detail="Message not found")
-    if req.emoji is not None and req.emoji not in DM_REACTION_EMOJI:
-        raise HTTPException(status_code=400, detail="Unsupported reaction")
-    reactions = storage_backend.set_dm_reaction(req.message_id, user_id, req.emoji)
-    return {"message_id": req.message_id, "reactions": reactions}
-
-
-@app.post("/dm/conversations/{conversation_id}/read")
-def dm_mark_read(conversation_id: str, user_id: str = Depends(current_user)):
-    _dm_conversation_or_404(conversation_id, user_id)
-    storage_backend.mark_dm_read(conversation_id, user_id)
-    return {"ok": True}
-
-
-@app.post("/dm/conversations/{conversation_id}/block")
-def dm_block(conversation_id: str, user_id: str = Depends(current_user)):
-    _dm_conversation_or_404(conversation_id, user_id)
-    storage_backend.set_dm_block(conversation_id, user_id, True)
-    return {"ok": True, "blocked": True}
-
-
-@app.post("/dm/conversations/{conversation_id}/unblock")
-def dm_unblock(conversation_id: str, user_id: str = Depends(current_user)):
-    _dm_conversation_or_404(conversation_id, user_id)
-    storage_backend.set_dm_block(conversation_id, user_id, False)
-    return {"ok": True, "blocked": False}
-
-
-@app.post("/dm/conversations/{conversation_id}/report")
-def dm_report(conversation_id: str, req: DMReportRequest,
-              user_id: str = Depends(current_user)):
-    """Report a conversation to the founder — the /debug/report email pattern,
-    with the last ~10 messages as context. The v1 safety model is report +
-    block; no auto-moderation of parent DMs."""
-    _dm_conversation_or_404(conversation_id, user_id)
-    recent = storage_backend.list_dm_messages(conversation_id, limit=10)
-    lines = [
-        f"DM REPORT from {user_id} on conversation {conversation_id}",
-        f"Reported message: {req.message_id or '(whole conversation)'}",
-        f"Note: {req.note or '(none)'}",
-        "",
-        "Recent messages (newest first):",
-    ]
-    for m in recent:
-        lines.append(f"  [{m['created_at']}] {m['sender_id']}: {m['body'][:200]}")
-    from app import email_smtp
-    email_smtp.send_email("MVP DM report", "\n".join(lines))
-    return {"ok": True}
 
 
 @app.post("/profile/seed")
@@ -2290,9 +2057,9 @@ async def _parent_voice_greeting(user_id: str) -> str:
         pass
     if not returning:
         try:
-            from app.agent import get_agent
+            from app.agent import get_agent, thread_key
             state = await get_agent(user_id).aget_state(
-                {"configurable": {"thread_id": f"{user_id}:default"}}
+                {"configurable": {"thread_id": thread_key(user_id, "voice", "default")}}
             )
             returning = bool((getattr(state, "values", None) or {}).get("messages"))
         except Exception:
@@ -2339,8 +2106,8 @@ async def voice_parent_convai_token(user_id: str = Depends(current_user)):
         "\n\nVOICE MODE: You are being spoken aloud to the parent. Reply in short, "
         "natural spoken sentences — no markdown, no headers, no bullet lists, no "
         "asterisks or bold. Keep weaving content recommendations as "
-        "[Title](mvp://library/{id}) or [Title](mvp://community/{id}) exactly as "
-        "instructed: the link text is spoken naturally and the app shows the card."
+        "[Title](mvp://library/{id}) exactly as instructed: the link text is "
+        "spoken naturally and the app shows the card."
         " If you need to search or look something up, SAY one short sentence out "
         "loud first — \"Let me look that up.\" — and then call the tool. Never go "
         "silent while a tool runs: the parent hears dead air."
@@ -2558,38 +2325,6 @@ def cms_delete_article(article_id: str, _: None = Depends(require_admin_token)):
     if not content_service.delete_article(article_id):
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"error": "Article not found"})
-    return {"deleted": True}
-
-
-@app.get("/cms/community-posts/{post_id}")
-def cms_get_community_post(post_id: str, _: None = Depends(require_admin_token)):
-    post = content_service.get_community_post(post_id)
-    if post is None:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=404, content={"error": "Post not found"})
-    return post
-
-
-@app.post("/cms/community-posts")
-def cms_create_community_post(req: CommunityPostCreateRequest, _: None = Depends(require_admin_token)):
-    return content_service.create_community_post(req.model_dump())
-
-
-@app.put("/cms/community-posts/{post_id}")
-def cms_update_community_post(post_id: str, req: CommunityPostUpdateRequest, _: None = Depends(require_admin_token)):
-    data = {k: v for k, v in req.model_dump().items() if v is not None}
-    result = content_service.update_community_post(post_id, data)
-    if result is None:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=404, content={"error": "Post not found"})
-    return result
-
-
-@app.delete("/cms/community-posts/{post_id}")
-def cms_delete_community_post(post_id: str, _: None = Depends(require_admin_token)):
-    if not content_service.delete_community_post(post_id):
-        from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=404, content={"error": "Post not found"})
     return {"deleted": True}
 
 

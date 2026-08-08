@@ -1,0 +1,92 @@
+spec:
+  name: circle-conversation-lifecycle
+  tier: 1
+  modules: [circle, household, auth, profile]
+  intent: >
+    A parent builds a private Circle — the people who actually help with their
+    kids — invites one of them by link, and holds a group conversation with
+    them. This REPLACES dm-conversation-lifecycle: the public board and 1:1 DMs
+    were retired in the beta-v1 sprint-2 redesign (backend migration v21 dropped
+    community_posts, post_replies and all three dm_* tables).
+
+    The isolation properties matter MORE here than they did for DMs, not less.
+    A DM had exactly two participants fixed at creation; a Circle conversation
+    has a mutable participant list controlled by its owner, and membership is
+    what grants read access to everything in the thread. The load-bearing rule
+    is that a Circle link must be MUTUAL: adding a stranger's user_id to your
+    own roster must grant you nothing, or anyone could type an id they guessed
+    and read that family's replies. Claiming an invite is the ONLY thing that
+    establishes the link, and it binds both directions at once.
+
+  personas:
+    alice:
+      preset: new-parent      # the Circle owner
+    rosa:
+      preset: new-parent      # the nanny Alice invites
+    mallory:
+      preset: new-parent      # an outsider who must see nothing
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "Migration v21 has run: the /dm/* and /content/community* routes are gone"
+
+  invariants:
+    - "A brand-new parent has an empty Circle and no conversations"
+    - "GET /household/roles enumerates the roles a member can hold"
+    - "A member added by hand (no account) appears in the roster but grants no
+       access to anything — they are an address-book entry until they claim"
+    - "POST /circle/invites returns a token + a URL built from
+       CIRCLE_INVITE_BASE_URL (never a hardcoded domain)"
+    - "GET /circle/invites/{token} is PUBLIC (an invitee has no account yet) and
+       previews the inviter WITHOUT leaking their user_id or their kids' data
+       beyond the household/kids labels the invite is meant to show"
+    - "Claiming binds household_members.member_user_id on BOTH sides — the link
+       is mutual after one claim, with no second manual add"
+    - "A one-sided link grants NOTHING: adding a user_id whose household has not
+       reciprocated must not let you add them to a conversation"
+    - "Only the owner may rename, delete, or add participants to a conversation"
+    - "The two refusal codes differ ON PURPOSE, and both are asserted: an
+       OUTSIDER gets 404 on every conversation path (existence must not be
+       confirmed), while a PARTICIPANT who is not the owner gets 403 on
+       owner-only routes (they can already see the thread, so 404 would only be
+       confusing)"
+    - "reply_count and last_reply_at move with posts; unread moves with reads
+       and the poster's own message is never unread to them"
+    - "A participant added later sees the conversation from its beginning —
+       history is not truncated at join time"
+    - "Removing a member from the Circle revokes their access to every shared
+       conversation"
+    - "DELETE /family on the owner removes the conversation for every
+       participant, and clears the reciprocal member_user_id pointers"
+    - "An expired or already-claimed token is refused, and re-claiming by a
+       different account does not transfer the seat"
+
+  boundary_contracts:
+    - endpoint: GET /circle/conversations
+      as: anonymous
+      status: 401
+
+    - endpoint: POST /circle/conversations
+      as: new-parent
+      body: {title: "", body: "", member_ids: []}
+      status: 400
+      note: "a conversation with no title is rejected, not silently created"
+
+    - endpoint: GET /circle/conversations/does-not-exist
+      as: new-parent
+      status: 404
+
+    - endpoint: GET /circle/invites/not-a-real-token
+      as: anonymous
+      status: 404
+      note: "public route, but an unknown token must not 500"
+
+    - endpoint: GET /dm/conversations
+      as: new-parent
+      status: 404
+      note: "retired in v21 — this asserts the surface is GONE, not merely unused"
+
+    - endpoint: GET /content/community
+      as: anonymous
+      status: 404
+      note: "the public board is retired; its rows were dropped with v21"

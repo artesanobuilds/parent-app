@@ -13,8 +13,11 @@ data/*.duckdb.wal
 
 # Runtime / user-state parquets: NEVER ship local dev DB state to prod.
 # These tables are created by DDL on bootstrap (duckdb_storage.py) and prod
-# keeps its own volume copies. Only the 4 content parquets (categories,
-# articles, community_posts, post_replies) are meant to seed prod.
+# keeps its own volume copies. Only the 2 content parquets (categories,
+# articles) are meant to seed prod. data/community_posts.parquet,
+# data/post_replies.parquet and data/dm_*.parquet are kept on disk as the
+# recovery snapshot for the tables migration v21 dropped — they are no longer
+# in BOOTSTRAP_TABLES, so nothing reads them.
 data/mvp.parquet
 data/auth_tokens.parquet
 data/push_device_tokens.parquet
@@ -52,7 +55,15 @@ data/window_notifications.parquet
 data/eval_reports/
 data/legal_documents.parquet
 data/legal_acceptances.parquet
-data/dm_conversations.parquet
-data/dm_messages.parquet
-data/dm_reactions.parquet
 data/saved_items.parquet
+# First-run agent warm-up (job rows + generated coach nudges) — user state.
+data/onboarding_warmup_runs.parquet
+data/coach_nudges.parquet
+# Household members / Circle — user state AND the DM authorization source.
+data/household_members.parquet
+# Circle conversations (beta-v1 Phase 1) — user state; invite_tokens are
+# authorization secrets and must never ship in the image.
+data/circle_conversations.parquet
+data/circle_participants.parquet
+data/circle_messages.parquet
+data/invite_tokens.parquet

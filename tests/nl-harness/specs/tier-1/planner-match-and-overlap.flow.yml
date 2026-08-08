@@ -1,0 +1,64 @@
+spec:
+  name: planner-match-and-overlap
+  tier: 1
+  modules: [cos, planning, lifecycle, auth]
+  intent: >
+    The sprint-2 planner tells a parent WHY an activity is on their board and
+    WHAT still collides with it. Three things the board payload must carry, all
+    added in migration v22: a match score that survives being tracked, a
+    plain-language reason for the match, and a warning when two planned things
+    for the same kid overlap in time.
+
+    This exists because the payload silently drifted once already. The backend
+    and iOS were built in parallel and disagreed on the key names — backend sent
+    `all_todos` and left overlaps in a flat `conflicts` list while
+    `PlanService.swift` decoded `todos` and a per-activity `overlaps` array.
+    Nothing errored: iOS Codable yields nil on a missing key, so the "Still to
+    do" checklist and the overlap warning rendered EMPTY and looked like a
+    design decision rather than a bug. These invariants pin the wire shape the
+    client actually decodes.
+
+  personas:
+    parent:
+      preset: new-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "Migration v22 has run (tracked_activities.fit_score + .fit_reason exist)"
+
+  invariants:
+    - "fit_score survives tracking — it is stored on the tracked activity, not
+       dropped when a candidate is promoted (it lives only on
+       activity_candidates before v22)"
+    - "fit_reason is a separate field from decision_rationale: fit_reason is the
+       SYSTEM explaining the match, decision_rationale is the PARENT's own
+       decision log. Neither may overwrite the other"
+    - "A board card exposes `fit_score` and `fit_reason` under those exact keys"
+    - "A board card's `todos` includes COMPLETED to-dos, each with a boolean
+       `done` — the checklist renders finished items struck through"
+    - "`open_todos` stays open-only: next_step and the follow-ups list depend on
+       that narrower meaning, so the two lists are NOT interchangeable"
+    - "Two activities for the same kid with overlapping date ranges each carry an
+       `overlaps` entry naming the OTHER activity, with a server-rendered `range`
+       string (clients never format dates — the format_when rule)"
+    - "The overlap is reciprocal: both cards warn, not just the later one"
+    - "A partial overlap is detected — a trip inside a longer camp counts, not
+       just an exact week match (the old competes_with signal was same-kid
+       same-week_start string equality and missed this)"
+    - "A declined activity conflicts with nothing"
+    - "An activity with no score renders no badge: fit_score absent/null must
+       never surface as 0%"
+
+  boundary_contracts:
+    - endpoint: GET /cos/plan/board
+      as: anonymous
+      status: 401
+
+    - endpoint: GET /cos/plan/board
+      as: new-parent
+      status: 200
+      note: "a parent with no plan gets empty stages, not a 404"
+
+    - endpoint: GET /cos/activities
+      as: anonymous
+      status: 401

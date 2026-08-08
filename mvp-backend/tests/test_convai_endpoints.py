@@ -751,7 +751,9 @@ def test_kid_blocked_turn_interrupted_persists_nothing_extra(
 
 @pytest.mark.parametrize("kind,tool", [
     ("library", "show_article"),
-    ("community", "show_community_post"),
+    # The community board is retired: a stale mvp://community/ link must still
+    # be stripped from speech, but it fires NO client tool (there is no card).
+    ("community", None),
 ])
 def test_parent_link_split_across_chunks_speaks_label_only(
     client, secret, monkeypatch, hermetic, kind, tool
@@ -783,12 +785,16 @@ def test_parent_link_split_across_chunks_speaks_label_only(
     assert spoken == "Here's a great read: Bedtime Routines — try it tonight."
 
     tools = _tool_deltas(payloads)
-    assert len(tools) == 1
-    call = tools[0]["choices"][0]["delta"]["tool_calls"][0]
-    assert call["function"]["name"] == tool
-    assert json.loads(call["function"]["arguments"]) == {"id": "abc-123"}
-    # Display-only: finish_reason MUST stay null or the coach stops mid-sentence.
-    assert tools[0]["choices"][0]["finish_reason"] is None
+    if tool is None:
+        assert tools == [], "a retired mvp://community/ link must fire no tool"
+    else:
+        assert len(tools) == 1
+        call = tools[0]["choices"][0]["delta"]["tool_calls"][0]
+        assert call["function"]["name"] == tool
+        assert json.loads(call["function"]["arguments"]) == {"id": "abc-123"}
+        # Display-only: finish_reason MUST stay null or the coach stops
+        # mid-sentence.
+        assert tools[0]["choices"][0]["finish_reason"] is None
     assert payloads[-1] == "[DONE]"
 
 

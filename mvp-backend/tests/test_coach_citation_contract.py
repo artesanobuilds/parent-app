@@ -1,11 +1,18 @@
 """Cross-surface contract: the coach's mvp:// citation links (2026-07-18).
 
-The coach cites content as [Title](mvp://library/{id}) / [Title](mvp://community/{id})
-— the backend EMITS that shape (content catalog + prompt instruction) and iOS
-PARSES it (AgentView's OpenURLAction → ArticleRoute/PostRoute). These links were
-dead in production for weeks because nothing tied the two sides together: the
-prompt instructed a URL scheme no client handled. This locks the pair, in the
-same grep-the-iOS-sources style as test_ios_baseurl_guard.
+The coach cites content as [Title](mvp://library/{id}) — the backend EMITS that
+shape (content catalog + prompt instruction) and iOS PARSES it (AgentView's
+OpenURLAction → ArticleRoute). These links were dead in production for weeks
+because nothing tied the two sides together: the prompt instructed a URL scheme
+no client handled. This locks the pair, in the same grep-the-iOS-sources style
+as test_ios_baseurl_guard.
+
+**2026-08-07 (beta-v1 Phase 1 / sprint 2):** the public community board is
+retired and `mvp://community/` is no longer a link shape anything serves — the
+/content/community* routes are gone and the `community_posts` / `post_replies`
+tables were dropped in migration v21. The catalog must therefore emit NO
+community citation: an emitted link to a retired surface is the same dead-link
+bug in a new costume.
 
 Also locks the coach's name contract: the UI titles the screen "Coach" and
 soul.md tells the model its name — if either side drifts, the coach introduces
@@ -31,9 +38,10 @@ os.environ.setdefault("OPENAI_API_KEY", "sk-test-dummy")
 
 def test_catalog_emits_the_mvp_link_shape_with_real_ids():
     """content_catalog_for_prompt must cite items as mvp://library/{article.id}
-    and mvp://community/{post.id} — the exact ids the public /content endpoints
-    resolve, because iOS routes lastPathComponent straight into
-    ArticleDetailView(articleId:) / CommunityPostDetailView(postId:)."""
+    — the exact id the public /content endpoints resolve, because iOS routes
+    lastPathComponent straight into ArticleDetailView(articleId:) — and must
+    cite NOTHING ELSE — the retired community board must not come back as a
+    citation, in any form."""
     import app.server as server
     from app.duckdb_storage import DuckDBStorage
     from app.content import content_catalog_for_prompt
@@ -46,17 +54,16 @@ def test_catalog_emits_the_mvp_link_shape_with_real_ids():
         "subtitle": "s", "emoji": "", "read_time": "", "summary": "", "tags": [],
         "content": "body",
     })
-    storage.create_community_post({
-        "id": "post-cite-1", "category": "cat-cite", "initials": "CM",
-        "name": "C. Member", "title": "Discuss Me", "preview": "p",
-    })
-
     catalog = content_catalog_for_prompt()
     assert "(mvp://library/art-cite-1)" in catalog
-    assert "(mvp://community/post-cite-1)" in catalog
-    # Every mvp:// link in the catalog uses exactly the two hosts iOS handles.
+    # The board is retired (its tables dropped in migration v21): no citation.
+    assert "mvp://community/" not in catalog, (
+        "the catalog still cites the retired community board — the coach would "
+        "hand parents links to a surface that no longer exists"
+    )
+    # Every mvp:// link in the catalog uses the ONE host iOS still handles.
     for host in re.findall(r"mvp://([a-z-]+)/", catalog):
-        assert host in ("library", "community"), f"catalog emits unhandled host: {host}"
+        assert host == "library", f"catalog emits unhandled host: {host}"
 
 
 def test_prompt_instruction_matches_the_catalog_shape():
@@ -67,17 +74,15 @@ def test_prompt_instruction_matches_the_catalog_shape():
         "agent.py no longer instructs mvp://library citations — update "
         "content.py AND the iOS OpenURLAction in the same change"
     )
-    assert "mvp://community/" in agent_src
 
 
 def test_ios_handles_every_link_shape_the_backend_emits():
-    """AgentView must route mvp://library + mvp://community (OpenURLAction) and
-    keep a handler for the disclaimer's mvp://learn-more. If this fails, coach
-    citations are dead links again — the bug this file exists to prevent."""
+    """AgentView must route mvp://library (OpenURLAction) and keep a handler
+    for the disclaimer's mvp://learn-more. If this fails, coach citations are
+    dead links again — the bug this file exists to prevent."""
     agent_view = (IOS_ROOT / "AgentView.swift").read_text()
     assert 'url.scheme == "mvp"' in agent_view, "AgentView lost the mvp:// OpenURLAction"
     assert '"library"' in agent_view and "ArticleRoute(" in agent_view
-    assert '"community"' in agent_view and "PostRoute(" in agent_view
     assert '"learn-more"' in agent_view, "the disclaimer's Learn-more link has no handler"
 
 

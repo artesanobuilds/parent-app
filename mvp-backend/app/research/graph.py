@@ -257,6 +257,9 @@ class ActivityCandidate(BaseModel):
     fit_score: Optional[float] = Field(
         default=None, description="0.0-1.0 estimate of fit vs the kid's age and interests"
     )
+    fit_reason: Optional[str] = Field(
+        default=None, description="ONE sentence explaining why this matches the kid's profile"
+    )
 
 
 def _candidate_key(c: Dict[str, Any]) -> tuple:
@@ -340,8 +343,9 @@ _SYSTEM_PROMPT = (
     "slow and expensive). Do this RIGHT AFTER each search, BEFORE the next one — "
     "do NOT hoard everything for one big call at the end. Fill as many concrete "
     "fields as the page supports (dates, hours, price, location, signup URL, "
-    "provider, contact). Set fit_score 0..1 vs the kid's age/interests, and set "
-    "kid_name to the best-fit kid (or null if family-wide).\n"
+    "provider, contact). Set fit_score 0..1 vs the kid's age/interests, fit_reason "
+    "to ONE sentence explaining why it matched (age band, interests, schedule fit, "
+    "location), and set kid_name to the best-fit kid (or null if family-wide).\n"
     "4. Repeat steps 2–3 for each planned search until you've recorded a solid "
     "set or hit your search budget.\n\n"
     "Rules: prefer options within the listed towns / radius, but cover the "

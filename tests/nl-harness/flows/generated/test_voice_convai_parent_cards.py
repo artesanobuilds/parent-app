@@ -27,7 +27,10 @@ pytestmark = [
 ]
 
 CONVAI_PATH = "/v1/parent/chat/completions"
-CARD_TOOLS = ("show_article", "show_community_post")
+# `show_community_post` was retired with the public board (beta-v1 sprint 2,
+# migration v21). Voice may only ever surface a library article now; a stale
+# mvp://community/ link is still stripped from speech but fires NO tool.
+CARD_TOOLS = ("show_article",)
 
 # Phrased to invite a content link without demanding one — the coach may or may
 # not cite. Both outcomes are valid; what must hold either way is that no URL is

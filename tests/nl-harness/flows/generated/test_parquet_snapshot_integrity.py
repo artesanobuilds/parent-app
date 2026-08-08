@@ -28,8 +28,9 @@ pytestmark = [pytest.mark.tier1, pytest.mark.readonly_safe]
 PROBABLE_PARQUETS = [
     "articles.parquet",
     "categories.parquet",
-    "community_posts.parquet",
-    "post_replies.parquet",
+    # community_posts / post_replies were dropped with the public board in the
+    # beta-v1 sprint-2 Circle redesign (migration v21) — they are no longer in
+    # BOOTSTRAP_TABLES, so they must NOT appear in the export manifest.
     "mvp.parquet",
     # operator-side tables; not exposed via public reads but should still
     # appear in the admin /data/export manifest:
@@ -82,18 +83,6 @@ def test_articles_endpoint_is_populated(flow_ctx):
         "articles endpoint returned 0 rows. Check bootstrap warnings in the "
         "backend log."
     )
-
-
-def test_community_endpoint_returns_a_list(flow_ctx):
-    """
-    Community may be empty on a clean local DB; we only assert the shape,
-    not non-emptiness. The point here is the endpoint doesn't 500 because
-    of a schema mismatch.
-    """
-    resp = flow_ctx.get("/content/community")
-    assert resp.status_code == 200, resp.text
-    posts = resp.json()
-    assert isinstance(posts, list), f"expected list, got {type(posts).__name__}"
 
 
 def test_admin_export_lists_every_expected_parquet(flow_ctx, admin):

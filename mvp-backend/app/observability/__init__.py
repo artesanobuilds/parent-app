@@ -154,6 +154,15 @@ def init_otel(app: Any) -> bool:
         logger.warning("[observability] OTEL endpoint set but OpenTelemetry unavailable: %s", exc)
         return False
 
+    # The OTLP exporter logs at ERROR when it can't ship a batch — which is
+    # almost always a transient timeout on Grafana Cloud's ingest gateway (or a
+    # deploy-time shutdown flush), not an app fault. Sentry's logging integration
+    # promotes ERROR logs to issues, so an upstream hiccup at 5am pages like a
+    # real bug. Metrics-health alerting lives in Grafana, not this log line, so
+    # we lose no signal by pinning the exporter's logger to WARNING. (Same move
+    # we use for the oauthlib loggers.)
+    logging.getLogger("opentelemetry.exporter.otlp").setLevel(logging.WARNING)
+
     try:
         resource = Resource.create({"service.name": os.getenv("OTEL_SERVICE_NAME", "mvp-backend")})
         interval = int(os.getenv("OTEL_METRIC_EXPORT_INTERVAL_MS", "60000"))

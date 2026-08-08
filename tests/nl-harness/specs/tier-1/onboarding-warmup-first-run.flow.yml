@@ -1,0 +1,127 @@
+spec:
+  name: onboarding-warmup-first-run
+  tier: 1
+  modules: [auth, profile, onboarding_warmup, coach, cos, content]
+  intent: >
+    The redesigned funnel's ending, end to end. A brand-new parent answers the
+    onboarding questions, signs in (which resolves the durable account id), and
+    the app enqueues the first-run warm-up that the "Creating account" progress
+    ring renders. Subcutaneously that is: issue a token, POST /profile/seed with
+    the EXACT iOS payload shape, POST /onboarding/warmup, poll the run to a
+    terminal state, then load the three surfaces the warm-up is supposed to have
+    filled — the COACH card (/coach/nudge), the plan board (/cos/plan/board) and
+    the ranked FOR YOU feed (/content/for-you).
+
+    The guarantee this flow exists to protect is that the ring NEVER traps the
+    parent: a warm-up beat that fails must still leave the run terminal at 100%,
+    with Home degrading to its empty states rather than the parent sitting behind
+    a spinner. This is the path that already lost two beta users' onboarding data
+    once (debugging_onboarding_seed_localhost); it gets flow coverage, not just
+    in-process unit coverage.
+
+  personas:
+    parent:
+      preset: new-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - >
+      RATE_LIMIT_AUTH_PER_HOUR (and AUTH_RATE_PER_HOUR) are raised on the backend
+      for harness runs — the default of 5 makes any multi-token suite fail
+      confusingly (see memory debugging_local_rate_limits).
+    - >
+      RATE_LIMIT_WARMUP_PER_HOUR defaults to 10 per user. This flow enqueues at
+      most twice for a FRESH user_id, so the cap is never the binding constraint.
+    - >
+      COST NOTE, deliberate: POST /onboarding/warmup makes ONE server-side model
+      call (the `coach` beat) whatever RUN_OPENAI_FLOWS is set to — the harness
+      cannot turn a server-side beat off. The always-on test therefore asserts
+      NOTHING about the nudge's content; it only asserts the endpoint is
+      well-formed and that a coach failure doesn't sink the run. Every assertion
+      that needs a real generated nudge lives in the requires_openai test.
+
+  invariants:
+    # ── the seed (cross-surface contract, mirrors test_onboarding_seed_contract.py)
+    - "POST /profile/seed accepts the iOS payload verbatim: kid `age` as a STRING, `household` as a string, `adults_in_household` as an int"
+    - "The seed response IS the family profile: kid `age` reads back coerced to a FLOAT (12 -> 12.0), not a string and not an int"
+    - "`household` maps to `household_structure` on the parent, and `adults_in_household` stays an int"
+    - "GET /profile round-trips the same coercions — the seed persisted, it wasn't just echoed"
+
+    # ── the warm-up run
+    - "POST /onboarding/warmup returns 200 with run_id + status + deduped=false for a fresh parent"
+    - "A second immediate enqueue never 500s, and if it reports deduped=true it returns the SAME run_id (a double-tapped ring can't stack runs)"
+    - "GET /onboarding/warmup/{run_id} answers 200 on every poll — the poll endpoint never cascades a 5xx while work is in flight"
+    - "The status payload always carries run_id/status/percent/steps/result/error"
+    - "`steps` is exactly the four beats in order — family, coach, plan, account — each with key/label/state/detail/error, state drawn from pending|running|done|failed|skipped"
+    - "`percent` is an int in 0..100 and never ticks BACKWARDS between polls"
+    - "The run reaches a TERMINAL status (done|failed|canceled) within the poll budget"
+    - "A terminal run is ALWAYS at percent == 100 — the ring lands"
+    - "Every step is in a terminal state once the run is terminal — nothing is left `running`"
+    - "THE HARD RULE: a failed beat does not block the run. If any step failed, the run is still `done` at 100 and result.failed_steps names it"
+    - "A second, unrelated family polling the run gets 404 — no existence oracle on another family's warm-up"
+
+    # ── the surfaces the warm-up is supposed to have filled
+    - "GET /coach/nudge is 200 and always carries a `nudge` key; null is a legitimate value (the card falls back to its empty state), a non-null nudge carries a non-empty body"
+    - "The `plan` beat is deterministic and offline, so it must reach `done`"
+    - "GET /cos/plan/board is 200 with `stages`, and after the warm-up it is NOT empty — the plan beat seeded starter considerations, all of them in the Considering stage (nothing auto-registered, nothing auto-watched)"
+    - "GET /content/for-you is 200 with items/total/limit/offset/ranked/signals and echoes the requested limit + offset"
+    - "The for-you feed is NEVER empty — including for a family whose profile was seeded seconds ago and whose word bag may match nothing"
+    - "Each for-you item carries the same id/category/title shape as /content/articles (iOS Codable is strict; one divergent shape empties the whole list)"
+
+    # ── requires_openai: the generated nudge
+    - "[requires_openai] With a real model, the `coach` beat reaches `done` and writes a nudge_id"
+    - "[requires_openai] GET /coach/nudge then returns a non-null nudge whose kid_name is one of the kids we actually seeded — never a stranger"
+
+    # ── fault-injected: the degradation guarantee, proven not assumed
+    - "[fault] With the model dependency forced down, the `coach` beat FAILS with a non-null error"
+    - "[fault] …and the run still reaches `done` at percent == 100, with result.failed_steps == ['coach']"
+    - "[fault] …and the other three beats still reach done, the board is still seeded, and GET /coach/nudge is well-formed with nudge == null"
+
+  boundary_contracts:
+    - endpoint: POST /auth/issue-token
+      as: anonymous
+      status: 200
+      response_includes: [token, user_id]
+
+    - endpoint: POST /profile/seed
+      as: parent
+      status: 200
+      response_includes: [parent, children]
+
+    - endpoint: GET /profile
+      as: parent
+      status: 200
+      response_includes: [parent, children]
+
+    - endpoint: POST /onboarding/warmup
+      as: parent
+      status: 200
+      response_includes: [run_id, status, deduped]
+
+    - endpoint: GET /onboarding/warmup/{run_id}
+      as: parent
+      status: 200
+      response_includes: [run_id, status, percent, steps, result, error]
+
+    - endpoint: GET /onboarding/warmup/{run_id}
+      as: other-parent
+      status: 404
+
+    - endpoint: GET /coach/nudge
+      as: parent
+      status: 200
+      response_includes: [nudge]
+
+    - endpoint: GET /cos/plan/board
+      as: parent
+      status: 200
+      response_includes: [stages]
+
+    - endpoint: GET /content/for-you
+      as: parent
+      status: 200
+      response_includes: [items, total, limit, offset, ranked, signals]
+
+  cleanup:
+    - "The new-parent persona registers DELETE /family/{user_id}, which cascades the profile, the warm-up run, the seeded considerations and the coach nudge. Only ever the throwaway user this flow created."
+    - "The fault-injected test registers flow_ctx.fault.reset() so a forced outage can never leak into a later flow."

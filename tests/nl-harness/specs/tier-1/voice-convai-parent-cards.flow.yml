@@ -7,7 +7,7 @@ spec:
     POST /v1/parent/chat/completions. Its novel job is turning the coach's
     inline `[Title](mvp://library/{id})` markdown into a clean voice
     experience: speak the label, NEVER let the URL reach TTS, and emit a
-    non-terminal `show_article` / `show_community_post` tool-call delta so the
+    non-terminal `show_article` tool-call delta so the
     iOS client renders the card. This flow proves that contract against a live
     turn — the probe stays healthy, auth is enforced, the SSE framing is
     OpenAI-shaped, no `mvp://` ever lands in spoken text, and any card tool
@@ -30,7 +30,7 @@ spec:
     - "elevenlabs_extra_body present but missing user_id returns 400"
     - "Every streamed frame is a `chat.completion.chunk` and the stream ends with `data: [DONE]`"
     - "No spoken content delta ever contains `mvp://` — a URL read aloud is the failure this endpoint exists to prevent"
-    - "Every tool-call delta names show_article or show_community_post, carries JSON arguments with a non-empty `id`, and has finish_reason null"
+    - "Every tool-call delta names show_article (show_community_post was retired with the public board in v21), carries JSON arguments with a non-empty `id`, and has finish_reason null"
     - "The turn produces at least one spoken content delta (the coach actually answered)"
 
   cleanup:

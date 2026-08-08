@@ -39,16 +39,16 @@ EVENTS: dict[str, set[str]] = {
     # Integrations
     "integration_connected": {"provider", "kind"},
     # Content + navigation engagement (client)
-    "content_opened": {"type"},                      # library article / community post
+    "content_opened": {"type"},                      # library article
     "screen_viewed": {"screen"},                     # every screen (tabs + pushed/presented)
     # Legal acceptance (client) — surface = onboarding | banner. Never content.
     "legal_accepted": {"surface"},
     "legal_reaccept_shown": set(),
-    # Parent-to-parent DMs (client) — source = directory | post | reply. Never content.
-    "dm_conversation_started": {"source"},
-    "dm_message_sent": set(),
-    "dm_blocked": set(),
-    "dm_reported": set(),
+    # Circle conversations — the private group threads that replaced 1:1 DMs and
+    # the public board (beta-v1 sprint 2). Emitted SERVER-side from app/circle.py.
+    # source = directory | post | reply. Never content, never participant ids.
+    "circle_conversation_started": {"source"},
+    "circle_message_sent": set(),
     # Saved tab (client) — item_type + surface enums only, never titles/content.
     "item_saved": {"item_type", "surface"},
     "item_unsaved": {"item_type", "surface"},

@@ -20,6 +20,12 @@ mvp-backend/data/*.parquet
 !mvp-backend/data/community_posts.parquet
 !mvp-backend/data/mvp.parquet
 !mvp-backend/data/post_replies.parquet
+# ...and ANY parquet loose at the backend root. `export_parquet` writes relative
+# to the CWD, so running it (or a test that calls it) from `mvp-backend/` rather
+# than with MVP_DUCKDB_PATH set drops ~44 user-state files — auth_tokens,
+# kid_credentials, invite_tokens — one directory ABOVE the ignored `data/`.
+# 2026-08-08: that had happened and they were staged for commit.
+mvp-backend/*.parquet
 
 # Generated eval report dumps
 mvp-backend/data/eval_reports/

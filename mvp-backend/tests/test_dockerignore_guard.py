@@ -27,8 +27,6 @@ from app.duckdb_storage import DuckDBStorage  # noqa: E402
 CONTENT_PARQUETS = {
     "categories.parquet",
     "articles.parquet",
-    "community_posts.parquet",
-    "post_replies.parquet",
 }
 
 

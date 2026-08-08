@@ -2,7 +2,7 @@
 DuckDB + Parquet storage backend.
 
 Stores user data as JSON blobs in a DuckDB database backed by parquet files.
-Also stores content library tables (categories, articles, community_posts).
+Also stores content library tables (categories, articles).
 Drop-in replacement for LocalFileStorage — same StorageBackend interface.
 """
 
@@ -116,7 +116,6 @@ class DuckDBStorage(StorageBackend):
         user_data(user_id, name, data, updated_at)
         categories(id, name, emoji, description)
         articles(id, category, title, subtitle, emoji, author, read_time, summary, tags, content, created_at, updated_at)
-        community_posts(id, category, initials, name, title, preview, user_id, created_at, updated_at)
     """
 
     DDL = """
@@ -153,28 +152,12 @@ class DuckDBStorage(StorageBackend):
         updated_at  TIMESTAMPTZ DEFAULT now()
     );
 
-    CREATE TABLE IF NOT EXISTS community_posts (
-        id          TEXT PRIMARY KEY,
-        category    TEXT NOT NULL,
-        initials    TEXT NOT NULL DEFAULT '',
-        name        TEXT NOT NULL DEFAULT '',
-        title       TEXT NOT NULL DEFAULT '',
-        preview     TEXT NOT NULL DEFAULT '',
-        user_id     TEXT,
-        created_at  TIMESTAMPTZ DEFAULT now(),
-        updated_at  TIMESTAMPTZ DEFAULT now()
-    );
-
-    CREATE TABLE IF NOT EXISTS post_replies (
-        id          TEXT PRIMARY KEY,
-        post_id     TEXT NOT NULL,
-        user_id     TEXT NOT NULL,
-        author_name TEXT NOT NULL DEFAULT '',
-        initials    TEXT NOT NULL DEFAULT '',
-        body        TEXT NOT NULL DEFAULT '',
-        created_at  TIMESTAMPTZ DEFAULT now()
-    );
     """
+    # NOTE: community_posts + post_replies used to live in CONTENT_DDL. The
+    # public board is retired (beta-v1 sprint 2) and both tables were DROPPED in
+    # migration v21. Do NOT re-add the DDL: CREATE-IF-NOT-EXISTS runs before
+    # migrations on every boot, so it would resurrect an empty table that v21
+    # (already applied) will never drop again.
 
     # Versioned legal documents (privacy policy, terms) + per-user acceptance.
     # legal_documents is APPEND-ONLY for published rows -- publishing promotes
@@ -219,52 +202,12 @@ class DuckDBStorage(StorageBackend):
         ON legal_acceptances (user_id, slug, accepted_at);
     """
 
-    # Parent-to-parent direct messages. Postgres-portable on purpose (ids +
-    # timestamps only, cursor pagination) -- messages ride the eventual
-    # DuckDB->Postgres migration, no dedicated store. participant_a/b are
-    # CANONICALLY ordered (a = min, b = max) so the unique index yields one
-    # conversation per pair regardless of who starts it. Inbox fields
-    # (last_message_at/preview) are denormalized on send. Per-side read stamps
-    # and block flags live on the conversation row.
-    DM_DDL = """
-    CREATE TABLE IF NOT EXISTS dm_conversations (
-        id                   TEXT PRIMARY KEY,
-        participant_a        TEXT NOT NULL,
-        participant_b        TEXT NOT NULL,
-        created_at           TIMESTAMPTZ DEFAULT now(),
-        last_message_at      TIMESTAMPTZ,
-        last_message_preview TEXT DEFAULT '',
-        a_last_read_at       TIMESTAMPTZ,
-        b_last_read_at       TIMESTAMPTZ,
-        a_blocked            BOOLEAN DEFAULT false,
-        b_blocked            BOOLEAN DEFAULT false
-    );
-
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_conversations_pair
-        ON dm_conversations (participant_a, participant_b);
-
-    CREATE TABLE IF NOT EXISTS dm_messages (
-        id              TEXT PRIMARY KEY,
-        conversation_id TEXT NOT NULL,
-        sender_id       TEXT NOT NULL,
-        body            TEXT NOT NULL,
-        created_at      TIMESTAMPTZ DEFAULT now()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_dm_messages_conversation
-        ON dm_messages (conversation_id, created_at);
-
-    CREATE TABLE IF NOT EXISTS dm_reactions (
-        id         TEXT PRIMARY KEY,
-        message_id TEXT NOT NULL,
-        user_id    TEXT NOT NULL,
-        emoji      TEXT NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT now()
-    );
-
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_reactions_message_user
-        ON dm_reactions (message_id, user_id);
-    """
+    # NOTE: DM_DDL (dm_conversations / dm_messages / dm_reactions, plus the
+    # UNIQUE participant-pair index) lived here. Parent-to-parent 1:1 DMs are
+    # retired (beta-v1 sprint 2) -- CIRCLE_DDL's group threads replace them --
+    # and all three tables were DROPPED in migration v21. Do NOT re-add the DDL:
+    # CREATE-IF-NOT-EXISTS runs before migrations on every boot, so it would
+    # resurrect empty tables that v21 (already applied) will never drop again.
 
     # Saved items (the Saved tab). DENORMALIZED snapshots on purpose -- a save
     # must survive a CMS edit or a deleted post, and for coach replies the
@@ -296,6 +239,172 @@ class DuckDBStorage(StorageBackend):
 
     CREATE INDEX IF NOT EXISTS idx_saved_items_lookup
         ON saved_items (user_id, item_type, item_ref);
+    """
+
+    # First-run agent warm-up (see app/onboarding_warmup.py). Brand-new tables,
+    # so CREATE IF NOT EXISTS converges every deployment on next boot and no
+    # migration row is needed (the migration framework is only for ALTERs on
+    # already-shipped tables). Indexes live here for the same reason - the
+    # columns ship with the CREATE TABLE, not with a later ALTER.
+    # (No semicolons inside comments - the bootstrap splits this DDL on ';'.)
+    WARMUP_DDL = """
+    -- Durable job row for the onboarding warm-up. The phone never holds the
+    -- job state - it polls/streams this row by run_id.
+    CREATE TABLE IF NOT EXISTS onboarding_warmup_runs (
+        id           TEXT PRIMARY KEY,          -- run_id (uuid)
+        user_id      TEXT NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'queued',  -- queued|running|done|failed|canceled
+        steps_json   JSON NOT NULL,             -- [{key,label,state,detail,error}] in display order
+        context_json JSON,                      -- request context (kid count, postal code, ...)
+        result_json  JSON,                      -- {coach_nudge_id, considerations_seeded, ...}
+        error        TEXT,
+        created_at   TIMESTAMPTZ DEFAULT now(),
+        started_at   TIMESTAMPTZ,
+        finished_at  TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_onboarding_warmup_user
+        ON onboarding_warmup_runs (user_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_onboarding_warmup_status
+        ON onboarding_warmup_runs (status);
+
+    -- Persisted coach nudges. The first one is written by the warm-up so the
+    -- redesigned Home has a real COACH card on first open.
+    CREATE TABLE IF NOT EXISTS coach_nudges (
+        id          TEXT PRIMARY KEY,           -- uuid
+        user_id     TEXT NOT NULL,
+        source      TEXT NOT NULL DEFAULT 'warmup',  -- warmup|daily|manual
+        kid_name    TEXT,                       -- who the nudge is about, NULL = family-wide
+        body        TEXT NOT NULL,              -- the card copy the parent reads
+        cta_label   TEXT,                       -- e.g. "Try this with Ben"
+        origin_id   TEXT,                       -- warm-up run that produced it (audit)
+        created_at  TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_coach_nudges_user
+        ON coach_nudges (user_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_coach_nudges_source
+        ON coach_nudges (user_id, source);
+    """
+
+    # Household members / Circle (beta-v1 Phase 1). "Your actual people":
+    # co-parents, spouse, nanny, grandparent, neighbour. Brand-new table, so
+    # CREATE IF NOT EXISTS converges every deployment and the indexes ship in
+    # the base DDL (their columns are here, not added by a later ALTER).
+    #
+    # Deliberately NOT the existing `caregivers` table: caregivers is
+    # PLAN-scoped state that reset_plan() wipes, and this table is the
+    # authorization source for Circle scoping - a "Start over" on the activity
+    # board must not silently change who you are allowed to message. The two
+    # are LINKED instead: caregiver_id below points at the mirrored
+    # caregivers row so a nanny is entered once and shows up in logistics.
+    #
+    # Children are NOT stored here. kind='child' rows are reserved (the
+    # discriminator exists so the client can render one roster), but the
+    # source of truth for a kid stays FamilyProfile.children - moving it
+    # would drag the kid-agent, crisis-lock and seed contract along.
+    # (No semicolons inside comments - the bootstrap splits this DDL on ';'.)
+    HOUSEHOLD_DDL = """
+    CREATE TABLE IF NOT EXISTS household_members (
+        id              TEXT PRIMARY KEY,       -- stable uuid, the ONLY key (never display_name)
+        user_id         TEXT NOT NULL,          -- owning parent account
+        kind            TEXT NOT NULL DEFAULT 'adult',  -- adult|child (child reserved, see above)
+        display_name    TEXT NOT NULL,
+        role            TEXT NOT NULL DEFAULT 'other',  -- me|spouse|co_parent|child|nanny|grandparent|neighbour|other
+        relation        TEXT,                   -- free text, e.g. "Step Mom"
+        mvp_username    TEXT,                   -- issued locally, unique within the household
+        email           TEXT,
+        avatar_key      TEXT,                   -- blob key, server-set only (ownership verified)
+        member_user_id  TEXT,                   -- the MVP account this member IS, once claimed
+        attributes_json JSON,                   -- role-scoped bag (likes/dislikes/challenges/excels_at/goals/co_parent_goals)
+        notes           TEXT,
+        caregiver_id    TEXT,                   -- mirrored caregivers.id for logistics, NULL when unlinked
+        created_at      TIMESTAMPTZ DEFAULT now(),
+        updated_at      TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_household_members_user
+        ON household_members (user_id, created_at);
+
+    -- Drives the Circle scoping lookup, which resolves both directions.
+    CREATE INDEX IF NOT EXISTS idx_household_members_account
+        ON household_members (member_user_id);
+    """
+
+    # Circle conversations (beta-v1 Phase 1) - the group threads that REPLACE
+    # the anonymous community board.
+    #
+    # Why a new model rather than widening the old dm_conversations: that table
+    # was structurally 1:1 (UNIQUE index on the canonically ordered participant
+    # pair), so a third participant had nowhere to go. It is gone as of v21.
+    #
+    # circle_participants.user_id is NULLABLE on purpose: you can start a
+    # thread with your nanny before she has an MVP account. The row is keyed by
+    # the household_members id (stable), and user_id is filled in when she
+    # claims an invite. Until then she simply cannot read it - authorization
+    # only ever matches on user_id.
+    #
+    # Messages carry a denormalized author_name/initials snapshot so a thread
+    # still renders correctly after a member is renamed or removed.
+    # (No semicolons inside comments - the bootstrap splits this DDL on ';'.)
+    CIRCLE_DDL = """
+    CREATE TABLE IF NOT EXISTS circle_conversations (
+        id            TEXT PRIMARY KEY,       -- stable uuid
+        owner_user_id TEXT NOT NULL,          -- the parent who started it (only editor/deleter)
+        title         TEXT NOT NULL,
+        body          TEXT,                   -- the opening post
+        created_at    TIMESTAMPTZ DEFAULT now(),
+        updated_at    TIMESTAMPTZ DEFAULT now(),
+        last_reply_at TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_circle_conversations_owner
+        ON circle_conversations (owner_user_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS circle_participants (
+        conversation_id TEXT NOT NULL,
+        user_id         TEXT,                 -- NULL until the invited member claims an account
+        member_id       TEXT NOT NULL,        -- household_members.id, or self:<user_id> for the owner
+        role            TEXT NOT NULL DEFAULT 'member',  -- owner|member
+        joined_at       TIMESTAMPTZ DEFAULT now(),
+        last_read_at    TIMESTAMPTZ
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_circle_participants_member
+        ON circle_participants (conversation_id, member_id);
+
+    CREATE INDEX IF NOT EXISTS idx_circle_participants_user
+        ON circle_participants (user_id);
+
+    CREATE TABLE IF NOT EXISTS circle_messages (
+        id              TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        user_id         TEXT NOT NULL,
+        author_name     TEXT,                 -- snapshot at send time
+        initials        TEXT,
+        body            TEXT NOT NULL,
+        created_at      TIMESTAMPTZ DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_circle_messages_conversation
+        ON circle_messages (conversation_id, created_at);
+
+    -- Invite links. Claiming one is what makes a Circle link MUTUAL, so this
+    -- table is an authorization primitive, not a convenience.
+    CREATE TABLE IF NOT EXISTS invite_tokens (
+        token      TEXT PRIMARY KEY,          -- url-safe secret
+        user_id    TEXT NOT NULL,             -- inviter
+        member_id  TEXT,                      -- the roster row being claimed, NULL for an open invite
+        created_at TIMESTAMPTZ DEFAULT now(),
+        expires_at TIMESTAMPTZ,
+        claimed_by TEXT,                      -- the account that claimed it
+        claimed_at TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_invite_tokens_user
+        ON invite_tokens (user_id, created_at);
     """
 
     # Family Companion (kid agent + handoff). Real tables, not blobs:
@@ -889,8 +998,6 @@ class DuckDBStorage(StorageBackend):
         ("user_data", "mvp.parquet"),
         ("categories", "categories.parquet"),
         ("articles", "articles.parquet"),
-        ("community_posts", "community_posts.parquet"),
-        ("post_replies", "post_replies.parquet"),
         ("kid_agent_configs", "kid_agent_configs.parquet"),
         ("kid_messages", "kid_messages.parquet"),
         ("kid_credentials", "kid_credentials.parquet"),
@@ -934,12 +1041,24 @@ class DuckDBStorage(StorageBackend):
         # (user audit state). Both excluded from the image in .dockerignore.
         ("legal_documents", "legal_documents.parquet"),
         ("legal_acceptances", "legal_acceptances.parquet"),
-        # Parent-to-parent DMs (user state).
-        ("dm_conversations", "dm_conversations.parquet"),
-        ("dm_messages", "dm_messages.parquet"),
-        ("dm_reactions", "dm_reactions.parquet"),
         # Saved items (user state).
         ("saved_items", "saved_items.parquet"),
+        # First-run agent warm-up: the durable job rows + the coach nudges they
+        # produce. Both are user state — a volume rebuild that seeded them from
+        # a dev machine would show one family's nudge to another.
+        ("onboarding_warmup_runs", "onboarding_warmup_runs.parquet"),
+        ("coach_nudges", "coach_nudges.parquet"),
+        # Household members / Circle. User state AND the authorization source
+        # for every Circle conversation — a volume rebuild that lost it would
+        # silently close every parent's Circle.
+        ("household_members", "household_members.parquet"),
+        # Circle conversations (beta-v1 Phase 1) — the group threads that
+        # replaced the public board. User state, and invite_tokens is an
+        # authorization primitive: losing it strands half-claimed links.
+        ("circle_conversations", "circle_conversations.parquet"),
+        ("circle_participants", "circle_participants.parquet"),
+        ("circle_messages", "circle_messages.parquet"),
+        ("invite_tokens", "invite_tokens.parquet"),
     ]
 
     def __init__(self, db_path: Path | str | None = None) -> None:
@@ -975,11 +1094,19 @@ class DuckDBStorage(StorageBackend):
             stmt = stmt.strip()
             if stmt:
                 self._con.execute(stmt + ";")
-        for stmt in self.DM_DDL.strip().split(";"):
+        for stmt in self.SAVED_DDL.strip().split(";"):
             stmt = stmt.strip()
             if stmt:
                 self._con.execute(stmt + ";")
-        for stmt in self.SAVED_DDL.strip().split(";"):
+        for stmt in self.WARMUP_DDL.strip().split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                self._con.execute(stmt + ";")
+        for stmt in self.HOUSEHOLD_DDL.strip().split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                self._con.execute(stmt + ";")
+        for stmt in self.CIRCLE_DDL.strip().split(";"):
             stmt = stmt.strip()
             if stmt:
                 self._con.execute(stmt + ";")
@@ -1188,34 +1315,6 @@ class DuckDBStorage(StorageBackend):
             "tags": list(row[8]) if row[8] else [], "content": row[9],
         }
 
-    def get_community_posts(self, category: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-        # user_id is included so signed-in readers get the author's DM peer
-        # handle -- the SERVER strips it for anonymous callers (optional_user).
-        if category:
-            rows = self._con.execute(
-                "SELECT id, category, initials, name, title, preview, user_id "
-                "FROM community_posts WHERE category = ? ORDER BY id LIMIT ?",
-                [category, limit],
-            ).fetchall()
-        else:
-            rows = self._con.execute(
-                "SELECT id, category, initials, name, title, preview, user_id "
-                "FROM community_posts ORDER BY id LIMIT ?",
-                [limit],
-            ).fetchall()
-        posts = [
-            {"id": r[0], "category": r[1], "initials": r[2], "name": r[3],
-             "title": r[4], "preview": r[5], "user_id": r[6]}
-            for r in rows
-        ]
-        # Add reply counts
-        post_ids = [p["id"] for p in posts]
-        if post_ids:
-            counts = self.get_reply_counts(post_ids)
-            for p in posts:
-                p["reply_count"] = counts.get(p["id"], 0)
-        return posts
-
     def search_articles(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         rows = self._con.execute(
             "SELECT id, category, title, subtitle, emoji, author, read_time, summary, tags "
@@ -1231,20 +1330,6 @@ class DuckDBStorage(StorageBackend):
             for r in rows
         ]
 
-    def search_community_posts(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
-        rows = self._con.execute(
-            "SELECT id, category, initials, name, title, preview "
-            "FROM community_posts "
-            "WHERE title ILIKE ? OR preview ILIKE ? "
-            "ORDER BY id LIMIT ?",
-            [f"%{query}%", f"%{query}%", limit],
-        ).fetchall()
-        return [
-            {"id": r[0], "category": r[1], "initials": r[2], "name": r[3],
-             "title": r[4], "preview": r[5]}
-            for r in rows
-        ]
-
     def score_articles_by_words(self, words: List[str], limit: int = 5) -> List[Dict[str, Any]]:
         """Score articles by counting how many topic words match title/subtitle/tags."""
         # Build a SUM(CASE ...) expression for each word
@@ -1253,35 +1338,21 @@ class DuckDBStorage(StorageBackend):
             f"OR array_to_string(tags, ' ') ILIKE '%' || ${i+1} || '%' THEN 1 ELSE 0 END)"
             for i in range(len(words))
         )
+        # The score filter lives in an OUTER WHERE, not a bare HAVING: DuckDB
+        # reads `HAVING` with no GROUP BY as an aggregate over the whole table
+        # and rejects the plain columns ("column title must appear in the GROUP
+        # BY clause"), so the bare-HAVING form 500s on every call.
         sql = (
-            f"SELECT id, category, title, subtitle, emoji, author, read_time, summary, tags, "
-            f"({cases}) AS score "
-            f"FROM articles HAVING score > 0 ORDER BY score DESC LIMIT ?"
+            f"SELECT id, category, title, subtitle, emoji, author, read_time, summary, tags "
+            f"FROM (SELECT id, category, title, subtitle, emoji, author, read_time, summary, tags, "
+            f"({cases}) AS score FROM articles) "
+            f"WHERE score > 0 ORDER BY score DESC LIMIT ?"
         )
         rows = self._con.execute(sql, words + [limit]).fetchall()
         return [
             {"id": r[0], "category": r[1], "title": r[2], "subtitle": r[3],
              "emoji": r[4], "author": r[5], "read_time": r[6], "summary": r[7],
              "tags": list(r[8]) if r[8] else []}
-            for r in rows
-        ]
-
-    def score_posts_by_words(self, words: List[str], limit: int = 5) -> List[Dict[str, Any]]:
-        """Score community posts by counting how many topic words match title/preview."""
-        cases = " + ".join(
-            f"(CASE WHEN title ILIKE '%' || ${i+1} || '%' OR preview ILIKE '%' || ${i+1} || '%' "
-            f"THEN 1 ELSE 0 END)"
-            for i in range(len(words))
-        )
-        sql = (
-            f"SELECT id, category, initials, name, title, preview, "
-            f"({cases}) AS score "
-            f"FROM community_posts HAVING score > 0 ORDER BY score DESC LIMIT ?"
-        )
-        rows = self._con.execute(sql, words + [limit]).fetchall()
-        return [
-            {"id": r[0], "category": r[1], "initials": r[2], "name": r[3],
-             "title": r[4], "preview": r[5]}
             for r in rows
         ]
 
@@ -1323,88 +1394,6 @@ class DuckDBStorage(StorageBackend):
             return False
         self._con.execute("DELETE FROM articles WHERE id = ?", [article_id])
         return True
-
-    def get_community_post(self, post_id: str) -> Optional[Dict[str, Any]]:
-        row = self._con.execute(
-            "SELECT id, category, initials, name, title, preview, user_id "
-            "FROM community_posts WHERE id = ?",
-            [post_id],
-        ).fetchone()
-        if row is None:
-            return None
-        return {
-            "id": row[0], "category": row[1], "initials": row[2], "name": row[3],
-            "title": row[4], "preview": row[5], "user_id": row[6],
-        }
-
-    def create_community_post(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        self._con.execute(
-            "INSERT INTO community_posts (id, category, initials, name, title, preview, user_id, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, now(), now())",
-            [data["id"], data["category"], data.get("initials", ""),
-             data.get("name", ""), data.get("title", ""),
-             data.get("preview", ""), data.get("user_id")],
-        )
-        return self.get_community_post(data["id"])
-
-    def update_community_post(self, post_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        existing = self.get_community_post(post_id)
-        if existing is None:
-            return None
-        fields = []
-        values = []
-        for key in ("category", "initials", "name", "title", "preview", "user_id"):
-            if key in data:
-                fields.append(f"{key} = ?")
-                values.append(data[key])
-        if not fields:
-            return existing
-        fields.append("updated_at = now()")
-        values.append(post_id)
-        self._con.execute(
-            f"UPDATE community_posts SET {', '.join(fields)} WHERE id = ?", values
-        )
-        return self.get_community_post(post_id)
-
-    def delete_community_post(self, post_id: str) -> bool:
-        existing = self.get_community_post(post_id)
-        if existing is None:
-            return False
-        self._con.execute("DELETE FROM community_posts WHERE id = ?", [post_id])
-        return True
-
-    def get_replies_for_post(self, post_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        rows = self._con.execute(
-            "SELECT id, post_id, user_id, author_name, initials, body "
-            "FROM post_replies WHERE post_id = ? ORDER BY created_at ASC LIMIT ?",
-            [post_id, limit],
-        ).fetchall()
-        return [
-            {"id": r[0], "post_id": r[1], "user_id": r[2], "author_name": r[3],
-             "initials": r[4], "body": r[5]}
-            for r in rows
-        ]
-
-    def create_reply(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        self._con.execute(
-            "INSERT INTO post_replies (id, post_id, user_id, author_name, initials, body, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, now())",
-            [data["id"], data["post_id"], data["user_id"], data.get("author_name", ""),
-             data.get("initials", ""), data.get("body", "")],
-        )
-        return {"id": data["id"], "post_id": data["post_id"], "user_id": data["user_id"],
-                "author_name": data.get("author_name", ""), "initials": data.get("initials", ""),
-                "body": data.get("body", "")}
-
-    def get_reply_counts(self, post_ids: List[str]) -> Dict[str, int]:
-        if not post_ids:
-            return {}
-        placeholders = ", ".join(["?"] * len(post_ids))
-        rows = self._con.execute(
-            f"SELECT post_id, count(*) FROM post_replies WHERE post_id IN ({placeholders}) GROUP BY post_id",
-            post_ids,
-        ).fetchall()
-        return {r[0]: r[1] for r in rows}
 
     def create_category(self, data: Dict[str, Any]) -> Dict[str, Any]:
         self._con.execute(
@@ -1453,20 +1442,14 @@ class DuckDBStorage(StorageBackend):
 
     def get_content_stats(self) -> Dict[str, Any]:
         articles_count = self._con.execute("SELECT count(*) FROM articles").fetchone()[0]
-        posts_count = self._con.execute("SELECT count(*) FROM community_posts").fetchone()[0]
         categories_count = self._con.execute("SELECT count(*) FROM categories").fetchone()[0]
         articles_by_cat = self._con.execute(
             "SELECT category, count(*) FROM articles GROUP BY category ORDER BY category"
         ).fetchall()
-        posts_by_cat = self._con.execute(
-            "SELECT category, count(*) FROM community_posts GROUP BY category ORDER BY category"
-        ).fetchall()
         return {
             "articles": articles_count,
-            "community_posts": posts_count,
             "categories": categories_count,
             "articles_by_category": {r[0]: r[1] for r in articles_by_cat},
-            "posts_by_category": {r[0]: r[1] for r in posts_by_cat},
         }
 
     # ── Family Companion (kid agent) ─────────────────────────────────
@@ -2228,8 +2211,8 @@ class DuckDBStorage(StorageBackend):
             caregivers, logistics_assignments, todo_items, ingest_artifacts,
             cos_messages, google_oauth_tokens).
 
-        Tables left intact: content (categories/articles/community_posts/
-        post_replies) and audit_events itself.
+        Tables left intact: content (categories/articles) and audit_events
+        itself.
         """
         deleted: Dict[str, int] = {}
 
@@ -2270,6 +2253,66 @@ class DuckDBStorage(StorageBackend):
                 [user_id],
             )
 
+            # Circle conversations are keyed by owner_user_id / participant
+            # rows, not a bare user_id, so they need a pre-pass like
+            # kid_messages above. Threads I OWN die with me (participants lose
+            # them — same rule as DMs); in threads I merely joined, only my
+            # participant row and my messages go, so the other households keep
+            # a readable thread.
+            circle_conv_ids = [
+                r[0] for r in self._con.execute(
+                    "SELECT id FROM circle_conversations WHERE owner_user_id = ?",
+                    [user_id],
+                ).fetchall()
+            ]
+            circle_msgs = 0
+            circle_parts = 0
+            for conv_id in circle_conv_ids:
+                circle_msgs += self._con.execute(
+                    "SELECT count(*) FROM circle_messages WHERE conversation_id = ?",
+                    [conv_id],
+                ).fetchone()[0]
+                circle_parts += self._con.execute(
+                    "SELECT count(*) FROM circle_participants WHERE conversation_id = ?",
+                    [conv_id],
+                ).fetchone()[0]
+                self._con.execute(
+                    "DELETE FROM circle_messages WHERE conversation_id = ?", [conv_id]
+                )
+                self._con.execute(
+                    "DELETE FROM circle_participants WHERE conversation_id = ?", [conv_id]
+                )
+                self._con.execute(
+                    "DELETE FROM circle_conversations WHERE id = ?", [conv_id]
+                )
+            circle_parts += self._con.execute(
+                "SELECT count(*) FROM circle_participants WHERE user_id = ?",
+                [user_id],
+            ).fetchone()[0]
+            self._con.execute(
+                "DELETE FROM circle_participants WHERE user_id = ?", [user_id]
+            )
+            circle_msgs += self._con.execute(
+                "SELECT count(*) FROM circle_messages WHERE user_id = ?",
+                [user_id],
+            ).fetchone()[0]
+            self._con.execute("DELETE FROM circle_messages WHERE user_id = ?", [user_id])
+            deleted["circle_conversations"] = len(circle_conv_ids)
+            deleted["circle_participants"] = circle_parts
+            deleted["circle_messages"] = circle_msgs
+
+            # Invites I issued go with me. Invites OTHERS issued that I claimed
+            # survive as their record, but the pointer at my dead account must
+            # not outlive it (a re-issued user_id would inherit the claim).
+            deleted["invite_tokens"] = self._con.execute(
+                "SELECT count(*) FROM invite_tokens WHERE user_id = ?", [user_id],
+            ).fetchone()[0]
+            self._con.execute("DELETE FROM invite_tokens WHERE user_id = ?", [user_id])
+            self._con.execute(
+                "UPDATE invite_tokens SET claimed_by = NULL WHERE claimed_by = ?",
+                [user_id],
+            )
+
             for table in [
                 "kid_agent_crisis_locks",
                 "kid_agent_configs",
@@ -2305,6 +2348,14 @@ class DuckDBStorage(StorageBackend):
                 # legal_documents (the policies themselves) deliberately survive.
                 "legal_acceptances",
                 "saved_items",
+                # First-run warm-up job rows + the coach nudges they produced.
+                "onboarding_warmup_runs",
+                "coach_nudges",
+                # Household members / Circle. Deleting the family removes my
+                # roster; the reciprocal rows OTHER families hold that point
+                # at me are swept separately below (they carry my user_id in
+                # member_user_id, not user_id).
+                "household_members",
             ]:
                 pre = self._con.execute(
                     f"SELECT count(*) FROM {table} WHERE user_id = ?",
@@ -2315,49 +2366,18 @@ class DuckDBStorage(StorageBackend):
                 )
                 deleted[table] = pre
 
-            # DMs key on participant columns, not user_id. Deleting a family
-            # removes every conversation they participate in — BOTH sides (my
-            # messages are my data; the peer loses the thread — documented in
-            # the privacy policy).
-            dm_conv_ids = [
-                r[0] for r in self._con.execute(
-                    "SELECT id FROM dm_conversations "
-                    "WHERE participant_a = ? OR participant_b = ?",
-                    [user_id, user_id],
-                ).fetchall()
-            ]
-            dm_msgs = 0
-            dm_reacts = 0
-            for conv_id in dm_conv_ids:
-                dm_msgs += self._con.execute(
-                    "SELECT count(*) FROM dm_messages WHERE conversation_id = ?",
-                    [conv_id],
-                ).fetchone()[0]
-                dm_reacts += self._con.execute(
-                    "SELECT count(*) FROM dm_reactions WHERE message_id IN "
-                    "(SELECT id FROM dm_messages WHERE conversation_id = ?)",
-                    [conv_id],
-                ).fetchone()[0]
-                self._con.execute(
-                    "DELETE FROM dm_reactions WHERE message_id IN "
-                    "(SELECT id FROM dm_messages WHERE conversation_id = ?)",
-                    [conv_id],
-                )
-                self._con.execute(
-                    "DELETE FROM dm_messages WHERE conversation_id = ?", [conv_id]
-                )
-                self._con.execute(
-                    "DELETE FROM dm_conversations WHERE id = ?", [conv_id]
-                )
-            if dm_conv_ids:
-                deleted["dm_conversations"] = len(dm_conv_ids)
-                deleted["dm_messages"] = dm_msgs
-                deleted["dm_reactions"] = dm_reacts
-            # Stray reactions BY this user on threads they don't participate
-            # in can't exist today (reacting requires participation), but the
-            # sweep is cheap and keeps the invariant honest.
+            # Reciprocal Circle links OTHER families hold on this account.
+            # The row is THEIR data about THEIR person, so it survives — but
+            # the pointer at a now-deleted account must go, or a re-issued
+            # user_id would inherit a stranger's Circle (and its threads).
+            deleted["household_member_links_cleared"] = self._con.execute(
+                "SELECT count(*) FROM household_members WHERE member_user_id = ?",
+                [user_id],
+            ).fetchone()[0]
             self._con.execute(
-                "DELETE FROM dm_reactions WHERE user_id = ?", [user_id]
+                "UPDATE household_members SET member_user_id = NULL, updated_at = now() "
+                "WHERE member_user_id = ?",
+                [user_id],
             )
 
             self.write_audit_event(
@@ -2724,218 +2744,15 @@ class DuckDBStorage(StorageBackend):
             "accepted_at": row[1].isoformat() if row[1] else None,
         }
 
-    # ── Direct messages (parent-to-parent) ───────────────────────────
+    # ── Account display names ────────────────────────────────────────
 
     def list_account_names(self) -> Dict[str, Optional[str]]:
-        """user_id → display_name for every account row (the DM directory's
-        raw material — the server layer resolves fallbacks + filters)."""
+        """user_id → display_name for every account row (raw material for
+        `server._display_name_for_user`, which resolves the profile fallback)."""
         rows = self._con.execute(
             "SELECT user_id, display_name FROM user_accounts"
         ).fetchall()
         return {r[0]: r[1] for r in rows}
-
-    _DM_CONV_COLS = (
-        "id, participant_a, participant_b, created_at, last_message_at, "
-        "last_message_preview, a_last_read_at, b_last_read_at, a_blocked, b_blocked"
-    )
-
-    @staticmethod
-    def _dm_conv_row(row) -> Dict[str, Any]:
-        return {
-            "id": row[0],
-            "participant_a": row[1],
-            "participant_b": row[2],
-            "created_at": row[3].isoformat() if row[3] else None,
-            "last_message_at": row[4].isoformat() if row[4] else None,
-            "last_message_preview": row[5] or "",
-            "a_last_read_at": row[6].isoformat() if row[6] else None,
-            "b_last_read_at": row[7].isoformat() if row[7] else None,
-            "a_blocked": bool(row[8]),
-            "b_blocked": bool(row[9]),
-        }
-
-    @staticmethod
-    def _dm_pair(user_id: str, peer_id: str) -> tuple:
-        """Canonical ordering — one conversation per pair no matter who starts."""
-        return (user_id, peer_id) if user_id < peer_id else (peer_id, user_id)
-
-    def get_or_create_dm_conversation(self, user_id: str, peer_id: str) -> Dict[str, Any]:
-        import uuid
-        a, b = self._dm_pair(user_id, peer_id)
-        row = self._con.execute(
-            f"SELECT {self._DM_CONV_COLS} FROM dm_conversations "
-            "WHERE participant_a = ? AND participant_b = ?",
-            [a, b],
-        ).fetchone()
-        if row:
-            return self._dm_conv_row(row)
-        conv_id = f"dm-{uuid.uuid4().hex[:12]}"
-        self._con.execute(
-            "INSERT INTO dm_conversations (id, participant_a, participant_b) VALUES (?, ?, ?)",
-            [conv_id, a, b],
-        )
-        return self.get_or_create_dm_conversation(user_id, peer_id)
-
-    def get_dm_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
-        row = self._con.execute(
-            f"SELECT {self._DM_CONV_COLS} FROM dm_conversations WHERE id = ?",
-            [conversation_id],
-        ).fetchone()
-        return self._dm_conv_row(row) if row else None
-
-    def list_dm_conversations(self, user_id: str) -> List[Dict[str, Any]]:
-        """The inbox: this user's conversations, newest activity first, each
-        annotated with peer_id + unread count (peer messages after my read
-        stamp). Per-row count query is fine at beta scale."""
-        rows = self._con.execute(
-            f"SELECT {self._DM_CONV_COLS} FROM dm_conversations "
-            "WHERE participant_a = ? OR participant_b = ? "
-            "ORDER BY COALESCE(last_message_at, created_at) DESC",
-            [user_id, user_id],
-        ).fetchall()
-        out = []
-        for row in rows:
-            conv = self._dm_conv_row(row)
-            i_am_a = conv["participant_a"] == user_id
-            conv["peer_id"] = conv["participant_b"] if i_am_a else conv["participant_a"]
-            conv["i_blocked"] = conv["a_blocked"] if i_am_a else conv["b_blocked"]
-            my_read = conv["a_last_read_at"] if i_am_a else conv["b_last_read_at"]
-            unread = self._con.execute(
-                "SELECT count(*) FROM dm_messages "
-                "WHERE conversation_id = ? AND sender_id != ? "
-                "AND created_at > COALESCE(CAST(? AS TIMESTAMPTZ), TIMESTAMPTZ '1970-01-01 00:00:00+00')",
-                [conv["id"], user_id, my_read],
-            ).fetchone()
-            conv["unread_count"] = int(unread[0]) if unread else 0
-            out.append(conv)
-        return out
-
-    def add_dm_message(self, conversation_id: str, sender_id: str, body: str) -> Dict[str, Any]:
-        import uuid
-        msg_id = f"dmm-{uuid.uuid4().hex[:12]}"
-        preview = body[:120]
-        with self._con.transaction():
-            self._con.execute(
-                "INSERT INTO dm_messages (id, conversation_id, sender_id, body) VALUES (?, ?, ?, ?)",
-                [msg_id, conversation_id, sender_id, body],
-            )
-            self._con.execute(
-                "UPDATE dm_conversations SET last_message_at = now(), last_message_preview = ? "
-                "WHERE id = ?",
-                [preview, conversation_id],
-            )
-        row = self._con.execute(
-            "SELECT id, conversation_id, sender_id, body, created_at "
-            "FROM dm_messages WHERE id = ?",
-            [msg_id],
-        ).fetchone()
-        return {
-            "id": row[0], "conversation_id": row[1], "sender_id": row[2],
-            "body": row[3], "created_at": row[4].isoformat() if row[4] else None,
-        }
-
-    def list_dm_messages(self, conversation_id: str, *, before: Optional[str] = None,
-                         limit: int = 50) -> List[Dict[str, Any]]:
-        """Newest-first page. `before` = the created_at cursor of the oldest
-        already-loaded message (ISO string)."""
-        if before:
-            rows = self._con.execute(
-                "SELECT id, conversation_id, sender_id, body, created_at FROM dm_messages "
-                "WHERE conversation_id = ? AND created_at < CAST(? AS TIMESTAMPTZ) "
-                "ORDER BY created_at DESC, id DESC LIMIT ?",
-                [conversation_id, before, limit],
-            ).fetchall()
-        else:
-            rows = self._con.execute(
-                "SELECT id, conversation_id, sender_id, body, created_at FROM dm_messages "
-                "WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
-                [conversation_id, limit],
-            ).fetchall()
-        msgs = [
-            {"id": r[0], "conversation_id": r[1], "sender_id": r[2],
-             "body": r[3], "created_at": r[4].isoformat() if r[4] else None,
-             "reactions": []}
-            for r in rows
-        ]
-        if msgs:
-            by_id = {m["id"]: m for m in msgs}
-            placeholders = ", ".join("?" for _ in msgs)
-            for mid, uid, emoji in self._con.execute(
-                f"SELECT message_id, user_id, emoji FROM dm_reactions "
-                f"WHERE message_id IN ({placeholders}) ORDER BY created_at",
-                list(by_id.keys()),
-            ).fetchall():
-                by_id[mid]["reactions"].append({"user_id": uid, "emoji": emoji})
-        return msgs
-
-    def get_dm_message(self, message_id: str) -> Optional[Dict[str, Any]]:
-        row = self._con.execute(
-            "SELECT id, conversation_id, sender_id, body, created_at "
-            "FROM dm_messages WHERE id = ?",
-            [message_id],
-        ).fetchone()
-        if not row:
-            return None
-        return {
-            "id": row[0], "conversation_id": row[1], "sender_id": row[2],
-            "body": row[3], "created_at": row[4].isoformat() if row[4] else None,
-        }
-
-    def set_dm_reaction(self, message_id: str, user_id: str,
-                        emoji: Optional[str]) -> List[Dict[str, Any]]:
-        """Tapback semantics: one reaction per user per message. A different
-        emoji replaces yours, the same emoji removes it, None removes it.
-        Returns the message's resulting reaction list."""
-        import uuid
-        existing = self._con.execute(
-            "SELECT emoji FROM dm_reactions WHERE message_id = ? AND user_id = ?",
-            [message_id, user_id],
-        ).fetchone()
-        if emoji is None or (existing and existing[0] == emoji):
-            self._con.execute(
-                "DELETE FROM dm_reactions WHERE message_id = ? AND user_id = ?",
-                [message_id, user_id],
-            )
-        elif existing:
-            self._con.execute(
-                "UPDATE dm_reactions SET emoji = ?, created_at = now() "
-                "WHERE message_id = ? AND user_id = ?",
-                [emoji, message_id, user_id],
-            )
-        else:
-            self._con.execute(
-                "INSERT INTO dm_reactions (id, message_id, user_id, emoji) "
-                "VALUES (?, ?, ?, ?)",
-                [f"dmr-{uuid.uuid4().hex[:12]}", message_id, user_id, emoji],
-            )
-        return [
-            {"user_id": r[0], "emoji": r[1]}
-            for r in self._con.execute(
-                "SELECT user_id, emoji FROM dm_reactions "
-                "WHERE message_id = ? ORDER BY created_at",
-                [message_id],
-            ).fetchall()
-        ]
-
-    def mark_dm_read(self, conversation_id: str, user_id: str) -> None:
-        conv = self.get_dm_conversation(conversation_id)
-        if not conv:
-            return
-        col = "a_last_read_at" if conv["participant_a"] == user_id else "b_last_read_at"
-        self._con.execute(
-            f"UPDATE dm_conversations SET {col} = now() WHERE id = ?",
-            [conversation_id],
-        )
-
-    def set_dm_block(self, conversation_id: str, user_id: str, blocked: bool) -> None:
-        conv = self.get_dm_conversation(conversation_id)
-        if not conv:
-            return
-        col = "a_blocked" if conv["participant_a"] == user_id else "b_blocked"
-        self._con.execute(
-            f"UPDATE dm_conversations SET {col} = ? WHERE id = ?",
-            [blocked, conversation_id],
-        )
 
     # ── Saved items ──────────────────────────────────────────────────
 
@@ -3258,7 +3075,7 @@ class DuckDBStorage(StorageBackend):
 
     def export_content_parquet(self) -> None:
         """Export content tables to separate parquet files (atomic)."""
-        for table in ("categories", "articles", "community_posts", "post_replies"):
+        for table in ("categories", "articles"):
             self._export_table_atomic(table, self.parquet_dir / f"{table}.parquet")
 
     # ── Activity planning: research runs + candidates ────────────────────
@@ -3529,6 +3346,251 @@ class DuckDBStorage(StorageBackend):
             "finished_at": row[11].isoformat() if row[11] else None,
         }
 
+    # ── First-run agent warm-up: durable job rows + coach nudges ─────
+    #
+    # Same durable-job shape as research_runs (the phone never holds the job):
+    # enqueue -> atomic claim -> run -> conditional finalize, with a startup
+    # sweeper for rows a restart left 'running'. Driven by
+    # app/onboarding_warmup.py — see that module for the step semantics.
+
+    _WARMUP_COLS = (
+        "id", "user_id", "status", "steps_json", "context_json", "result_json",
+        "error", "created_at", "started_at", "finished_at",
+    )
+
+    @staticmethod
+    def _warmup_run_row_to_dict(row: Any) -> Dict[str, Any]:
+        return {
+            "id": row[0],
+            "user_id": row[1],
+            "status": row[2],
+            "steps": json.loads(row[3]) if row[3] else [],
+            "context": json.loads(row[4]) if row[4] else {},
+            "result": json.loads(row[5]) if row[5] else {},
+            "error": row[6],
+            "created_at": row[7].isoformat() if row[7] else None,
+            "started_at": row[8].isoformat() if row[8] else None,
+            "finished_at": row[9].isoformat() if row[9] else None,
+        }
+
+    def create_warmup_run(
+        self,
+        *,
+        user_id: str,
+        steps: List[Dict[str, Any]],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Insert a queued warm-up run and return its run_id."""
+        import uuid
+        run_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO onboarding_warmup_runs (
+                id, user_id, status, steps_json, context_json, created_at
+            ) VALUES (?, ?, 'queued', ?, ?, now())
+            """,
+            [
+                run_id, user_id,
+                json.dumps(steps, ensure_ascii=False),
+                json.dumps(context or {}, ensure_ascii=False),
+            ],
+        )
+        return run_id
+
+    def get_active_warmup_run(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """The user's in-flight warm-up (queued or running), if any."""
+        row = self._con.execute(
+            f"SELECT {', '.join(self._WARMUP_COLS)} FROM onboarding_warmup_runs "
+            "WHERE user_id = ? AND status IN ('queued', 'running') "
+            "ORDER BY created_at DESC LIMIT 1",
+            [user_id],
+        ).fetchone()
+        return self._warmup_run_row_to_dict(row) if row else None
+
+    def enqueue_warmup_run(
+        self,
+        *,
+        user_id: str,
+        steps: List[Dict[str, Any]],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Atomically dedupe-or-create. A double-tap on the progress screen
+        resumes the same run instead of stacking a second one behind it; the
+        check + insert share one transaction so two simultaneous submits can't
+        both create. Returns {run_id, status, deduped}."""
+        with self._con.transaction():
+            active = self.get_active_warmup_run(user_id)
+            if active is not None:
+                return {"run_id": active["id"], "status": active["status"], "deduped": True}
+            run_id = self.create_warmup_run(user_id=user_id, steps=steps, context=context)
+            return {"run_id": run_id, "status": "queued", "deduped": False}
+
+    def claim_next_queued_warmup_run(self) -> Optional[Dict[str, Any]]:
+        """Atomically pick the oldest queued run and flip it to running. Single
+        UPDATE...RETURNING so two workers can't claim the same row."""
+        row = self._con.execute(
+            """
+            UPDATE onboarding_warmup_runs
+               SET status = 'running', started_at = now()
+             WHERE id = (
+                 SELECT id FROM onboarding_warmup_runs
+                  WHERE status = 'queued'
+                  ORDER BY created_at
+                  LIMIT 1
+             )
+            RETURNING id
+            """,
+        ).fetchone()
+        if row is None:
+            return None
+        return self.get_warmup_run(row[0])
+
+    def update_warmup_run(
+        self,
+        run_id: str,
+        *,
+        status: Optional[str] = None,
+        steps: Optional[List[Dict[str, Any]]] = None,
+        result: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+        finished: bool = False,
+    ) -> None:
+        """Patch mutable fields. `finished=True` stamps finished_at."""
+        sets: List[str] = []
+        params: List[Any] = []
+        if status is not None:
+            sets.append("status = ?"); params.append(status)
+        if steps is not None:
+            sets.append("steps_json = ?"); params.append(json.dumps(steps, ensure_ascii=False))
+        if result is not None:
+            sets.append("result_json = ?"); params.append(json.dumps(result, ensure_ascii=False))
+        if error is not None:
+            sets.append("error = ?"); params.append(error)
+        if finished:
+            sets.append("finished_at = now()")
+        if not sets:
+            return
+        params.append(run_id)
+        self._con.execute(
+            f"UPDATE onboarding_warmup_runs SET {', '.join(sets)} WHERE id = ?",
+            params,
+        )
+
+    def finalize_warmup_run_if_running(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        steps: Optional[List[Dict[str, Any]]] = None,
+        result: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+    ) -> bool:
+        """Write a terminal status ONLY if the run is still 'running' — the same
+        cancel-clobber guard as finalize_run_if_running. Returns True if it
+        transitioned, False if the run had already left 'running'."""
+        sets: List[str] = ["status = ?", "finished_at = now()"]
+        params: List[Any] = [status]
+        if steps is not None:
+            sets.append("steps_json = ?"); params.append(json.dumps(steps, ensure_ascii=False))
+        if result is not None:
+            sets.append("result_json = ?"); params.append(json.dumps(result, ensure_ascii=False))
+        if error is not None:
+            sets.append("error = ?"); params.append(error)
+        params.append(run_id)
+        row = self._con.execute(
+            f"UPDATE onboarding_warmup_runs SET {', '.join(sets)} "
+            "WHERE id = ? AND status = 'running' RETURNING id",
+            params,
+        ).fetchone()
+        return row is not None
+
+    def requeue_stale_warmup_runs(self) -> int:
+        """Startup sweeper: a restart kills the in-flight worker thread, so any
+        run still 'running' is orphaned. Re-queue it (steps are idempotent).
+        Returns how many were re-queued."""
+        rows = self._con.execute(
+            """
+            UPDATE onboarding_warmup_runs
+               SET status = 'queued', started_at = NULL
+             WHERE status = 'running'
+            RETURNING id
+            """,
+        ).fetchall()
+        if rows:
+            logger.warning(
+                "[warmup] re-queued %d stale running run(s) after restart", len(rows)
+            )
+        return len(rows)
+
+    def get_warmup_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {', '.join(self._WARMUP_COLS)} FROM onboarding_warmup_runs WHERE id = ?",
+            [run_id],
+        ).fetchone()
+        return self._warmup_run_row_to_dict(row) if row else None
+
+    def list_warmup_runs(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._WARMUP_COLS)} FROM onboarding_warmup_runs "
+            "WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+            [user_id, limit],
+        ).fetchall()
+        return [self._warmup_run_row_to_dict(r) for r in rows]
+
+    # coach_nudges ----------------------------------------------------------
+
+    def upsert_coach_nudge(
+        self,
+        *,
+        user_id: str,
+        body: str,
+        source: str = "warmup",
+        kid_name: Optional[str] = None,
+        cta_label: Optional[str] = None,
+        origin_id: Optional[str] = None,
+    ) -> str:
+        """Write the nudge for (user_id, source), replacing any prior one from
+        that source. Delete-then-insert in one transaction keeps a warm-up
+        re-run idempotent — a restart can't leave a parent with two first
+        nudges. Returns the nudge id."""
+        import uuid
+        nudge_id = str(uuid.uuid4())
+        with self._con.transaction():
+            self._con.execute(
+                "DELETE FROM coach_nudges WHERE user_id = ? AND source = ?",
+                [user_id, source],
+            )
+            self._con.execute(
+                """
+                INSERT INTO coach_nudges (
+                    id, user_id, source, kid_name, body, cta_label, origin_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, now())
+                """,
+                [nudge_id, user_id, source, kid_name, body, cta_label, origin_id],
+            )
+        return nudge_id
+
+    def latest_coach_nudge(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """The newest nudge for a parent, whatever produced it. Drives Home's
+        COACH card; None means the card falls back to its empty state."""
+        row = self._con.execute(
+            "SELECT id, user_id, source, kid_name, body, cta_label, origin_id, created_at "
+            "FROM coach_nudges WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            [user_id],
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "user_id": row[1],
+            "source": row[2],
+            "kid_name": row[3],
+            "body": row[4],
+            "cta_label": row[5],
+            "origin_id": row[6],
+            "created_at": row[7].isoformat() if row[7] else None,
+        }
+
     def insert_activity_candidates(
         self,
         *,
@@ -3545,7 +3607,7 @@ class DuckDBStorage(StorageBackend):
             "age_min", "age_max", "start_date", "end_date", "schedule_text",
             "price_text", "price_amount", "location_text", "city", "region",
             "distance_mi", "signup_url", "source_url", "contact_json", "fit_score",
-            "raw_json",
+            "fit_reason", "raw_json",
         )
         placeholders = ", ".join(["?"] * len(cols))
         with self._con.transaction() as con:
@@ -3563,6 +3625,7 @@ class DuckDBStorage(StorageBackend):
                         c.get("signup_url"), c.get("source_url"),
                         json.dumps(c.get("contact") or {}, ensure_ascii=False) if c.get("contact") else None,
                         c.get("fit_score"),
+                        c.get("fit_reason"),
                         json.dumps(c.get("raw") or c, ensure_ascii=False),
                     ],
                 )
@@ -3600,7 +3663,7 @@ class DuckDBStorage(StorageBackend):
             SELECT id, run_id, user_id, kid_name, name, provider, category,
                    age_min, age_max, start_date, end_date, schedule_text,
                    price_text, price_amount, location_text, city, region, distance_mi,
-                   signup_url, source_url, contact_json, fit_score, raw_json, created_at
+                   signup_url, source_url, contact_json, fit_score, fit_reason, raw_json, created_at
             FROM activity_candidates
             {clause}
             ORDER BY fit_score DESC NULLS LAST, created_at
@@ -3622,8 +3685,9 @@ class DuckDBStorage(StorageBackend):
                 "signup_url": r[18], "source_url": r[19],
                 "contact": json.loads(r[20]) if r[20] else None,
                 "fit_score": r[21],
-                "raw": json.loads(r[22]) if r[22] else None,
-                "created_at": r[23].isoformat() if r[23] else None,
+                "fit_reason": r[22],
+                "raw": json.loads(r[23]) if r[23] else None,
+                "created_at": r[24].isoformat() if r[24] else None,
             })
         return out
 
@@ -3702,7 +3766,7 @@ class DuckDBStorage(StorageBackend):
         "rrule", "recur_time", "recur_duration_min", "status", "pending_reason",
         "price_amount", "price_status",
         "signup_url", "contact_json", "carpool_with", "details_json", "notes",
-        "decision_rationale", "created_at", "updated_at",
+        "decision_rationale", "fit_score", "fit_reason", "created_at", "updated_at",
     )
 
     def track_activity(
@@ -3730,6 +3794,8 @@ class DuckDBStorage(StorageBackend):
         details: Optional[Dict[str, Any]] = None,
         notes: Optional[str] = None,
         decision_rationale: Optional[str] = None,
+        fit_score: Optional[float] = None,
+        fit_reason: Optional[str] = None,
     ) -> str:
         import uuid
 
@@ -3747,6 +3813,20 @@ class DuckDBStorage(StorageBackend):
             else:
                 atype = normalize_activity_type(activity_type)
 
+        # Copy forward fit_score and fit_reason from the candidate when tracking
+        # one (so "75% Match" / "Why it matched" survive into Planned). Explicit
+        # args win (allows manual override), then candidate lookup, then None.
+        if candidate_id and (fit_score is None or fit_reason is None):
+            row = self._con.execute(
+                "SELECT fit_score, fit_reason FROM activity_candidates WHERE id = ?",
+                [candidate_id]
+            ).fetchone()
+            if row:
+                if fit_score is None:
+                    fit_score = row[0]
+                if fit_reason is None:
+                    fit_reason = row[1]
+
         activity_id = str(uuid.uuid4())
         self._con.execute(
             """
@@ -3755,8 +3835,9 @@ class DuckDBStorage(StorageBackend):
                 activity_type,
                 status, pending_reason, price_amount, price_status, signup_url,
                 contact_json, carpool_with, details_json, notes, decision_rationale,
+                fit_score, fit_reason,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
             """,
             [
                 activity_id, user_id, kid_name, candidate_id, name, provider,
@@ -3767,6 +3848,7 @@ class DuckDBStorage(StorageBackend):
                 carpool_with,
                 json.dumps(details, ensure_ascii=False) if details else None,
                 notes, decision_rationale,
+                fit_score, fit_reason,
             ],
         )
         # ALL date writes flow through the one write path (v17). Legacy callers
@@ -4032,6 +4114,15 @@ class DuckDBStorage(StorageBackend):
                     f"SELECT count(*) FROM {table} WHERE user_id = ?", [user_id]
                 ).fetchone()[0]
                 self._con.execute(f"DELETE FROM {table} WHERE user_id = ?", [user_id])
+            # household_members SURVIVES a plan reset (it is the Circle, not
+            # the plan) — but the caregivers rows it mirrors just went, so
+            # clear the dangling links rather than leaving them pointing at
+            # deleted ids.
+            self._con.execute(
+                "UPDATE household_members SET caregiver_id = NULL, updated_at = now() "
+                "WHERE user_id = ? AND caregiver_id IS NOT NULL",
+                [user_id],
+            )
         self.write_audit_event(
             user_id=user_id, actor=actor, action="plan_reset",
             details={"counts": deleted},
@@ -4460,6 +4551,451 @@ class DuckDBStorage(StorageBackend):
             "caregivers", caregiver_id, patch,
             json_cols=("contact_json", "default_availability_json"),
             touch_updated=False,
+        )
+
+    # household_members (Circle) --------------------------------------------
+
+    _MEMBER_COLS = (
+        "id", "user_id", "kind", "display_name", "role", "relation",
+        "mvp_username", "email", "avatar_key", "member_user_id",
+        "attributes_json", "notes", "caregiver_id", "created_at", "updated_at",
+    )
+
+    # Columns a PATCH may set. `user_id`/`id`/`created_at` are never writable;
+    # `attributes` is re-keyed to attributes_json by the caller.
+    _MEMBER_PATCHABLE = (
+        "kind", "display_name", "role", "relation", "mvp_username", "email",
+        "avatar_key", "member_user_id", "attributes_json", "notes", "caregiver_id",
+    )
+
+    def _member_row(self, row: Any) -> Dict[str, Any]:
+        return self._row_to_dict(
+            self._MEMBER_COLS, row,
+            json_cols=(("attributes_json", "attributes"),),
+            ts_cols=("created_at", "updated_at"),
+        )
+
+    def add_household_member(
+        self,
+        user_id: str,
+        *,
+        display_name: str,
+        role: str = "other",
+        kind: str = "adult",
+        relation: Optional[str] = None,
+        mvp_username: Optional[str] = None,
+        email: Optional[str] = None,
+        avatar_key: Optional[str] = None,
+        member_user_id: Optional[str] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+        notes: Optional[str] = None,
+        caregiver_id: Optional[str] = None,
+    ) -> str:
+        import uuid
+        member_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO household_members (
+                id, user_id, kind, display_name, role, relation, mvp_username,
+                email, avatar_key, member_user_id, attributes_json, notes,
+                caregiver_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+            """,
+            [
+                member_id, user_id, kind, display_name, role, relation,
+                mvp_username, email, avatar_key, member_user_id,
+                json.dumps(attributes, ensure_ascii=False) if attributes else None,
+                notes, caregiver_id,
+            ],
+        )
+        return member_id
+
+    def list_household_members(self, user_id: str) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._MEMBER_COLS)} FROM household_members "
+            "WHERE user_id = ? ORDER BY created_at",
+            [user_id],
+        ).fetchall()
+        return [self._member_row(r) for r in rows]
+
+    def get_household_member(self, member_id: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {', '.join(self._MEMBER_COLS)} FROM household_members WHERE id = ?",
+            [member_id],
+        ).fetchone()
+        return self._member_row(row) if row else None
+
+    def update_household_member(self, member_id: str, fields: Dict[str, Any]) -> None:
+        """Patch a member. Unlike ``_cos_update`` an explicit None CLEARS the
+        column — the caller passes only the keys the client actually sent
+        (``exclude_unset``), so "set relation to null" is expressible."""
+        sets: List[str] = []
+        params: List[Any] = []
+        for key, value in fields.items():
+            if key not in self._MEMBER_PATCHABLE:
+                continue
+            sets.append(f"{key} = ?")
+            if key == "attributes_json" and value is not None:
+                params.append(json.dumps(value, ensure_ascii=False))
+            else:
+                params.append(value)
+        if not sets:
+            return
+        sets.append("updated_at = now()")
+        params.append(member_id)
+        self._con.execute(
+            f"UPDATE household_members SET {', '.join(sets)} WHERE id = ?", params
+        )
+
+    def delete_household_member(self, member_id: str) -> Dict[str, int]:
+        """Remove a member and everything that references it (CLAUDE.md:
+        deletes cascade). The mirrored caregivers row goes too, and any
+        logistics assignment that pointed at that caregiver falls back to an
+        unassigned 'tbd' row rather than dangling at a deleted id."""
+        counts: Dict[str, int] = {"household_members": 0, "caregivers": 0,
+                                  "logistics_assignments_unassigned": 0}
+        with self._con.transaction():
+            row = self._con.execute(
+                "SELECT user_id, caregiver_id FROM household_members WHERE id = ?",
+                [member_id],
+            ).fetchone()
+            if row is None:
+                return counts
+            owner, caregiver_id = row[0], row[1]
+            if caregiver_id:
+                counts["logistics_assignments_unassigned"] = self._con.execute(
+                    "SELECT count(*) FROM logistics_assignments "
+                    "WHERE user_id = ? AND caregiver_id = ?",
+                    [owner, caregiver_id],
+                ).fetchone()[0]
+                self._con.execute(
+                    "UPDATE logistics_assignments SET caregiver_id = NULL, "
+                    "status = 'tbd', updated_at = now() "
+                    "WHERE user_id = ? AND caregiver_id = ?",
+                    [owner, caregiver_id],
+                )
+                counts["caregivers"] = self._con.execute(
+                    "SELECT count(*) FROM caregivers WHERE id = ? AND user_id = ?",
+                    [caregiver_id, owner],
+                ).fetchone()[0]
+                self._con.execute(
+                    "DELETE FROM caregivers WHERE id = ? AND user_id = ?",
+                    [caregiver_id, owner],
+                )
+            self._con.execute("DELETE FROM household_members WHERE id = ?", [member_id])
+            counts["household_members"] = 1
+        return counts
+
+    def circle_peer_ids(self, user_id: str) -> List[str]:
+        """Account ids inside this user's Circle — the authorization set for
+        every Circle conversation.
+
+        MUTUAL by construction: I must hold a member row pointing at you AND
+        you must hold one pointing at me. A one-sided link is just an address
+        book entry, so nobody can unlock a channel by unilaterally typing
+        a stranger's user_id into their own roster."""
+        rows = self._con.execute(
+            """
+            SELECT DISTINCT mine.member_user_id
+            FROM household_members mine
+            WHERE mine.user_id = ?
+              AND mine.member_user_id IS NOT NULL
+              AND mine.member_user_id <> ?
+              AND EXISTS (
+                  SELECT 1 FROM household_members theirs
+                  WHERE theirs.user_id = mine.member_user_id
+                    AND theirs.member_user_id = ?
+              )
+            """,
+            [user_id, user_id, user_id],
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def find_household_member_by_account(
+        self, user_id: str, member_user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """The roster row `user_id` holds that points at the account
+        `member_user_id`. Used when claiming an invite, to decide whether the
+        reciprocal side already exists or has to be created."""
+        row = self._con.execute(
+            f"SELECT {', '.join(self._MEMBER_COLS)} FROM household_members "
+            "WHERE user_id = ? AND member_user_id = ? ORDER BY created_at LIMIT 1",
+            [user_id, member_user_id],
+        ).fetchone()
+        return self._member_row(row) if row else None
+
+    # circle_conversations / circle_participants / circle_messages ----------
+    # The group threads that replaced the anonymous board. Authorization lives
+    # in app/circle.py (one guard, every route through it); this layer is
+    # deliberately dumb about who may read what.
+
+    _CIRCLE_CONV_COLS = (
+        "id", "owner_user_id", "title", "body",
+        "created_at", "updated_at", "last_reply_at",
+    )
+    _CIRCLE_PARTICIPANT_COLS = (
+        "conversation_id", "user_id", "member_id", "role", "joined_at", "last_read_at",
+    )
+    _CIRCLE_MESSAGE_COLS = (
+        "id", "conversation_id", "user_id", "author_name", "initials", "body", "created_at",
+    )
+
+    def _circle_conv_row(self, row: Any) -> Dict[str, Any]:
+        return self._row_to_dict(
+            self._CIRCLE_CONV_COLS, row,
+            ts_cols=("created_at", "updated_at", "last_reply_at"),
+        )
+
+    def create_circle_conversation(
+        self, owner_user_id: str, *, title: str, body: Optional[str] = None
+    ) -> str:
+        import uuid
+        conv_id = f"cc-{uuid.uuid4().hex[:12]}"
+        self._con.execute(
+            "INSERT INTO circle_conversations (id, owner_user_id, title, body, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, now(), now())",
+            [conv_id, owner_user_id, title, body],
+        )
+        return conv_id
+
+    def get_circle_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {', '.join(self._CIRCLE_CONV_COLS)} FROM circle_conversations "
+            "WHERE id = ?",
+            [conversation_id],
+        ).fetchone()
+        return self._circle_conv_row(row) if row else None
+
+    def update_circle_conversation(self, conversation_id: str, fields: Dict[str, Any]) -> None:
+        allowed = {"title", "body"}
+        sets, params = [], []
+        for key, value in fields.items():
+            if key in allowed:
+                sets.append(f"{key} = ?")
+                params.append(value)
+        if not sets:
+            return
+        sets.append("updated_at = now()")
+        params.append(conversation_id)
+        self._con.execute(
+            f"UPDATE circle_conversations SET {', '.join(sets)} WHERE id = ?", params
+        )
+
+    def delete_circle_conversation(self, conversation_id: str) -> Dict[str, int]:
+        """Deletes cascade (CLAUDE.md): the thread takes its messages and its
+        participant rows with it — an orphan participant row would leave the
+        thread listed in someone's Circle forever."""
+        counts = {"circle_messages": 0, "circle_participants": 0,
+                  "circle_conversations": 0}
+        with self._con.transaction():
+            counts["circle_messages"] = self._con.execute(
+                "SELECT count(*) FROM circle_messages WHERE conversation_id = ?",
+                [conversation_id],
+            ).fetchone()[0]
+            counts["circle_participants"] = self._con.execute(
+                "SELECT count(*) FROM circle_participants WHERE conversation_id = ?",
+                [conversation_id],
+            ).fetchone()[0]
+            self._con.execute(
+                "DELETE FROM circle_messages WHERE conversation_id = ?", [conversation_id]
+            )
+            self._con.execute(
+                "DELETE FROM circle_participants WHERE conversation_id = ?",
+                [conversation_id],
+            )
+            counts["circle_conversations"] = self._con.execute(
+                "SELECT count(*) FROM circle_conversations WHERE id = ?",
+                [conversation_id],
+            ).fetchone()[0]
+            self._con.execute(
+                "DELETE FROM circle_conversations WHERE id = ?", [conversation_id]
+            )
+        return counts
+
+    def list_circle_conversations_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """Threads this ACCOUNT participates in. Rows whose user_id is still
+        NULL (invited, not yet claimed) match nobody — that is the point."""
+        rows = self._con.execute(
+            f"SELECT {', '.join('c.' + c for c in self._CIRCLE_CONV_COLS)} "
+            "FROM circle_conversations c "
+            "WHERE EXISTS (SELECT 1 FROM circle_participants p "
+            "              WHERE p.conversation_id = c.id AND p.user_id = ?) "
+            "ORDER BY COALESCE(c.last_reply_at, c.created_at) DESC",
+            [user_id],
+        ).fetchall()
+        return [self._circle_conv_row(r) for r in rows]
+
+    def add_circle_participant(
+        self, conversation_id: str, *, member_id: str,
+        user_id: Optional[str] = None, role: str = "member",
+    ) -> None:
+        """Idempotent per (conversation, member) — re-adding someone updates
+        their account binding instead of creating a duplicate row."""
+        existing = self._con.execute(
+            "SELECT 1 FROM circle_participants WHERE conversation_id = ? AND member_id = ?",
+            [conversation_id, member_id],
+        ).fetchone()
+        if existing:
+            if user_id is not None:
+                self._con.execute(
+                    "UPDATE circle_participants SET user_id = ? "
+                    "WHERE conversation_id = ? AND member_id = ?",
+                    [user_id, conversation_id, member_id],
+                )
+            return
+        self._con.execute(
+            "INSERT INTO circle_participants (conversation_id, user_id, member_id, "
+            "role, joined_at) VALUES (?, ?, ?, ?, now())",
+            [conversation_id, user_id, member_id, role],
+        )
+
+    def list_circle_participants(self, conversation_id: str) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._CIRCLE_PARTICIPANT_COLS)} FROM circle_participants "
+            "WHERE conversation_id = ? ORDER BY joined_at",
+            [conversation_id],
+        ).fetchall()
+        return [
+            self._row_to_dict(self._CIRCLE_PARTICIPANT_COLS, r,
+                              ts_cols=("joined_at", "last_read_at"))
+            for r in rows
+        ]
+
+    def get_circle_participant(
+        self, conversation_id: str, user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """The authorization lookup. Matches on user_id ONLY — an unclaimed
+        (user_id IS NULL) roster row grants nothing."""
+        row = self._con.execute(
+            f"SELECT {', '.join(self._CIRCLE_PARTICIPANT_COLS)} FROM circle_participants "
+            "WHERE conversation_id = ? AND user_id = ? LIMIT 1",
+            [conversation_id, user_id],
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(self._CIRCLE_PARTICIPANT_COLS, row,
+                                 ts_cols=("joined_at", "last_read_at"))
+
+    def bind_circle_participant_account(self, member_id: str, user_id: str) -> int:
+        """Fill in the account for every pending participant row of a member.
+        Called when an invite is claimed: the threads they were added to before
+        they had an account become readable at that moment, and not before."""
+        pending = self._con.execute(
+            "SELECT count(*) FROM circle_participants "
+            "WHERE member_id = ? AND user_id IS NULL",
+            [member_id],
+        ).fetchone()[0]
+        self._con.execute(
+            "UPDATE circle_participants SET user_id = ? "
+            "WHERE member_id = ? AND user_id IS NULL",
+            [user_id, member_id],
+        )
+        return pending
+
+    def add_circle_message(
+        self, conversation_id: str, *, user_id: str, body: str,
+        author_name: Optional[str] = None, initials: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        import uuid
+        message_id = f"cm-{uuid.uuid4().hex[:12]}"
+        with self._con.transaction():
+            self._con.execute(
+                "INSERT INTO circle_messages (id, conversation_id, user_id, "
+                "author_name, initials, body, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, now())",
+                [message_id, conversation_id, user_id, author_name, initials, body],
+            )
+            self._con.execute(
+                "UPDATE circle_conversations SET last_reply_at = now(), updated_at = now() "
+                "WHERE id = ?",
+                [conversation_id],
+            )
+        row = self._con.execute(
+            f"SELECT {', '.join(self._CIRCLE_MESSAGE_COLS)} FROM circle_messages WHERE id = ?",
+            [message_id],
+        ).fetchone()
+        return self._row_to_dict(self._CIRCLE_MESSAGE_COLS, row, ts_cols=("created_at",))
+
+    def list_circle_messages(self, conversation_id: str, limit: int = 500) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._CIRCLE_MESSAGE_COLS)} FROM circle_messages "
+            "WHERE conversation_id = ? ORDER BY created_at LIMIT ?",
+            [conversation_id, limit],
+        ).fetchall()
+        return [
+            self._row_to_dict(self._CIRCLE_MESSAGE_COLS, r, ts_cols=("created_at",))
+            for r in rows
+        ]
+
+    def circle_message_stats(self, conversation_id: str) -> Dict[str, Any]:
+        """reply_count + who replied last, for the conversation list row."""
+        row = self._con.execute(
+            "SELECT count(*) FROM circle_messages WHERE conversation_id = ?",
+            [conversation_id],
+        ).fetchone()
+        last = self._con.execute(
+            "SELECT author_name, user_id FROM circle_messages WHERE conversation_id = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            [conversation_id],
+        ).fetchone()
+        return {
+            "reply_count": row[0] if row else 0,
+            "last_reply_from": (last[0] if last else None),
+            "last_reply_user_id": (last[1] if last else None),
+        }
+
+    def circle_unread_count(self, conversation_id: str, user_id: str) -> int:
+        row = self._con.execute(
+            "SELECT count(*) FROM circle_messages m "
+            "WHERE m.conversation_id = ? AND m.user_id <> ? "
+            "AND m.created_at > COALESCE("
+            "  (SELECT p.last_read_at FROM circle_participants p "
+            "   WHERE p.conversation_id = m.conversation_id AND p.user_id = ?), "
+            "  TIMESTAMPTZ '1970-01-01 00:00:00+00')",
+            [conversation_id, user_id, user_id],
+        ).fetchone()
+        return row[0] if row else 0
+
+    def mark_circle_conversation_read(self, conversation_id: str, user_id: str) -> None:
+        self._con.execute(
+            "UPDATE circle_participants SET last_read_at = now() "
+            "WHERE conversation_id = ? AND user_id = ?",
+            [conversation_id, user_id],
+        )
+
+    # invite_tokens ---------------------------------------------------------
+
+    _INVITE_COLS = (
+        "token", "user_id", "member_id", "created_at", "expires_at",
+        "claimed_by", "claimed_at",
+    )
+
+    def create_invite_token(
+        self, user_id: str, *, member_id: Optional[str], token: str, ttl_days: int = 14,
+    ) -> Dict[str, Any]:
+        self._con.execute(
+            "INSERT INTO invite_tokens (token, user_id, member_id, created_at, expires_at) "
+            f"VALUES (?, ?, ?, now(), now() + INTERVAL {int(ttl_days)} DAY)",
+            [token, user_id, member_id],
+        )
+        return self.get_invite_token(token)
+
+    def get_invite_token(self, token: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {', '.join(self._INVITE_COLS)} FROM invite_tokens WHERE token = ?",
+            [token],
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(
+            self._INVITE_COLS, row,
+            ts_cols=("created_at", "expires_at", "claimed_at"),
+        )
+
+    def claim_invite_token(self, token: str, claimed_by: str) -> None:
+        self._con.execute(
+            "UPDATE invite_tokens SET claimed_by = ?, claimed_at = now() WHERE token = ?",
+            [claimed_by, token],
         )
 
     # logistics_assignments -------------------------------------------------

@@ -45,24 +45,14 @@ export function Dashboard() {
           >
             New Article
           </Link>
-          <Link
-            to="/community/new"
-            className="rounded-md border border-accent px-500 py-300 text-title-md font-medium text-accent hover:bg-accent-tint transition-colors duration-fast"
-          >
-            New Post
-          </Link>
         </div>
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-3 gap-600 mb-1000">
+      <div className="grid grid-cols-2 gap-600 mb-1000">
         <div className="rounded-lg bg-elevated p-600 border border-hairline">
           <p className="text-body-sm font-medium text-ink-muted mb-200">Articles</p>
           <p className="font-display text-display-sm text-accent">{stats.articles}</p>
-        </div>
-        <div className="rounded-lg bg-elevated p-600 border border-hairline">
-          <p className="text-body-sm font-medium text-ink-muted mb-200">Community Posts</p>
-          <p className="font-display text-display-sm text-accent">{stats.community_posts}</p>
         </div>
         <div className="rounded-lg bg-elevated p-600 border border-hairline">
           <p className="text-body-sm font-medium text-ink-muted mb-200">Categories</p>
@@ -71,7 +61,7 @@ export function Dashboard() {
       </div>
 
       {/* Breakdowns */}
-      <div className="grid grid-cols-2 gap-600">
+      <div className="grid grid-cols-1 gap-600">
         <div className="rounded-lg bg-elevated p-600 border border-hairline">
           <h2 className="text-title-md font-semibold text-ink-secondary mb-500">Articles by Category</h2>
           {Object.keys(stats.articles_by_category).length === 0 ? (
@@ -88,21 +78,6 @@ export function Dashboard() {
           )}
         </div>
 
-        <div className="rounded-lg bg-elevated p-600 border border-hairline">
-          <h2 className="text-title-md font-semibold text-ink-secondary mb-500">Posts by Category</h2>
-          {Object.keys(stats.posts_by_category).length === 0 ? (
-            <p className="text-body-sm text-ink-muted">No data yet</p>
-          ) : (
-            <ul className="space-y-300">
-              {Object.entries(stats.posts_by_category).map(([cat, count]) => (
-                <li key={cat} className="flex items-center justify-between text-body-md">
-                  <span className="text-ink-secondary">{cat}</span>
-                  <span className="font-medium text-ink-primary">{count}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
       </div>
     </div>
   );

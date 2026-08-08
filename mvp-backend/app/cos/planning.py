@@ -14,7 +14,7 @@ layer.
 """
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import datetime, time, date
 from typing import Any, Optional
 
 from app.cos.lifecycle import UNDECIDED
@@ -139,20 +139,28 @@ def check_eligibility(activity: dict, kid: dict) -> dict:
 
 
 def detect_time_conflicts(
-    calendar_entries: list[dict], recurring: list[dict]
+    calendar_entries: list[dict], recurring: list[dict],
+    tracked_activities: Optional[list[dict]] = None,
 ) -> list[dict]:
-    """Detect per-kid clashes between recurring appointments and calendar entries.
+    """Detect per-kid clashes between recurring appointments and calendar entries,
+    and between tracked activities for the same kid.
 
     ``calendar_entries`` carry: ``id``, ``title``, ``kid_name``, ``start_ts``
     (ISO str|None), ``end_ts`` (ISO str|None), ``kind``. ``recurring`` carry:
     ``id``, ``title``, ``kid_name``, ``weekday`` (0=Mon..6=Sun, int|None),
     ``start_time`` ("HH:MM"|None), ``end_time`` ("HH:MM"|None).
+    ``tracked_activities`` carry: ``id``, ``name``, ``kid_name``, ``start_date``,
+    ``end_date`` (ISO date|None), ``status``.
 
     A conflict exists when a recurring appointment's weekday matches a calendar
     entry's weekday (derived from ``start_ts``) and their times-of-day overlap
     (``start_a < end_b and start_b < end_a``). Only same-kid pairs are compared;
     a ``kid_name`` of None or "both" matches any kid. Entries missing the data
     needed to compare are skipped.
+
+    Tracked activities with overlapping date ranges for the same kid are also
+    flagged. ``status == "declined"`` activities are excluded from overlap
+    warnings — a declined thing conflicts with nothing.
 
     Returns a list of conflict dicts describing each clash.
     """
@@ -200,6 +208,52 @@ def detect_time_conflicts(
                         ),
                     }
                 )
+
+    # Activity-vs-activity overlap: same kid, overlapping date ranges.
+    # Declined activities conflict with nothing.
+    if tracked_activities:
+        active = [
+            a for a in tracked_activities
+            if (a.get("status") or "").lower() != "declined"
+        ]
+        for i, a in enumerate(active):
+            a_kid = a.get("kid_name")
+            a_start = _parse_date(a.get("start_date"))
+            a_end = _parse_date(a.get("end_date"))
+            if not (a_kid and a_start and a_end):
+                continue
+
+            for j, b in enumerate(active):
+                if i >= j:  # compare each pair once
+                    continue
+                b_kid = b.get("kid_name")
+                if not _kids_match(a_kid, b_kid):
+                    continue
+                b_start = _parse_date(b.get("start_date"))
+                b_end = _parse_date(b.get("end_date"))
+                if not (b_start and b_end):
+                    continue
+
+                # Date overlap: start_a <= end_b and start_b <= end_a
+                if a_start <= b_end and b_start <= a_end:
+                    conflicts.append(
+                        {
+                            "type": "activity_overlap",
+                            "kid_name": _resolve_kid(a_kid, b_kid),
+                            "activity_a_id": a.get("id"),
+                            "activity_a_name": a.get("name"),
+                            "activity_b_id": b.get("id"),
+                            "activity_b_name": b.get("name"),
+                            "overlap_start": max(a_start, b_start).isoformat(),
+                            "overlap_end": min(a_end, b_end).isoformat(),
+                            "detail": (
+                                f"{a.get('name')} "
+                                f"({_short_date(a_start)}–{_short_date(a_end)}) "
+                                f"overlaps {b.get('name')} "
+                                f"({_short_date(b_start)}–{_short_date(b_end)})"
+                            ),
+                        }
+                    )
 
     return conflicts
 
@@ -513,3 +567,28 @@ def _resolve_kid(a: Optional[str], b: Optional[str]) -> Optional[str]:
     if not _is_wildcard(b):
         return b
     return a
+
+
+def _parse_date(value: Optional[str]) -> Optional[date]:
+    """Parse an ISO date string (YYYY-MM-DD); returns None on null or parse failure."""
+    if not value:
+        return None
+    try:
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        # Handle both date objects and ISO strings
+        s = str(value)[:10]  # take first 10 chars (YYYY-MM-DD)
+        return date.fromisoformat(s)
+    except (ValueError, AttributeError):
+        return None
+
+
+def _short_date(value) -> str:
+    """Format a date as 'Jun 22' for display."""
+    if isinstance(value, date) and not isinstance(value, datetime):
+        d = value
+    else:
+        d = _parse_date(value)
+    if not d:
+        return ""
+    return d.strftime("%b %-d")

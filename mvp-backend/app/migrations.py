@@ -253,7 +253,94 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
          "CREATE INDEX IF NOT EXISTS idx_tracked_activities_user_type "
          "ON tracked_activities (user_id, activity_type)"
      )),
+    # beta-v1 Phase 1: household members / Circle. The table is NEW, so
+    # HOUSEHOLD_DDL's CREATE IF NOT EXISTS (indexes included) covers fresh and
+    # legacy DBs alike and there is nothing to ALTER. Marker only — it records
+    # when the Circle schema arrived and pins its registration in
+    # BOOTSTRAP_TABLES + the .dockerignore exclusion. household_members is the
+    # DM authorization source, so losing it is a privacy event, not just data
+    # loss.
+    (20, "household.members_circle", None),
+    # beta-v1 sprint 2: DROP the two retired surfaces' tables.
+    #
+    #   • the public community board  -> community_posts, post_replies
+    #   • parent-to-parent 1:1 DMs    -> dm_conversations, dm_messages,
+    #                                    dm_reactions
+    #
+
+    # Both surfaces are gone from every client (iOS deleted its views, the CMS
+    # its editor) and their routes were withdrawn first. A DROP has to be
+    # VERSIONED — a new table converges via CREATE-IF-NOT-EXISTS, but a removal
+    # only happens if something runs it exactly once. The matching DDL was
+    # deleted from duckdb_storage.py in the same commit, so nothing recreates
+    # them on the next boot.
+    #
+    # RECOVERABILITY: export_parquet snapshots every BOOTSTRAP_TABLES entry to
+    # data/<table>.parquet, and prod snapshots before any volume rebuild — so
+    # data/community_posts.parquet, data/post_replies.parquet and
+    # data/dm_*.parquet hold the last state of these five tables. Those files
+    # are deliberately NOT deleted: they are the only way back. (Local dev at
+    # drop time: community_posts 34 rows, post_replies 6, all dm_* empty.)
+    #
+    # saved_items rows with item_type='community_post' are deliberately UNTOUCHED
+    # — real users' saves. iOS skips them on render, the server no longer
+    # resolves them, and nothing here deletes them.
+    #
+    # Order is FK-safe (children before parents), and this migration is DROPs
+    # and nothing else: run_migrations wraps each body in one transaction, and
+    # DuckDB cannot CREATE INDEX on a table with outstanding same-transaction
+    # updates (that combination took prod down on 2026-07-11). Keep it pure.
+    (21, "retire_community_board_and_dms",
+     lambda con: _drop_retired_surface_tables(con)),
+    # beta-v1 sprint 2 planner redesign: match quality and reason.
+    # tracked_activities gains fit_score and fit_reason (copied forward from
+    # activity_candidates at track time). fit_score was the research LLM's 0..1
+    # estimate (it existed on candidates but was dropped on track, so Planned
+    # items have no score to render). fit_reason is the new "Why it matched"
+    # sentence. Idempotent on re-run, no backfill — these two fields apply only
+    # to new research runs after this schema lands. Separate transactions (INDEX
+    # must not share a txn with an UPDATE).
+    (22, "tracked_activities.add_fit_fields",
+     lambda con: _add_tracked_activity_fit_fields(con)),
 ]
+
+# FK-safe order: children (reactions, messages, replies) before their parents.
+_RETIRED_TABLES = (
+    "dm_reactions",
+    "dm_messages",
+    "dm_conversations",
+    "post_replies",
+    "community_posts",
+)
+
+
+def _drop_retired_surface_tables(con) -> None:
+    for table in _RETIRED_TABLES:
+        # Table names are a fixed literal tuple above, never caller input.
+        con.execute(f"DROP TABLE IF EXISTS {table}")
+
+
+def _add_tracked_activity_fit_fields(con) -> None:
+    """Migration v22: tracked_activities gains fit_score + fit_reason."""
+    cols = {
+        r[0] for r in con.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'tracked_activities'"
+        ).fetchall()
+    }
+    if "fit_score" not in cols:
+        con.execute("ALTER TABLE tracked_activities ADD COLUMN fit_score DOUBLE")
+    if "fit_reason" not in cols:
+        con.execute("ALTER TABLE tracked_activities ADD COLUMN fit_reason TEXT")
+    # Also add fit_reason to activity_candidates so research can write it.
+    cand_cols = {
+        r[0] for r in con.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'activity_candidates'"
+        ).fetchall()
+    }
+    if "fit_reason" not in cand_cols:
+        con.execute("ALTER TABLE activity_candidates ADD COLUMN fit_reason TEXT")
 
 
 def _backfill_user_accounts(con) -> None:

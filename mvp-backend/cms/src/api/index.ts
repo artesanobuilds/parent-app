@@ -1,4 +1,4 @@
-import type { Article, Category, CommunityPost, ContentStats } from '../types';
+import type { Article, Category, ContentStats } from '../types';
 
 const API = '';
 
@@ -87,17 +87,6 @@ export const updateArticle = (id: string, data: Partial<Article>) =>
   fetchJSON<Article>(`${API}/cms/articles/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
 export const deleteArticle = (id: string) =>
   fetchJSON<{ deleted: boolean }>(`${API}/cms/articles/${id}`, { method: 'DELETE' });
-
-// Community Posts
-export const getCommunityPosts = (category?: string) =>
-  fetchJSON<CommunityPost[]>(`${API}/content/community${category ? `?category=${category}` : ''}`);
-export const getCommunityPost = (id: string) => fetchJSON<CommunityPost>(`${API}/cms/community-posts/${id}`);
-export const createCommunityPost = (data: CommunityPost) =>
-  fetchJSON<CommunityPost>(`${API}/cms/community-posts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-export const updateCommunityPost = (id: string, data: Partial<CommunityPost>) =>
-  fetchJSON<CommunityPost>(`${API}/cms/community-posts/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-export const deleteCommunityPost = (id: string) =>
-  fetchJSON<{ deleted: boolean }>(`${API}/cms/community-posts/${id}`, { method: 'DELETE' });
 
 // Stats & Export
 export const getStats = () => fetchJSON<ContentStats>(`${API}/cms/stats`);

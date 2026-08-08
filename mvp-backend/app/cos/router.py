@@ -59,44 +59,76 @@ class CosChatRequest(BaseModel):
 
 
 async def _cos_chat_stream(user_id: str, thread_id: str, message: str):
-    """SSE generator mirroring app.server.generate_stream's envelope."""
+    """SSE generator mirroring app.server.generate_stream's envelope.
+
+    Runs the MERGED parent agent on the merged per-parent text thread — the
+    same graph and the same memory `/chat` uses. The transcript this endpoint
+    serves back (`cos_messages`) is still its own, so `GET /cos/messages`
+    keeps its contract.
+    """
+    from app import agent as agent_module
+    from app import thread_repair
+
     storage = _storage()
     storage.append_cos_message(user_id, thread_id=thread_id, role="user", content=message)
 
     agent = get_cos_agent(user_id)
-    memory_key = f"cos:{user_id}:{thread_id}"
+    memory_key = agent_module.thread_key(user_id, "cos", thread_id)
     from app.cost_logging import CostLoggingCallbackHandler, new_workflow_id
     cost_cb = CostLoggingCallbackHandler(
         feature="cos", workflow=new_workflow_id(), session=thread_id, user=user_id
     )
     config = {"configurable": {"thread_id": memory_key}, "callbacks": [cost_cb]}
-    assistant_buffer = ""
 
-    try:
-        async for event in agent.astream_events(
-            {"messages": [HumanMessage(content=message)]},
-            config=config,
-            version="v1",
-        ):
-            kind = event["event"]
-            if kind == "on_chat_model_stream":
-                content = event["data"]["chunk"].content
-                if content:
-                    assistant_buffer += content
-                    yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
-            elif kind == "on_tool_start":
-                yield f"data: {json.dumps({'type': 'tool_start', 'tool': event['name']})}\n\n"
-            elif kind == "on_tool_end":
-                yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name']})}\n\n"
+    # Self-heal a thread poisoned by a cancelled tool call before the turn.
+    # This surface used to run WITHOUT the pre-flight — it had its own agent
+    # and its own checkpointer, so one aborted plan turn poisoned it forever
+    # (the outage in memory `debugging_voice_thread_poisoning`). Now that it
+    # shares the parent thread, it must never be the path that skips repair.
+    await thread_repair.repair_thread(agent, config)
 
-        yield "data: [DONE]\n\n"
-        if assistant_buffer:
-            storage.append_cos_message(
-                user_id, thread_id=thread_id, role="assistant", content=assistant_buffer
-            )
-    except Exception as exc:
-        logger.error(f"[cos] stream error: {exc}")
-        yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
+    for attempt in (1, 2):
+        assistant_buffer = ""
+        try:
+            async for event in agent.astream_events(
+                {"messages": [HumanMessage(content=message)]},
+                config=config,
+                version="v1",
+            ):
+                # Harness-internal model calls (summarization) must not be
+                # streamed to the client — see app/agent.is_internal_event.
+                if agent_module.is_internal_event(event):
+                    continue
+                kind = event["event"]
+                if kind == "on_chat_model_stream":
+                    content = event["data"]["chunk"].content
+                    if content:
+                        assistant_buffer += content
+                        yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+                elif kind == "on_tool_start":
+                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': event['name']})}\n\n"
+                elif kind == "on_tool_end":
+                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name']})}\n\n"
+
+            yield "data: [DONE]\n\n"
+            if assistant_buffer:
+                storage.append_cos_message(
+                    user_id, thread_id=thread_id, role="assistant", content=assistant_buffer
+                )
+            return
+        except Exception as exc:
+            # Poisoned mid-run: repair and retry once, but only if nothing has
+            # streamed yet — a retry after partial output would repeat text.
+            if attempt == 1 and not assistant_buffer and thread_repair.is_dangling_tool_error(exc):
+                logger.warning(
+                    "[cos] dangling tool call mid-run — repairing and retrying "
+                    "user=%s thread=%s", user_id, thread_id,
+                )
+                await thread_repair.repair_thread(agent, config)
+                continue
+            logger.error(f"[cos] stream error: {exc}")
+            yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
+            return
 
 
 @router.post("/chat")
@@ -140,6 +172,8 @@ class TrackActivityBody(BaseModel):
     signup_url: Optional[str] = None
     notes: Optional[str] = None
     decision_rationale: Optional[str] = None
+    fit_score: Optional[float] = None
+    fit_reason: Optional[str] = None
 
 
 # Date fields route through storage.set_activity_dates (the ONE date write
@@ -165,6 +199,8 @@ class TrackActivityPatch(BaseModel):
     recur_duration_min: Optional[int] = None
     notes: Optional[str] = None
     decision_rationale: Optional[str] = None
+    fit_score: Optional[float] = None
+    fit_reason: Optional[str] = None
 
 
 def _reject_bad_rrule(rrule: Optional[str]) -> None:
@@ -271,13 +307,23 @@ def plan_board(user_id: str = Depends(current_user)):
     to-dos and a computed next_step. One payload drives BOTH clients — the
     grouping/CTA logic lives in cos/lifecycle.py, never per surface."""
     storage = _storage()
+    activities = storage.list_tracked_activities(user_id)
+    # Activity-vs-activity date overlaps (sprint 2): computed here and projected
+    # onto each card so the detail screen can say "Overlaps Rialto Beach trip,
+    # Aug 15–17" without the client comparing dates itself.
+    conflicts = planning.detect_time_conflicts(
+        storage.list_calendar_entries(user_id),
+        storage.list_recurring_appointments(user_id),
+        tracked_activities=activities,
+    )
     return lifecycle.build_board(
-        storage.list_tracked_activities(user_id),
+        activities,
         storage.list_todos(user_id),
         gmail_connected=lifecycle.gmail_connected(storage, user_id),
         registration_windows=storage.list_registration_windows(
             user_id, status="watching"
         ),
+        conflicts=conflicts,
     )
 
 

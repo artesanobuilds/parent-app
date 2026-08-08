@@ -1,19 +1,58 @@
+"""The parent agent — ONE harness for the whole parent experience.
+
+Coach and Chief-of-Staff used to be two separate `create_agent` graphs with
+their own models, checkpointers and caches (`app/agent.py` + `app/cos/agent.py`).
+They are now a SINGLE agent: one identity (Coach), one toolset, one thread per
+parent across the text surfaces. `app/cos/agent.get_cos_agent` is a shim that
+returns this agent.
+
+Three things that are easy to get wrong here:
+
+1. **All tools are registered flat.** LangChain has no API to add or remove
+   tools after `create_agent()` (langchain#33808) — middleware can only filter
+   what is already registered. `LLMToolSelectorMiddleware` exists and is
+   deliberately NOT used: our whole tool block is ~3k prompt-cacheable tokens,
+   and the selector trades that cached prefix for an extra model call every
+   turn, while a `max_tools` cap would starve exactly the turns that motivated
+   the merge ("Ben's summer is a mess" needs profile + activity search +
+   calendar together).
+
+2. **The summarizer's tokens must never reach the parent.** Middleware model
+   calls surface on `astream_events` as ordinary `on_chat_model_stream` events
+   — verified against the installed langchain, not assumed. Left alone, the
+   context summary would be printed into the chat and SPOKEN on voice. Every
+   internal model is tagged `INTERNAL_STREAM_TAG` and every streaming surface
+   drops events carrying it (`is_internal_event`).
+
+3. **Thread repair runs on every entry.** A cancelled tool call leaves a
+   dangling `tool_calls` checkpoint that makes OpenAI 400 the thread forever
+   (`app/thread_repair.py`). `tests/agents/test_merged_agent_harness.py` fails
+   if a surface streams this agent without repairing first.
+"""
 import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from langchain_openai import ChatOpenAI
 from langchain_tavily import TavilySearch
 from langgraph.checkpoint.memory import MemorySaver
 from langchain.agents import create_agent
+from langchain.agents.middleware import (
+    ContextEditingMiddleware,
+    ClearToolUsesEdit,
+    PIIMiddleware,
+    SummarizationMiddleware,
+    ToolCallLimitMiddleware,
+)
 from langchain.tools import tool
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from app.profiling import profiling_service
 from app.content import content_catalog_for_prompt
+from app.cos.prompt import COS_ROLE_SECTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +77,124 @@ _soul_content = _soul_path.read_text(encoding="utf-8")
 logger.info("Loaded soul.md (%d chars)", len(_soul_content))
 
 
+# --------------------------------------------------------------------------- #
+# Threads
+# --------------------------------------------------------------------------- #
+# Coach and Chief-of-Staff kept SEPARATE conversations (`cos:{user}:{thread}`
+# vs `{user}:{thread}`). One agent means one conversation: every TEXT surface
+# now lands on the same per-parent thread, so a plan built on the board is in
+# the coach's head and vice versa. Voice stays on its own thread for now — a
+# spoken turn and a typed turn have different pacing, and unifying them is an
+# open product decision (memory `project_voice_v2_state`).
+#
+# Nothing durable is keyed on these: the checkpointer is an in-process
+# MemorySaver, and the transcripts the clients render live in `chat_threads` /
+# `cos_messages`, which are untouched by this change.
+
+PARENT_TEXT_THREAD = "parent"
+PARENT_VOICE_THREAD = "voice"
+
+_TEXT_SURFACES = ("chat", "cos")
+
+
+def thread_key(user_id: str, surface: str, thread_id: str | None = None) -> str:
+    """The LangGraph thread id for one parent on one surface.
+
+    ``surface`` is "chat" or "cos" (both collapse to the ONE merged text
+    thread, ignoring the client's thread_id — see above), or "voice" which
+    keeps its own per-``thread_id`` namespace exactly as before.
+    """
+    if surface in _TEXT_SURFACES:
+        return f"{user_id}:{PARENT_TEXT_THREAD}"
+    return f"{user_id}:{thread_id or 'default'}"
+
+
+# --------------------------------------------------------------------------- #
+# Internal model calls (summarization) must not leak into a surface's stream
+# --------------------------------------------------------------------------- #
+
+INTERNAL_STREAM_TAG = "mvp:internal"
+
+
+def is_internal_event(event: Mapping[str, Any]) -> bool:
+    """True for an `astream_events` event produced by an INTERNAL model call
+    (context summarization), which must never be shown or spoken.
+
+    Verified behavior, not a precaution: with `SummarizationMiddleware` the
+    summarizer's output arrives as ordinary `on_chat_model_stream` events on
+    both v1 and v2, so a surface that doesn't filter would print the summary
+    into the parent's chat.
+    """
+    tags = event.get("tags") or ()
+    return INTERNAL_STREAM_TAG in tags
+
+
+def _internal_llm() -> ChatOpenAI:
+    """A separate, tagged model instance for middleware's own calls."""
+    name = os.getenv("MVP_INTERNAL_MODEL_NAME", model_name)
+    return ChatOpenAI(model=name).with_config(tags=[INTERNAL_STREAM_TAG])
+
+
+# --------------------------------------------------------------------------- #
+# Middleware — the harness
+# --------------------------------------------------------------------------- #
+# Adopted only where the async hook exists on the INSTALLED langchain (this is
+# an async FastAPI backend; a middleware with only the sync hook raises
+# NotImplementedError mid-turn — langchain#33474). All four below implement
+# their `a*` hooks in langchain 1.3.10; `tests/agents/test_merged_agent_harness`
+# re-checks that on every run so an upgrade can't silently regress it.
+
+# One merged thread outgrows the window; summarize far below the model's limit
+# so a long planning session never hard-fails.
+SUMMARIZE_TRIGGER_TOKENS = int(os.getenv("MVP_SUMMARIZE_TRIGGER_TOKENS", "120000"))
+SUMMARIZE_KEEP_MESSAGES = int(os.getenv("MVP_SUMMARIZE_KEEP_MESSAGES", "30"))
+
+# COS tools return large plan snapshots (GetPlanSnapshot, SearchActivities,
+# CompareActivities). Old ones are pure noise once acted on — clear them and
+# keep the last few verbatim.
+CONTEXT_EDIT_TRIGGER_TOKENS = int(os.getenv("MVP_CONTEXT_EDIT_TRIGGER_TOKENS", "60000"))
+CONTEXT_EDIT_KEEP_RESULTS = int(os.getenv("MVP_CONTEXT_EDIT_KEEP_RESULTS", "5"))
+
+# A runaway tool loop is a cost event, not just a slow turn. Generous enough
+# that a real "sort out my summer" turn (snapshot + compare + several tracks)
+# never trips it.
+TOOL_CALLS_PER_RUN = int(os.getenv("MVP_TOOL_CALLS_PER_RUN", "40"))
+
+def build_middleware() -> list:
+    """The agent harness. See the module docstring for what was rejected."""
+    return [
+        # Order matters: PII scrubs the incoming turn BEFORE anything else sees
+        # it, so a card never reaches the model, the checkpoint, or the
+        # summarizer's input.
+        PIIMiddleware(
+            "credit_card",
+            strategy="mask",
+            apply_to_input=True,
+            apply_to_output=True,
+            apply_to_tool_results=False,
+        ),
+        SummarizationMiddleware(
+            model=_internal_llm(),
+            trigger=("tokens", SUMMARIZE_TRIGGER_TOKENS),
+            keep=("messages", SUMMARIZE_KEEP_MESSAGES),
+        ),
+        ContextEditingMiddleware(
+            edits=[
+                ClearToolUsesEdit(
+                    trigger=CONTEXT_EDIT_TRIGGER_TOKENS,
+                    keep=CONTEXT_EDIT_KEEP_RESULTS,
+                    # Inputs stay: "which activity did I just track" is the
+                    # cheap half and the model reasons over it.
+                    clear_tool_inputs=False,
+                    # The two tools whose OUTPUT is the answer, not a lookup.
+                    exclude_tools=("DraftEmail", "Help"),
+                )
+            ],
+        ),
+        ToolCallLimitMiddleware(run_limit=TOOL_CALLS_PER_RUN, exit_behavior="end"),
+    ]
+
+
 def _prune_empty(value: Any) -> Any:
     """Recursively prune empty/None values from dicts/lists to keep prompt lean."""
     if isinstance(value, dict):
@@ -49,30 +206,38 @@ def _prune_empty(value: Any) -> Any:
     return value
 
 
-def _build_system_prompt(user_name: str, profile_context: str | None = None) -> str:
-    profile_section = ""
-    if profile_context:
-        profile_section = f"""
-Family profile (weave into advice, never dump as raw data):
-{profile_context}
-"""
-
-    return f"""{_soul_content}
-
----
-
+_COACH_SECTIONS = """\
 # Operational context
 
-User: "{user_name}" — use their name when natural.
+You are ONE agent doing two jobs for this parent, and you switch between them
+without announcing it:
+
+1. **Coaching** — the hard parenting moments. This is the voice and the
+   response shape above: short, warm, one useful thing.
+2. **Running the logistics** — camps, classes, school life, trips, the
+   calendar, the to-dos. Detailed below.
+
+Most turns are one or the other, and the good ones are both: "Ben's summer is a
+mess" is a coverage problem AND an overwhelmed parent. Read the family profile,
+call the planning tools, and answer the whole thing in one turn — never tell the
+parent to go somewhere else in the app for the other half.
+
+When you are running logistics the brevity ceiling relaxes: a tradeoff table or
+a week-by-week gap list is the useful answer. Everything else about your voice
+still holds.
 
 Web search: use for factual claims or recent info. Cite sources as markdown links.
 
-Content library: when relevant, weave max 1 link per response naturally into your sentence.
-Format: [Title](mvp://library/slug) or [Title](mvp://community/slug)
+Content library: when relevant, weave max 1 link per response naturally into your
+sentence. Format: [Title](mvp://library/slug)
 
-{content_catalog_for_prompt()}
-{profile_section}
+Never emit an mvp://community/ link. The public board was retired with the
+beta-v1 sprint-2 Circle redesign: the tables are dropped, the routes 404 and no
+client handles that scheme, so such a link is dead on arrival. Library is the
+only mvp:// host that resolves. Locked by tests/test_coach_citation_contract.py.
+"""
 
+_PASSIVE_PROFILING_SECTION = """\
 # Passive profiling
 
 As you coach, silently extract profile details from what the parent shares.
@@ -80,11 +245,55 @@ Call LearnedAboutParent or LearnedAboutChild whenever the conversation reveals n
 - The parent: household, work, stress patterns, coping, energy, goals, support system, parenting style, etc.
 - A child: temperament, triggers, interests, challenges, school, sleep, escalation patterns, etc.
 
+Signup no longer asks for any of these, so you are the ONLY way they are ever
+learned — record them the moment the parent mentions them, and let a natural
+opening surface them (never interrogate):
+parent_age_range, employment, pronouns, cultural_background, adults_in_household,
+energy_pattern, dreaded_moment, support_system, and each child's pronouns.
+
 Rules:
 - NEVER ask questions just to fill the profile. Your primary job is coaching. Profile building is a silent side effect.
 - Only record what the parent actually said or clearly implied. Don't infer beyond their words.
 - Partial updates are fine — send only the fields you learned in that exchange.
 - Don't mention the profile or that you're tracking anything. Just coach naturally."""
+
+
+def _build_system_prompt(
+    user_name: str,
+    profile_context: str | None = None,
+    household_context: str | None = None,
+    for_you_context: str | None = None,
+) -> str:
+    """Assemble the merged prompt.
+
+    Ordered STATIC → DYNAMIC on purpose: soul, role sections, catalog and the
+    profiling rules are identical for every turn and cache as one prefix; the
+    family profile, the Circle roster and the ranked article shortlist change
+    as the parent uses the app and go last.
+    """
+    dynamic: List[str] = []
+    if household_context:
+        dynamic.append(household_context)
+    if profile_context:
+        dynamic.append(
+            "Family profile (weave into advice, never dump as raw data):\n"
+            + profile_context
+        )
+    if for_you_context:
+        dynamic.append(for_you_context)
+
+    parts = [
+        _soul_content,
+        "---",
+        _COACH_SECTIONS,
+        f'User: "{user_name}" — use their name when natural.',
+        content_catalog_for_prompt(),
+        COS_ROLE_SECTIONS,
+        _PASSIVE_PROFILING_SECTION,
+    ]
+    if dynamic:
+        parts.append("# This family\n\n" + "\n\n".join(dynamic))
+    return "\n\n".join(parts)
 
 
 class ParentUpdate(BaseModel):
@@ -181,6 +390,24 @@ def _make_child_tool(user_id: str):
     return LearnedAboutChild
 
 
+def build_parent_tools(user_id: str) -> list:
+    """Every tool the merged agent can reach, flat.
+
+    Coach half: web search + the two passive-profiling tools (still the ONLY
+    way the fields the funnel stopped asking for are ever learned — memory
+    `patterns_onboarding_parity`). Chief-of-Staff half: the full planning
+    toolset, unchanged and still owned by `app/cos/tools.py`.
+    """
+    from app.cos.tools import build_cos_tools
+
+    return [
+        search,
+        _make_parent_tool(user_id),
+        _make_child_tool(user_id),
+        *build_cos_tools(user_id),
+    ]
+
+
 _agent_cache: Dict[str, Dict[str, Any]] = {}
 
 def _saved_signal_context(user_name: str) -> str:
@@ -205,35 +432,91 @@ def _saved_signal_context(user_name: str) -> str:
     return "\n".join(lines)
 
 
-def get_agent(user_name: str = "0"):
-    """Return a cached agent executor personalized to the given user name."""
+def _household_context(user_id: str) -> str:
+    """The Circle roster as prompt text (empty when there is none)."""
+    try:
+        from app.household import household_context_for_prompt
+
+        return household_context_for_prompt(user_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("[agent] household context unavailable", exc_info=True)
+        return ""
+
+
+def _for_you_context(family: Dict[str, Any]) -> str:
+    """The ranked library shortlist — the same ranking `GET /content/for-you`
+    serves. The Library is no longer browsable, so the agent is the path."""
+    try:
+        from app import content as content_service
+
+        return content_service.for_you_prompt_lines(
+            content_service.for_you_word_bag(family or {})
+        )
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _dynamic_context(user_name: str) -> Dict[str, Optional[str]]:
+    """Everything in the prompt that changes as the parent uses the app.
+
+    Returned as one bundle because the agent cache is keyed on it: any change
+    to the profile, the Circle roster or the ranked shortlist rebuilds the
+    agent with a fresh prompt.
+    """
     raw_profile = profiling_service.get_family_profile(user_name)
     pruned_profile = _prune_empty(raw_profile)
-    profile_context = json.dumps(pruned_profile, ensure_ascii=False, indent=2) if pruned_profile else None
+    profile_context = (
+        json.dumps(pruned_profile, ensure_ascii=False, indent=2)
+        if pruned_profile
+        else None
+    )
     saved_context = _saved_signal_context(user_name)
     if saved_context:
         profile_context = (profile_context or "") + saved_context
+    return {
+        "profile": profile_context,
+        "household": _household_context(user_name) or None,
+        "for_you": _for_you_context(raw_profile) or None,
+    }
+
+
+def get_agent(user_name: str = "0"):
+    """Return the cached merged parent agent personalized to this parent."""
+    context = _dynamic_context(user_name)
 
     cached = _agent_cache.get(user_name)
-    if cached and cached.get("profile") == profile_context:
+    if cached and cached.get("context") == context:
         return cached["agent"]
 
-    user_tools = [search, _make_parent_tool(user_name), _make_child_tool(user_name)]
     agent_executor = create_agent(
         model=llm,
-        tools=user_tools,
+        tools=build_parent_tools(user_name),
         checkpointer=checkpointer,
-        system_prompt=_build_system_prompt(user_name, profile_context),
+        middleware=build_middleware(),
+        system_prompt=_build_system_prompt(
+            user_name,
+            profile_context=context["profile"],
+            household_context=context["household"],
+            for_you_context=context["for_you"],
+        ),
     )
-    _agent_cache[user_name] = {"agent": agent_executor, "profile": profile_context}
+    _agent_cache[user_name] = {
+        "agent": agent_executor,
+        "context": context,
+        # Back-compat: callers/tests that inspected the old cache shape.
+        "profile": context["profile"],
+    }
     return agent_executor
 
 
 def build_system_prompt_for(user_name: str = "0") -> str:
-    """Public: assemble the parent agent's per-user system prompt (soul + family
-    profile + content catalog). Used by the ConvAI token endpoint to override the
-    dashboard agent's prompt per connection, mirroring get_agent's assembly."""
-    raw_profile = profiling_service.get_family_profile(user_name)
-    pruned_profile = _prune_empty(raw_profile)
-    profile_context = json.dumps(pruned_profile, ensure_ascii=False, indent=2) if pruned_profile else None
-    return _build_system_prompt(user_name, profile_context)
+    """Public: assemble the merged agent's per-user system prompt. Used by the
+    ConvAI token endpoint to override the dashboard agent's prompt per
+    connection, mirroring get_agent's assembly."""
+    context = _dynamic_context(user_name)
+    return _build_system_prompt(
+        user_name,
+        profile_context=context["profile"],
+        household_context=context["household"],
+        for_you_context=context["for_you"],
+    )

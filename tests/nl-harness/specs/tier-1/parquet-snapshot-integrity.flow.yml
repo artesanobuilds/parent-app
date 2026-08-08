@@ -23,7 +23,6 @@ spec:
     - "GET /content/categories returns >=1 row (bootstrap populated the table)"
     - "Every category response includes a `parent_id` key (nullable, but present)"
     - "GET /content/articles returns >=1 row"
-    - "GET /content/community returns a list (possibly empty in prod, populated locally)"
     - "Admin POST /cms/export-parquet succeeds (200) and writes the snapshot"
     - "Admin GET /data/export returns a `checksums` dict with every expected parquet name"
     - "After re-export, /content/categories still returns the same N>=1 rows (round-trip)"
@@ -39,10 +38,6 @@ spec:
       as: anonymous
       status: 200
       response_array_min_length: 1
-
-    - endpoint: GET /content/community
-      as: anonymous
-      status: 200
 
     - endpoint: POST /cms/export-parquet
       as: admin

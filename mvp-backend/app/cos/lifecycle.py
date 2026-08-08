@@ -242,23 +242,77 @@ def _sort_todos(todos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     )
 
 
+def overlaps_by_activity(conflicts: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Project the flat `activity_overlap` conflicts onto each activity id.
+
+    `detect_time_conflicts` emits one row per overlapping PAIR (a/b). The card
+    and detail screens need "what does THIS activity collide with", so each pair
+    is indexed under both ids with the other side's name and a rendered range —
+    the same server-renders-the-string rule as `format_when`, so the clients
+    never format a date.
+    """
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for c in conflicts or []:
+        if c.get("type") != "activity_overlap":
+            continue
+        rng = _overlap_range_label(c.get("overlap_start"), c.get("overlap_end"))
+        for own, other_id, other_name in (
+            (c.get("activity_a_id"), c.get("activity_b_id"), c.get("activity_b_name")),
+            (c.get("activity_b_id"), c.get("activity_a_id"), c.get("activity_a_name")),
+        ):
+            if not own:
+                continue
+            out.setdefault(own, []).append(
+                {"activity_id": other_id, "name": other_name, "range": rng}
+            )
+    return out
+
+
+def _overlap_range_label(start: Optional[str], end: Optional[str]) -> str:
+    """"Aug 15–17" / "Aug 28 – Sep 2" from two ISO dates."""
+    from datetime import date as _date
+
+    def _p(v: Optional[str]) -> Optional[_date]:
+        try:
+            return _date.fromisoformat(v) if v else None
+        except (TypeError, ValueError):
+            return None
+
+    s, e = _p(start), _p(end)
+    if not s:
+        return ""
+    if not e or s == e:
+        return s.strftime("%b %-d")
+    if s.month == e.month:
+        return f"{s.strftime('%b %-d')}–{e.strftime('%-d')}"
+    return f"{s.strftime('%b %-d')} – {e.strftime('%b %-d')}"
+
+
 def build_board(
     activities: List[Dict[str, Any]],
     todos: List[Dict[str, Any]],
     *,
     gmail_connected: bool = False,
     registration_windows: Optional[List[Dict[str, Any]]] = None,
+    conflicts: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Group activities into board stages, joining each with its open to-dos and
     computed next_step. This one payload drives BOTH clients (iOS + web) so the
     grouping/CTA logic never forks per surface."""
     open_by_activity: Dict[str, List[Dict[str, Any]]] = {}
+    all_by_activity: Dict[str, List[Dict[str, Any]]] = {}
     for t in todos:
-        if (t.get("status") or "open") != "open":
-            continue
         aid = t.get("activity_id")
         if aid:
-            open_by_activity.setdefault(aid, []).append(t)
+            # `done` is a derived convenience for the clients' "Still to do"
+            # checklist, which renders completed items struck through. The
+            # authoritative value stays `status`; this is a projection of it so
+            # neither client has to know the status vocabulary.
+            entry_t = dict(t)
+            entry_t["done"] = (entry_t.get("status") or "open") != "open"
+            all_by_activity.setdefault(aid, []).append(entry_t)
+            if not entry_t["done"]:
+                open_by_activity.setdefault(aid, []).append(entry_t)
 
     # Watching registration windows, joined by activity (Phase 4): the card
     # shows "Registration opens Aug 12 · watching" with confidence labeled —
@@ -268,12 +322,21 @@ def build_board(
         if (w.get("status") == "watching") and w.get("activity_id"):
             window_by_activity.setdefault(w["activity_id"], w)
 
+    overlap_index = overlaps_by_activity(conflicts or [])
+
     sections: Dict[str, List[Dict[str, Any]]] = {s["key"]: [] for s in STAGES}
     for a in activities:
         open_todos = _sort_todos(open_by_activity.get(a["id"], []))
+        all_todos = all_by_activity.get(a["id"], [])
         step = next_step(a, open_todos)
         entry = dict(a)
         entry["open_todos"] = open_todos
+        entry["all_todos"] = all_todos
+        # Sprint-2 "Still to do" checklist reads `todos` (open AND completed);
+        # `open_todos` stays open-only because next_step and the existing
+        # follow-ups list depend on that meaning.
+        entry["todos"] = all_todos
+        entry["overlaps"] = overlap_index.get(a["id"], [])
         entry["next_step"] = step
         # Canonical vertical for the card chip; NULL/unknown degrades to camp
         # (pre-v16 rows, surprising LLM arguments) — same posture as stage_for.

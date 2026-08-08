@@ -3,8 +3,11 @@ spec:
   tier: 1
   modules: [saved, content, auth]
   intent: >
-    The Saved tab's contract: a parent bookmarks an article, a community post,
-    and a coach reply; the refs endpoint drives bookmark state; unsave is soft
+    The Saved tab's contract: a parent bookmarks an article and a coach reply
+    (`community_post` was a third type until the public board was retired in
+    beta-v1 sprint 2 — existing rows of that type are deliberately KEPT in
+    DuckDB and simply skipped by the client, never deleted, so this flow no
+    longer creates one); the refs endpoint drives bookmark state; unsave is soft
     (re-saving revives with a bumped count); the merged list carries denormalized
     snapshots that survive content changes; and account deletion takes the saved
     items with it. Saves double as the coach's revealed-preference signal, so

@@ -66,6 +66,7 @@ USER_ID_PREFIX="faulttest" \
   flows/generated/test_research_backoff_recovery.py \
   flows/generated/test_research_openai_outage.py \
   flows/generated/test_research_worker_saturation.py \
+  flows/generated/test_onboarding_warmup_first_run.py \
   "$@"
 RC=$?
 

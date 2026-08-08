@@ -2,7 +2,6 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   FileText,
-  Users,
   FolderOpen,
   Download,
   LogOut,
@@ -16,7 +15,6 @@ import { toast } from "../shared/Toast";
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/articles", label: "Articles", icon: FileText },
-  { to: "/community", label: "Community", icon: Users },
   { to: "/categories", label: "Categories", icon: FolderOpen },
   { to: "/email-sync", label: "Email Sync", icon: Mailbox },
   { to: "/calendar-sync", label: "Calendar Sync", icon: CalendarSyncIcon },

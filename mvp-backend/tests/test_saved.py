@@ -47,11 +47,6 @@ def test_saved_lifecycle():
                 "subtitle": "Ending the 9pm standoff", "emoji": "", "read_time": "",
                 "summary": "", "tags": ["sleep", "toddler"], "content": "long body",
             })
-            storage.create_community_post({
-                "id": "post-save-1", "category": "cat-sleep", "initials": "PP",
-                "name": "Poster Parent", "title": "Anyone else up at 2am?",
-                "preview": "solidarity thread",
-            })
 
             uid = "saved-user"
             tok = client.post("/auth/issue-token", json={"user_id": uid}).json()["token"]
@@ -90,11 +85,14 @@ def test_saved_lifecycle():
             assert r.json()["body"].startswith("Try naming")
             assert r.json()["kid_name"] == "Nia"
 
-            # ── community post + refs ────────────────────────────────
-            client.post("/saved", json={"item_type": "community_post",
-                                        "item_ref": "post-save-1"}, headers=auth)
+            # ── refs ─────────────────────────────────────────────────
             refs = client.get("/saved/refs?item_type=article", headers=auth).json()["refs"]
             assert refs == ["art-save-1"]
+            # The retired board can no longer be SAVED (its tables are gone),
+            # but DELETE still accepts the type so an old row can be cleared.
+            assert client.post("/saved", json={"item_type": "community_post",
+                                               "item_ref": "post-save-1"},
+                               headers=auth).status_code == 400
 
             # ── snapshot survives content deletion ───────────────────
             storage.delete_article("art-save-1")
@@ -103,17 +101,21 @@ def test_saved_lifecycle():
             assert art["title"] == "Bedtime Wars"  # denormalized copy lives on
 
             # ── unsave (soft) → refs shrink → re-save bumps count ────
-            r = client.delete("/saved?item_type=community_post&item_ref=post-save-1",
+            # On coach_reply: art-save-1's row was deleted just above, so
+            # re-saving it would (correctly) 404 on the content lookup.
+            r = client.delete("/saved?item_type=coach_reply&item_ref=msg-uuid-1",
                               headers=auth)
             assert r.json()["unsaved"] is True
-            assert client.get("/saved/refs?item_type=community_post",
+            assert client.get("/saved/refs?item_type=coach_reply",
                               headers=auth).json()["refs"] == []
-            r = client.post("/saved", json={"item_type": "community_post",
-                                            "item_ref": "post-save-1"}, headers=auth)
+            r = client.post("/saved", json={
+                "item_type": "coach_reply", "item_ref": "msg-uuid-1",
+                "body": "Try naming the feeling before the fix — it lands better.",
+            }, headers=auth)
             assert r.json()["save_count"] == 2  # revived, not duplicated
             # double-unsave is a no-op False
-            client.delete("/saved?item_type=community_post&item_ref=post-save-1", headers=auth)
-            assert client.delete("/saved?item_type=community_post&item_ref=post-save-1",
+            client.delete("/saved?item_type=coach_reply&item_ref=msg-uuid-1", headers=auth)
+            assert client.delete("/saved?item_type=coach_reply&item_ref=msg-uuid-1",
                                  headers=auth).json()["unsaved"] is False
 
             # ── merged Plan projection (never materialized) ──────────
