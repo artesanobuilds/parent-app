@@ -86,3 +86,14 @@ locks that.
       above, not this run — the script's manifest glob was hashing them too and
       has been fixed to list only what each run captured)
 
+
+## 2026-08-10T01:38:02Z
+
+- **Reason:** pre-deploy: migration v23 (circle_requests table + article eyebrow columns) + round-2 iOS fidelity pass
+- **Remote:** `https://mvp-backend-production-8678.up.railway.app`
+- **Location:** `/Users/miguelalvarado/Desktop/mvp-prod-snapshot-2026-08-10`
+- **Captured:** articles.parquet categories.parquet
+- **md5:**
+    - `8ee35ebdcc23b41758cdc5c3542ee5f1 articles.parquet`
+    - `99e73584ea36c5ecbba6ea4264fb8da3 categories.parquet`
+
