@@ -82,6 +82,31 @@ struct PaywallView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var cycle: PaywallBillingCycle = .annual
+    // Smoke-and-mirrors: persisted for display in the consolidated Settings
+    // "Your MVP information" card and the account sheet — NOTHING charged,
+    // Miguel's explicit call. Existing installs that never saw this screen
+    // simply never set these, and both surfaces hide the rows when empty.
+    @AppStorage("picked_plan_name") private var pickedPlanName = ""
+    @AppStorage("picked_plan_billing") private var pickedPlanBilling = ""
+
+    /// Called by BOTH Buy buttons (see `PaywallBuyButton`) — and ONLY by
+    /// them; nothing else in this view triggers it. Defaults to a genuine
+    /// no-op for the (not-yet-wired) Settings-menu presentation, where there
+    /// is no downstream step to advance to. The onboarding funnel's `.plan`
+    /// step (`OnboardingView.planScreen`) supplies `{ goTo(.warmup) }` here —
+    /// still no purchase, StoreKit, or Stripe call, exactly Miguel's
+    /// "it does nothing, just lets you go to the next step" (2026-08-09).
+    var onContinue: () -> Void = {}
+
+    /// The Settings-menu paywall is presented as a dismissible sheet, so it
+    /// shows the X. The onboarding funnel's `.plan` step is a full-screen
+    /// step with nothing to dismiss TO and no such affordance in the frame —
+    /// showing the X there would be a button that visibly does nothing.
+    var showsCloseButton: Bool = true
+
+    /// See `PaywallBuyButton.accessibilityHint`. The funnel step passes
+    /// "Continues to the next step" — accurate there, unlike the default.
+    var buyAccessibilityHint: String = "Not yet available"
 
     var body: some View {
         if PaywallFeatureFlag.isEnabled {
@@ -95,10 +120,14 @@ struct PaywallView: View {
         }
     }
 
-    fileprivate var screen: some View {
+    /// Was `fileprivate` — widened to `internal` so `OnboardingView`'s
+    /// `.plan` step can call it directly and bypass `PaywallFeatureFlag`
+    /// (that flag gates the Settings-menu ENTRY POINT, not this funnel step,
+    /// per Miguel's instruction; the funnel step is unconditional).
+    var screen: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                closeHeader
+                if showsCloseButton { closeHeader }
                 ScrollView {
                     VStack(spacing: .hearth800) {
                         titleBlock
@@ -183,19 +212,28 @@ struct PaywallView: View {
     private var plansStack: some View {
         VStack(spacing: .hearth500) {
             ForEach(paywallPlans) { plan in
-                PaywallPlanCard(plan: plan)
+                PaywallPlanCard(
+                    plan: plan,
+                    onBuy: {
+                        pickedPlanName = plan.name.capitalized
+                        pickedPlanBilling = cycle.label
+                        onContinue()
+                    },
+                    buyAccessibilityHint: buyAccessibilityHint
+                )
             }
         }
     }
 
     // MARK: Footer
 
+    /// The frame's footer reads "Purchases will open Stripe in a new tab." —
+    /// there is no Stripe integration; both Buy buttons just advance
+    /// (smoke-and-mirrors, Miguel's explicit call). That line would be a
+    /// lie, so it's omitted rather than shown as drawn — same real-data-only
+    /// rule the consolidated Settings cards follow.
     private var footer: some View {
-        Text("Purchases will open Stripe in a new tab.")
-            .font(.hearthBodySM)
-            .foregroundColor(.inkMuted)
-            .multilineTextAlignment(.center)
-            .fixedSize(horizontal: false, vertical: true)
+        EmptyView()
     }
 }
 
@@ -203,12 +241,14 @@ struct PaywallView: View {
 
 private struct PaywallPlanCard: View {
     let plan: PaywallPlan
+    var onBuy: () -> Void = {}
+    var buyAccessibilityHint: String = "Not yet available"
 
     var body: some View {
         VStack(alignment: .leading, spacing: .hearth500) {
             header
             bullets
-            PaywallBuyButton(planName: plan.name)
+            PaywallBuyButton(planName: plan.name, action: onBuy, accessibilityHint: buyAccessibilityHint)
         }
         .padding(.hearth600)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -249,22 +289,31 @@ private struct PaywallPlanCard: View {
 
 // MARK: - Buy button
 //
-// Deliberately a NO-OP. Apple normally requires In-App Purchase for a digital
-// subscription; the design's footer ("Purchases will open Stripe in a new
-// tab") is at best a US-storefront-only link-out under the 2025 Epic
-// injunction, and that policy area moves. No purchase rail ships — no
-// StoreKit, no URL open, no Stripe SDK — until the Stripe-vs-IAP compliance
-// question is decided (plan `drifting-jingling-valley.md`, Phase 4). A Buy
-// button that visibly does nothing yet is the correct, deliberate state.
+// Deliberately wired to NOTHING PURCHASE-RELATED. Apple normally requires
+// In-App Purchase for a digital subscription; the design's footer
+// ("Purchases will open Stripe in a new tab") is at best a US-storefront-only
+// link-out under the 2025 Epic injunction, and that policy area moves. No
+// purchase rail ships — no StoreKit, no URL open, no Stripe SDK — until the
+// Stripe-vs-IAP compliance question is decided (plan
+// `drifting-jingling-valley.md`, Phase 4).
+//
+// `action` defaults to a real no-op (Settings-menu context: a Buy button that
+// visibly does nothing yet is the correct, deliberate state there). The
+// onboarding funnel's `.plan` step passes its own `goTo(.warmup)` through
+// `PaywallView.onContinue` — that is ALSO not a purchase, just advancing a
+// screen, per Miguel's explicit "it does nothing, just lets you go to the
+// next step" (2026-08-09). Do not add StoreKit / URL-open / Stripe SDK here
+// without the compliance decision above, regardless of caller.
 private struct PaywallBuyButton: View {
     let planName: String
+    var action: () -> Void = {}
+    /// "Not yet available" is true for the Settings-menu no-op but would be a
+    /// LIE inside the funnel, where tapping this genuinely advances to
+    /// `.warmup` — the funnel step overrides it accordingly.
+    var accessibilityHint: String = "Not yet available"
 
     var body: some View {
-        Button {
-            // TODO(paywall-purchase-rail): wire this once Stripe-vs-IAP is
-            // decided. Do not add StoreKit / URL-open / Stripe SDK here
-            // without that decision — see the file-level doc comment above.
-        } label: {
+        Button(action: action) {
             Text("Buy")
                 .font(.hearthTitleMD)
                 .foregroundColor(.inkOnPhotoLight)
@@ -275,7 +324,7 @@ private struct PaywallBuyButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Buy \(planName)")
-        .accessibilityHint("Not yet available")
+        .accessibilityHint(accessibilityHint)
     }
 }
 

@@ -63,49 +63,43 @@ struct ArticleDetailView: View {
 
     private func header(_ article: APIArticle) -> some View {
         VStack(alignment: .leading, spacing: .hearth400) {
-            // Photo-tile hero — saffron is the warm "energy/play" tile and
-            // the default editorial start-here block. Per the cards spec
-            // `category` variant, text overlaid on a warm tile resolves to
-            // inkOnPhotoDark; the emoji is decorative so we leave it as-is.
-            ZStack {
-                Color.photoSaffron
-                Text(article.emoji)
-                    .font(.system(size: 64))
-            }
-            .frame(height: 200)
-            .frame(maxWidth: .infinity)
-
             VStack(alignment: .leading, spacing: .hearth400) {
-                // Category badge
-                if let category = contentVM.categories.first(where: { $0.id == article.category }) {
-                    Text("\(category.emoji) \(category.name)")
-                        .font(.hearthLabel)
-                        .foregroundColor(.accentPress)
-                        .tracking(0.66)
-                        .textCase(.uppercase)
-                        .padding(.horizontal, .hearth400)
-                        .padding(.vertical, .hearth300)
-                        .background(Color.accentTint)
-                        .clipShape(Capsule())
+                // Eyebrow: kicker · age_range · read_time, joined with " · " only for
+                // non-empty parts and uppercased. Design spec shows "WE TRIED IT · Ages 3–7 · 4 min".
+                let eyebrowParts = [
+                    article.kicker,
+                    article.ageRange,
+                    article.readTime.isEmpty ? nil : article.readTime
+                ].compactMap { $0 }.filter { !$0.isEmpty }
+
+                if !eyebrowParts.isEmpty {
+                    Text(eyebrowParts.joined(separator: " · ").uppercased())
+                        .font(.hearthBodySMBold)
+                        .tracking(0.52)
+                        .foregroundColor(.inkEyebrow)
                 }
 
-                // Title — Fraunces display, the editorial hero.
+                // Title — Fraunces w700 38/40 ls-0.38
                 Text(article.title)
-                    .font(.hearthDisplayMD)
+                    .font(.custom(HearthFontFamily.displaySerif, size: 38))
+                    .fontWeight(.bold)
+                    .lineSpacing(2)
                     .foregroundColor(.inkPrimary)
 
-                // Subtitle
+                // Standfirst (subtitle) — Fraunces w400 22/33
                 Text(article.subtitle)
-                    .font(.hearthBodyLG)
+                    .font(.custom(HearthFontFamily.displaySerif, size: 22))
+                    .fontWeight(.regular)
+                    .lineSpacing(11)
                     .foregroundColor(.inkSecondary)
 
-                // Meta row — JetBrains Mono caption is the metadata family.
-                HStack(spacing: .hearth400) {
-                    Label(article.author, systemImage: "person.fill")
-                    Label(article.readTime, systemImage: "clock")
-                }
-                .font(.hearthCaptionMono)
-                .foregroundColor(.inkMuted)
+                // Byline — measured Inter w300 12, centered. `hearthCaptionMono` is the
+                // designated byline token but it is the MONO family; keeping the sans
+                // family matters more here than the 1pt, so this is the 13pt body token.
+                Text(article.author)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
                 // Tags row (chips). Hidden when empty.
                 if !article.tags.isEmpty {
@@ -143,9 +137,9 @@ struct ArticleDetailView: View {
 
     private func markdownBody(_ article: APIArticle) -> some View {
         // MarkdownUI uses its own text styling pipeline; we still feed it
-        // Hearth colors. Sizes track type/body-lg for the article reading
-        // surface (17pt body, 22pt h3, 28pt h2 — Fraunces feel on headings
-        // via the FontFamily.custom("Fraunces") binding).
+        // Hearth colors. Design spec: section heads are Inter w900 24; body
+        // paragraphs stay at the existing readable body token. The Figma slip
+        // that applied w900 24 to EVERY body paragraph is ignored.
         Markdown(article.content ?? "")
             .markdownTextStyle {
                 ForegroundColor(Color.inkPrimary)
@@ -157,9 +151,9 @@ struct ArticleDetailView: View {
             .markdownBlockStyle(\.heading2) { configuration in
                 configuration.label
                     .markdownTextStyle {
-                        FontFamily(.custom(HearthFontFamily.displaySerif))
-                        FontSize(28)
-                        FontWeight(.semibold)
+                        FontFamily(.custom(HearthFontFamily.sans))
+                        FontSize(24)
+                        FontWeight(.black)
                         ForegroundColor(Color.inkPrimary)
                     }
                     .padding(.top, .hearth500)
@@ -168,9 +162,9 @@ struct ArticleDetailView: View {
             .markdownBlockStyle(\.heading3) { configuration in
                 configuration.label
                     .markdownTextStyle {
-                        FontFamily(.custom(HearthFontFamily.displaySerif))
-                        FontSize(22)
-                        FontWeight(.semibold)
+                        FontFamily(.custom(HearthFontFamily.sans))
+                        FontSize(24)
+                        FontWeight(.black)
                         ForegroundColor(Color.inkPrimary)
                     }
                     .padding(.top, .hearth400)

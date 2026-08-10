@@ -8,9 +8,9 @@ from langchain.agents import create_agent
 from langchain.tools import tool
 from langchain_openai import ChatOpenAI
 from langchain_tavily import TavilySearch
-from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel
 
+from app.checkpointing import checkpointer
 from app.profiling import profiling_service
 
 logger = logging.getLogger(__name__)
@@ -26,8 +26,10 @@ llm = ChatOpenAI(model=model_name, stream_usage=True)
 # Initialize Tools
 search = TavilySearch(max_results=2)
 
-# Initialize Memory
-checkpointer = MemorySaver()
+# Memory. Re-exported from app/checkpointing (imported above): the ONE durable
+# SQLite saver shared with the parent + kid agents, so a half-finished
+# onboarding chat survives a restart instead of restarting from nothing.
+# Onboarding thread ids are `onboarding:{user}:{thread}`.
 
 
 def _prune_empty(value: Any) -> Any:
@@ -58,10 +60,12 @@ Profile context (use when relevant; keep enriching):
 You are MVP (Most Value Parent), an onboarding parenting coach. Your sole goal is to interview {{user}} to build structured parent and child profiles for personalized guidance. Keep tone warm, concise, and practical; prefer bullets.
 
 What the signup funnel ALREADY captured (do NOT re-ask — you have it below in the profile context):
-- Parent: name, household structure, primary language at home, postal_code, what's hardest right now (stressors), what would help (goals).
+- Parent: name, household structure, education style, postal_code, what's hardest right now (stressors).
 - Each child: name, age, temperament/personality traits.
 
 What the funnel NO LONGER asks — YOU are now the only way these are ever learned, so treat them as HIGH PRIORITY and work them in naturally as the conversation gives you an opening (never as a form, never as a rapid-fire list):
+- primary_language + secondary_language (language(s) spoken at home)
+- goals (what would actually help them — the funnel used to ask this as "What would help")
 - parent_age_range (bracket only — never ask for exact age)
 - employment (work situation)
 - pronouns (the parent's)
@@ -97,6 +101,12 @@ class ParentUpdate(BaseModel):
     postal_code: Optional[str] = None
     country: Optional[str] = None
     primary_language: Optional[str] = None
+    # The sprint-1 funnel stopped asking for language (the design's
+    # "Let's get acquainted" has four fields and neither is this), so the chat
+    # path is now the only way a bilingual household is ever learned. The form
+    # path still seeds `secondary_language`, so the field has to exist on BOTH
+    # writers or the chat agent would be prompted for something it silently drops.
+    secondary_language: Optional[str] = None
     parent_age_range: Optional[str] = None
     adults_in_household: Optional[int] = None
     household_structure: Optional[str] = None

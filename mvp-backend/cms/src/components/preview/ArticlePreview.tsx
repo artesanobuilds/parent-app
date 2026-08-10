@@ -25,6 +25,18 @@ export default function ArticlePreview({ article }: ArticlePreviewProps) {
           </span>
         )}
 
+        {/* Eyebrow — kicker · age range · read time, joining only the parts that
+            are set, exactly as the app builds it. Mirrors the iOS reader so the
+            editor can see whether the line reads well before publishing. */}
+        {[article.kicker, article.age_range, article.read_time]
+          .filter((part) => part && part.trim() !== '').length > 0 && (
+          <p className="text-body-sm font-bold uppercase tracking-wide text-ink-muted mb-300">
+            {[article.kicker, article.age_range, article.read_time]
+              .filter((part) => part && part.trim() !== '')
+              .join(' · ')}
+          </p>
+        )}
+
         {/* Title — font-display per Hearth spec */}
         <h1 className="font-display text-display-sm text-ink-primary mb-300">
           {article.title || 'Untitled Article'}

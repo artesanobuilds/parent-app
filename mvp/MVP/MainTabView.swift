@@ -146,7 +146,13 @@ struct MainTabView: View {
             Group {
                 switch selectedTab {
                 case .home:
-                    HomeView(username: username)
+                    // `onOpenPlanner` gives Dashboard 1's COMING UP "Add event"
+                    // row a real destination without Home owning a second
+                    // plan-mutation path — `planVM` lives here, and the Planner
+                    // tab is where the add-to-plan flows already are.
+                    HomeView(username: username,
+                             onOpenPlanner: { withAnimation(.hearthFast) { selectedTab = .planning } },
+                             onOpenSettings: { withAnimation(.hearthFast) { selectedTab = .settings } })
                 case .agent:
                     AgentView(viewModel: viewModel, configuration: configuration)
                 case .planning:
@@ -192,7 +198,7 @@ struct MainTabView: View {
 
     private var settingsTab: some View {
         NavigationStack {
-            SettingsView(configuration: configuration,
+            FamilySettingsView(configuration: configuration,
                          userID: username,
                          onOpenPlan: { withAnimation(.hearthFast) { selectedTab = .planning } })
                 .navigationTitle("Settings")

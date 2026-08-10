@@ -39,6 +39,13 @@ class ParentProfile:
     postal_code: Optional[str] = None  # zip / international postal code
     country: Optional[str] = None  # ISO-3166 alpha-2 (e.g., US, MX, CA)
     primary_language: Optional[str] = None  # e.g., en, es, zh, "other"
+    # 2026-08-08: the iOS seed has posted `secondary_language` since the Phase-3
+    # Figma pass, but this field did not exist — and `_apply_update` skips any key
+    # the dataclass lacks (`hasattr` guard), so every bilingual household's second
+    # language was silently DROPPED on write. Found while removing the language
+    # rows from the onboarding funnel: "keep the data" isn't true if the field was
+    # never stored. Nothing to migrate — the values never landed anywhere.
+    secondary_language: Optional[str] = None  # e.g., en, es, zh, "other"
     parent_age_range: Optional[str] = None  # "<25" | "25-34" | "35-44" | "45-54" | "55+" | "prefer_not_to_say"
     adults_in_household: Optional[int] = None  # 1-4
     household_structure: Optional[str] = None  # e.g., single, co-parenting, divorced, widowed
@@ -89,6 +96,15 @@ class ChildProfile:
     strengths: List[str] = field(default_factory=list)
     academic_strengths: List[str] = field(default_factory=list)
     challenges: List[str] = field(default_factory=list)
+    # The design's kid editor asks five things: Likes · Dislikes · Challenges ·
+    # Excels at · Goals for {name}. Four mapped onto existing fields
+    # (interests / challenges / strengths / motivators) but `dislikes` and a
+    # per-kid `goals` had no home — and because the PATCH whitelist is derived
+    # from this dataclass, a client sending them would get a silent 200 with the
+    # values dropped. A row that looks saved and isn't is worse than a missing
+    # row, so the fields exist rather than the labels lying.
+    dislikes: List[str] = field(default_factory=list)
+    goals: List[str] = field(default_factory=list)
     emotion_regulation: Optional[str] = None
     social_profile: Optional[str] = None
     learning_profile: Optional[str] = None  # e.g., visual, auditory, kinesthetic, EF notes

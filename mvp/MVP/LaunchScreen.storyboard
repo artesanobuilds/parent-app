@@ -8,29 +8,40 @@
     </dependencies>
     <scenes>
         <!--Launch Screen — the MVP wordmark on cream, positioned to match the
-            SwiftUI splash so the handoff is invisible.
+            PAYWALL's header so the handoff is invisible.
 
             History, so this doesn't regress again in either direction:
             it first showed a full-bleed LaunchHero PHOTO, which meant the app
             opened with two visibly different splashes back to back. Stripping
             the photo left it completely EMPTY, which reads as a broken app —
-            a blank cream card zooms out of the icon and sits there.
+            a blank cream card zooms out of the icon and sits there. A later
+            version (centerY multiplier 0.82) matched OnboardingView's trophy
+            splash — but the 2026-08-09 "plan first" reorder made the PAYWALL
+            (PaywallView.titleBlock) the first SwiftUI screen on a fresh
+            install, not the splash. With the old multiplier the wordmark
+            jumped from near-center down to near-top the instant the paywall
+            mounted, which read as a second, different splash screen.
 
-            The fix is neither: show the same wordmark the SwiftUI splash shows,
-            in the same place. One splash, no blank frame.
+            The fix is neither: show the same wordmark, positioned where the
+            paywall's `titleBlock` actually renders it (measured via
+            simulator screenshot, 2026-08-09: ~11% down the full screen
+            height, not ~41%). One splash, no jump. If the first SwiftUI
+            screen changes again, re-measure and re-anchor here — this is
+            exactly what went wrong last time.
 
             Two things must stay in sync by hand, because a storyboard can read
             neither the Hearth tokens nor a custom font:
-              * the background MUST equal bg/canvas (neutral/cream-200 #E9E4DC).
-                It previously drifted to the pre-beta #F3F0EB and flashed.
+              * the background MUST equal bg/canvas (neutral/cream-200 #E9E4DC),
+                same token PaywallView.screen uses (`Color.bgCanvas`). It
+                previously drifted to the pre-beta #F3F0EB and flashed.
               * LaunchWordmark.imageset is Fraunces BAKED TO PNG. Custom fonts
                 are not registered yet when the launch screen renders, so a
                 UILabel in Fraunces would silently fall back to the system face.
                 Regenerate the PNG if the display face changes.
 
-            centerY multiplier 0.82 puts the wordmark slightly above centre,
-            matching where OnboardingView.splashScreen lands it once the CTAs
-            take up the bottom of the screen.
+            centerY multiplier 0.22 puts the wordmark near the top of the
+            screen, matching where PaywallView.titleBlock's MVPLogoView
+            (size 96) renders once the paywall mounts.
         -->
         <scene sceneID="launch-scene">
             <objects>
@@ -42,12 +53,12 @@
                             <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" translatesAutoresizingMaskIntoConstraints="NO" image="LaunchWordmark" id="launch-wordmark"/>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="launch-safe-area"/>
-                        <!-- bg/canvas = neutral/cream-200 #E9E4DC -->
+                        <!-- bg/canvas = neutral/cream-200 #E9E4DC (matches Color.bgCanvas, same as PaywallView.screen's background) -->
                         <color key="backgroundColor" red="0.9137254901960784" green="0.8941176470588236" blue="0.8627450980392157" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
                             <constraint firstItem="launch-wordmark" firstAttribute="centerX" secondItem="launch-view" secondAttribute="centerX" id="wordmark-center-x"/>
-                            <constraint firstItem="launch-wordmark" firstAttribute="centerY" secondItem="launch-view" secondAttribute="centerY" multiplier="0.82" id="wordmark-center-y"/>
-                            <constraint firstItem="launch-wordmark" firstAttribute="width" secondItem="launch-view" secondAttribute="width" multiplier="0.58" id="wordmark-width"/>
+                            <constraint firstItem="launch-wordmark" firstAttribute="centerY" secondItem="launch-view" secondAttribute="centerY" multiplier="0.22" id="wordmark-center-y"/>
+                            <constraint firstItem="launch-wordmark" firstAttribute="width" secondItem="launch-view" secondAttribute="width" multiplier="0.19" id="wordmark-width"/>
                         </constraints>
                     </view>
                 </viewController>

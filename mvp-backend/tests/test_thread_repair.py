@@ -10,6 +10,7 @@ compiled graph (repair only reads/writes checkpointer state — no LLM calls).
 
 import asyncio
 import os
+import uuid
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key-not-used")
 os.environ.setdefault("TAVILY_API_KEY", "test-key-not-used")
@@ -108,7 +109,13 @@ def test_repair_thread_heals_poisoned_checkpoint():
     from app.agent import get_agent
 
     agent = get_agent("thread-repair-test-user")
-    config = {"configurable": {"thread_id": "thread-repair-test-user:poisoned"}}
+    # A UNIQUE thread id per run. The checkpointer is durable now
+    # (app/checkpointing.py) — it used to be a per-process MemorySaver that
+    # started empty every run, so a fixed id silently accumulated state across
+    # runs and the second run failed on the leftover checkpoint.
+    config = {"configurable": {
+        "thread_id": f"thread-repair-test-user:poisoned:{uuid.uuid4().hex}"
+    }}
 
     async def scenario():
         # Seed the exact poisoned shape from the outage.
@@ -137,10 +144,15 @@ def test_repair_thread_noop_on_healthy_and_empty_threads():
     agent = get_agent("thread-repair-test-user")
 
     async def scenario():
+        # Unique per run — the checkpointer is durable (see above).
+        run = uuid.uuid4().hex
         empty = await repair_thread(
-            agent, {"configurable": {"thread_id": "thread-repair-test-user:empty"}}
+            agent,
+            {"configurable": {"thread_id": f"thread-repair-test-user:empty:{run}"}},
         )
-        healthy_config = {"configurable": {"thread_id": "thread-repair-test-user:healthy"}}
+        healthy_config = {"configurable": {
+            "thread_id": f"thread-repair-test-user:healthy:{run}"
+        }}
         await agent.aupdate_state(
             healthy_config,
             {"messages": [

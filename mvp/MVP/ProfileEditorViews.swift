@@ -35,6 +35,12 @@ enum ProfileOptions {
     /// the onboarding funnel offers, so a kid's vibe reads identically wherever
     /// it's set (see `patterns_onboarding_parity`). Single-select: the backend
     /// field `temperament` is one string, not a list.
+    ///
+    /// Sprint-1: Greg's kid frames show only three of these (Easy-going,
+    /// Sensitive, Spirited). The funnel FILTERS this array down to those — see
+    /// `OnboardingView.funnelTemperamentLabels`. The list itself stays complete
+    /// so a temperament set here is still findable, and so the kid-settings
+    /// sheet keeps offering all six. Do not fork it.
     static let temperamentChips: [(label: String, symbol: String)] = [
         ("Spirited", "flame"),
         ("Sensitive", "heart"),
@@ -43,6 +49,14 @@ enum ProfileOptions {
         ("Shy/cautious", "tortoise"),
         ("Social butterfly", "figure.wave")
     ]
+
+    /// The three the sprint-1 kid frames draw — Spirited / Sensitive /
+    /// Easy-going, which is the first three above and the same SET the funnel
+    /// filters to. The kid-settings card shows these collapsed and all six once
+    /// its "More" chip is opened (`kid-001b` variant `907:2949` draws exactly
+    /// that chip), which is where the other three stay reachable.
+    static let temperamentChipsPrimary: [(label: String, symbol: String)] =
+        Array(temperamentChips.prefix(3))
 
     /// The onboarding "free time" grid AND the account sheet's "Family
     /// interests" grid (Sprint-1 gap). Single source so a selection made at
@@ -56,6 +70,59 @@ enum ProfileOptions {
         ("Nature", "tree"),
         ("Parks", "sportscourt"),
         ("Science", "atom")
+    ]
+
+    /// Figma-exported vector icons (`Onboarding - need help with acitivities`
+    /// [sic], node `1004:1746`), one imageset per option, template-rendering
+    /// so a single asset tints white-on-teal (selected) or teal-on-white
+    /// (unselected). Exported 2026-08-09 via one batched `/images` SVG call —
+    /// see `docs/design/beta-v1-sprint2.md` round-2 addendum for the node-id
+    /// table if these ever need re-export. Two tiles in that frame ("Nature"
+    /// swimmer, "Parks" rocket) are stray duplicates with no matching option
+    /// in this list — skipped, not mapped.
+    static func interestIconName(for option: String) -> String? {
+        switch option {
+        case "Arts & crafts": return "InterestIcon-artsCrafts"
+        case "Museums": return "InterestIcon-museums"
+        case "Hiking": return "InterestIcon-hiking"
+        case "Gardens": return "InterestIcon-gardens"
+        case "Nature": return "InterestIcon-nature"
+        case "Parks": return "InterestIcon-parks"
+        case "Science": return "InterestIcon-science"
+        default: return nil
+        }
+    }
+
+    /// "What's hardest right now" — the parent's stressors. Backend field:
+    /// `stressors`. Sprint-1: Greg's "What's on your mind?" frame shows only the
+    /// six the funnel now offers (see `OnboardingView.funnelChallengeLabels`);
+    /// the other four still matter to Coach context, so they live here for the
+    /// parent-profile editor to surface rather than being deleted.
+    static let challengeChips: [(label: String, symbol: String)] = [
+        ("Morning routines", "sunrise"),
+        ("Bedtime battles", "moon.zzz"),
+        ("Big emotions", "wave.3.left"),
+        ("Picky eating", "fork.knife"),
+        ("Screen time", "iphone"),
+        ("Sibling rivalry", "person.2"),
+        ("School struggles", "book.closed"),
+        ("Behavior changes", "arrow.triangle.2.circlepath"),
+        ("Work-life balance", "scale.3d"),
+        ("Feeling alone in it", "person")
+    ]
+
+    /// "What would help" — the parent's goals. Backend field: `goals`. Asked by
+    /// NO sprint-1 frame, so the funnel no longer shows it; the field is still
+    /// seeded and still feeds Coach context, and the parent-profile editor
+    /// already has a `ChipEditor(title: "Goals")` row. These are the suggested
+    /// labels for that editor.
+    static let goalChips: [(label: String, symbol: String)] = [
+        ("Expert guidance", "book"),
+        ("Daily strategies", "list.bullet"),
+        ("Understanding my child", "magnifyingglass"),
+        ("Community support", "person.3"),
+        ("Managing my stress", "heart.circle"),
+        ("Building confidence", "figure.stand")
     ]
 
     static let ageRange = ["", "<25", "25-34", "35-44", "45-54", "55+", "prefer_not_to_say"]
@@ -152,6 +219,61 @@ struct ChipEditor: View {
     }
 }
 
+// MARK: - Suggested chips (multi-select onto a string list)
+
+/// A wrapped row of tappable suggestions that toggle membership in a `[String]`
+/// profile field. Used for the two grids sprint-1 removed from the funnel
+/// (`stressors`, `goals`): the funnel shows the design's short list, this shows
+/// the FULL option list so nothing became unreachable.
+///
+/// It only ever adds or removes the option's own label, so a value the coach
+/// learned that isn't in `options` is untouched — the neighbouring `ChipEditor`
+/// is what edits those.
+struct SuggestedChipRow: View {
+    let title: String
+    let options: [String]
+    @Binding var selection: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: .hearth300) {
+            Text(title)
+                .font(.hearthBodySM.weight(.semibold))
+                .foregroundColor(.inkSecondary)
+            FlowLayout(spacing: 8) {
+                ForEach(options, id: \.self) { option in
+                    chip(option)
+                }
+            }
+        }
+    }
+
+    private func chip(_ option: String) -> some View {
+        let selected = selection.contains(option)
+        return Button {
+            if selected {
+                selection.removeAll { $0 == option }
+            } else {
+                selection.append(option)
+            }
+        } label: {
+            Text(option)
+                .font(.hearthBodySM.weight(.medium))
+                .foregroundColor(selected ? .inkOnPhotoLight : .inkPrimary)
+                .padding(.horizontal, .hearth400)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule().fill(selected ? Color.accentDefault : Color.bgElevated)
+                )
+                .overlay(
+                    Capsule().stroke(selected ? Color.clear : Color.borderChipOutline,
+                                     lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}
+
 // MARK: - Shared row helpers
 
 private func pickerRow(_ label: String, _ options: [String], _ binding: Binding<String>) -> some View {
@@ -194,34 +316,13 @@ struct ParentProfileEditor: View {
                 }
             }
 
-            Section("Basics") {
-                TextField("Name", text: $draft.name.orEmpty)
-                TextField("Pronouns", text: $draft.pronouns.orEmpty)
-                TextField("ZIP / Postal code", text: $draft.postalCode.orEmpty)
-                    .keyboardType(.numbersAndPunctuation)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                TextField("Country (e.g. US)", text: $draft.country.orEmpty)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                pickerRow("Language", ProfileOptions.language, $draft.primaryLanguage.orEmpty)
-                pickerRow("Age range", ProfileOptions.ageRange, $draft.parentAgeRange.orEmpty)
-            }
-
-            Section("Household & work") {
-                Stepper(
-                    "Adults at home: \(draft.adultsInHousehold.map(String.init) ?? "Not set")",
-                    value: Binding(
-                        get: { draft.adultsInHousehold ?? 0 },
-                        set: { draft.adultsInHousehold = $0 == 0 ? nil : $0 }
-                    ),
-                    in: 0...6
-                )
-                pickerRow("Household", ProfileOptions.household, $draft.householdStructure.orEmpty)
-                pickerRow("Employment", ProfileOptions.employment, $draft.employment.orEmpty)
-                TextField("Work hours", text: $draft.workHours.orEmpty)
-                TextField("Energy pattern", text: $draft.energyPattern.orEmpty)
-            }
+            basicsSection
+            householdSection
+            coachSection
+            // Sprint-1 evicted these two grids from the funnel. They are still
+            // real profile fields the Coach reads, so this is where a parent
+            // changes them now.
+            mindSection
 
             if let error { Text(error).font(.hearthBodySM).foregroundColor(.statusError) }
         }
@@ -237,6 +338,102 @@ struct ParentProfileEditor: View {
         }
     }
 
+    // MARK: Sections
+    //
+    // Split out of `body` deliberately: one long Form body on a screen this
+    // dense is the shape that produces "unable to type-check this expression in
+    // reasonable time" (a real build failure, not SourceKit noise).
+
+    @ViewBuilder
+    private var basicsSection: some View {
+        Section("Basics") {
+            TextField("Name", text: $draft.name.orEmpty)
+            TextField("Pronouns", text: $draft.pronouns.orEmpty)
+            TextField("ZIP / Postal code", text: $draft.postalCode.orEmpty)
+                .keyboardType(.numbersAndPunctuation)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            TextField("Country (e.g. US)", text: $draft.country.orEmpty)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+            // The funnel no longer asks for language (sprint-1 drops the field
+            // from `Onboarding - 2`), so this row is the only place a parent can
+            // set or correct it. Labelled "Primary language" rather than
+            // "Language" because that is the profile key it writes.
+            pickerRow("Primary language", ProfileOptions.language,
+                      $draft.primaryLanguage.orEmpty)
+            // Backend field existed with no iOS editor until the consolidated
+            // Settings "Language at home" card — every bilingual household's
+            // second language was previously dropped on save.
+            pickerRow("Secondary language", ProfileOptions.language,
+                      $draft.secondaryLanguage.orEmpty)
+            pickerRow("Age range", ProfileOptions.ageRange, $draft.parentAgeRange.orEmpty)
+        }
+    }
+
+    @ViewBuilder
+    private var householdSection: some View {
+        Section("Household & work") {
+            Stepper(
+                "Adults at home: \(draft.adultsInHousehold.map(String.init) ?? "Not set")",
+                value: Binding(
+                    get: { draft.adultsInHousehold ?? 0 },
+                    set: { draft.adultsInHousehold = $0 == 0 ? nil : $0 }
+                ),
+                in: 0...6
+            )
+            pickerRow("Household", ProfileOptions.household, $draft.householdStructure.orEmpty)
+            pickerRow("Employment", ProfileOptions.employment, $draft.employment.orEmpty)
+            TextField("Work hours", text: $draft.workHours.orEmpty)
+            TextField("Energy pattern", text: $draft.energyPattern.orEmpty)
+        }
+    }
+
+    /// Consolidated Settings "MVP coach settings" card. Voice is deliberately
+    /// NOT here — the parent-coach voice is not overridable per-user
+    /// (`server.py`: "Voice: intentionally NOT overridden here… the
+    /// ElevenLabs dashboard decides"), unlike the kid companion's voice,
+    /// which IS editable via `KidSettingsSheet`. Guidance style is a real
+    /// backend field (`profiling.py: guidance_style`) that had no editor.
+    @ViewBuilder
+    private var coachSection: some View {
+        Section("Coach") {
+            pickerRow("Guidance style", ProfileOptions.guidanceStyle,
+                      $draft.guidanceStyle.orEmpty)
+        }
+    }
+
+    /// "What's hardest" + "What would help" — `stressors` and `goals`.
+    ///
+    /// The funnel's "What's on your mind?" screen now shows only the six
+    /// hardest-right-now options the design draws, and drops the whole
+    /// "What would help" section. Both fields are still seeded, still read by
+    /// the Coach, and now editable here: the full option list is offered as
+    /// tappable suggestions, and anything the parent (or the coach) added that
+    /// isn't in the list is preserved as a free-text chip.
+    @ViewBuilder
+    private var mindSection: some View {
+        Section {
+            SuggestedChipRow(title: "What's hardest",
+                             options: ProfileOptions.challengeChips.map(\.label),
+                             selection: $draft.stressors.orEmptyArray)
+            ChipEditor(title: "Anything else that's hard",
+                       items: $draft.stressors.orEmptyArray)
+        } header: {
+            Text("What's on your mind")
+        } footer: {
+            Text("Your coach uses these to decide what to bring up — and what to leave alone.")
+                .font(.hearthBodySM).foregroundColor(.inkMuted)
+        }
+
+        Section("What would help") {
+            SuggestedChipRow(title: "Pick what would help",
+                             options: ProfileOptions.goalChips.map(\.label),
+                             selection: $draft.goals.orEmptyArray)
+            ChipEditor(title: "Your own words", items: $draft.goals.orEmptyArray)
+        }
+    }
+
     private func save() {
         guard let baseURL else { return }
         saving = true; error = nil
@@ -246,12 +443,18 @@ struct ParentProfileEditor: View {
             "postal_code": draft.postalCode ?? "",
             "country": draft.country ?? "",
             "primary_language": draft.primaryLanguage ?? "",
+            "secondary_language": draft.secondaryLanguage ?? "",
             "parent_age_range": draft.parentAgeRange ?? "",
             "household_structure": draft.householdStructure ?? "",
             "employment": draft.employment ?? "",
             "work_hours": draft.workHours ?? "",
             "energy_pattern": draft.energyPattern ?? "",
+            "guidance_style": draft.guidanceStyle ?? "",
             "adults_in_household": draft.adultsInHousehold as Any,
+            // The two funnel-evicted grids. Sent as the WHOLE list on every
+            // save (PATCH replaces list fields), so a de-selection sticks.
+            "stressors": draft.stressors ?? [],
+            "goals": draft.goals ?? [],
         ]
         Task {
             do {
@@ -470,16 +673,43 @@ struct AddKidSheet: View {
 
 // MARK: - One learned list, for one kid (the kid-settings sheet's rows)
 
-/// The three list fields beta-v1's `WHAT WE'VE LEARNED` rows expose per kid.
-/// Each maps to exactly one snake_case key on PATCH /profile/kids/{name}.
+/// The five "What makes {name} special" rows sprint-1 measures on the kid
+/// frames, in the design's order: Likes · Dislikes · Challenges · Excels at ·
+/// Goals for {name}. Each maps to exactly ONE snake_case key on
+/// PATCH /profile/kids/{name}.
+///
+/// Each row stores under its OWN backend key. `dislikes` and a per-kid `goals`
+/// were added to `ChildProfile` on 2026-08-08 for exactly this reason: the rows
+/// had been borrowing `triggers`/`motivators`, which meant the label and the
+/// storage disagreed, and a client sending the real names would have hit the
+/// auto-derived PATCH whitelist and been silently DROPPED — a row that looks
+/// saved and isn't. Only `Excels at` still borrows (`strengths`), which is a
+/// genuine synonym rather than an approximation.
 enum KidLearnedField: String, CaseIterable, Hashable {
-    case interests, strengths, challenges
+    case likes, dislikes, challenges, excelsAt, goals
 
-    var title: String {
+    /// The design labels the last row with the kid's name.
+    func title(for kidName: String) -> String {
         switch self {
-        case .interests:  return "Interests"
-        case .strengths:  return "Strengths"
+        case .likes:      return "Likes"
+        case .dislikes:   return "Dislikes"
         case .challenges: return "Challenges"
+        case .excelsAt:   return "Excels at"
+        case .goals:      return "Goals for \(kidName)"
+        }
+    }
+
+    /// Name-free label, for the editors that push with a nav title.
+    var title: String { title(for: "them") }
+
+    /// `kid-001b` variant `907:2949`'s grey prompts, verbatim.
+    var examplePrompt: String {
+        switch self {
+        case .likes:      return "Examples: Berries, kittens, silly songs"
+        case .dislikes:   return "Examples: green food, loud noises"
+        case .challenges: return "Examples: bathtime"
+        case .excelsAt:   return "Examples: math"
+        case .goals:      return "Examples: social"
         }
     }
 
@@ -487,19 +717,29 @@ enum KidLearnedField: String, CaseIterable, Hashable {
     /// left out of the payload on purpose — PATCH only touches keys that are
     /// present, which is what stops one edit from wiping the rest
     /// (`test_saving_basics_does_not_wipe_learned_fields`).
-    var payloadKey: String { rawValue }
+    var payloadKey: String {
+        switch self {
+        case .likes:      return "interests"
+        case .dislikes:   return "dislikes"
+        case .challenges: return "challenges"
+        case .excelsAt:   return "strengths"
+        case .goals:      return "goals"
+        }
+    }
 
     func values(of kid: ChildProfileDTO) -> [String] {
         switch self {
-        case .interests:  return kid.interests ?? []
-        case .strengths:  return kid.strengths ?? []
+        case .likes:      return kid.interests ?? []
+        case .dislikes:   return kid.dislikes ?? []
         case .challenges: return kid.challenges ?? []
+        case .excelsAt:   return kid.strengths ?? []
+        case .goals:      return kid.goals ?? []
         }
     }
 }
 
 /// Edits a single learned list for a single kid. Pushed from the kid-settings
-/// sheet's `WHAT WE'VE LEARNED` rows.
+/// sheet's "What makes {name} special" rows.
 struct KidLearnedListEditor: View {
     let baseURL: URL?
     let userID: String
@@ -528,7 +768,7 @@ struct KidLearnedListEditor: View {
     var body: some View {
         Form {
             Section {
-                ChipEditor(title: field.title, items: $items)
+                ChipEditor(title: field.title(for: kidDisplayName), items: $items)
             } footer: {
                 Text("Gathered from \(kidDisplayName)'s conversations. Edit or remove anything that's off.")
                     .font(.hearthBodySM).foregroundColor(.inkMuted)
@@ -538,7 +778,7 @@ struct KidLearnedListEditor: View {
         .scrollContentBackground(.hidden)
         .background(Color.bgCanvas.ignoresSafeArea())
         .trackScreen("kid_learned_\(field.rawValue)")
-        .navigationTitle(field.title)
+        .navigationTitle(field.title(for: kidDisplayName))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {

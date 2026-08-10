@@ -14,7 +14,9 @@ from langchain_core.messages import HumanMessage
 
 from app.agent import get_agent
 from app import agent as agent_module
+from app import checkpointing
 from app.onboarding_agent import get_onboarding_agent
+from app.coach_threads import CoachThreadStore
 from app.memory import MemoryRepository
 from app.profiling import profiling_service, ParentProfile, ChildProfile
 from app.duckdb_storage import DuckDBStorage
@@ -67,6 +69,9 @@ storage_backend = DuckDBStorage()
 content_service.init(storage_backend)
 chat_memory = MemoryRepository()
 onboarding_memory = MemoryRepository()
+# Coach history (sprint 2): conversation titles/summaries over the SAME stores —
+# metadata in user_data, transcripts in chat_memory. No new table.
+coach_threads = CoachThreadStore(storage=storage_backend, memory=chat_memory)
 
 
 @asynccontextmanager
@@ -146,6 +151,15 @@ async def lifespan(app: FastAPI):
         analytics_shutdown()   # flush queued events (no-op if disabled)
     except Exception:
         pass
+    # The durable checkpointer holds a SQLite connection per event loop, and
+    # aiosqlite's worker thread is only joined by an explicit close. Closing it
+    # here is the graceful path (the daemon flag in app/checkpointing.py is the
+    # backstop so a missed close can't wedge shutdown).
+    try:
+        await checkpointing.checkpointer.aclose()
+        checkpointing.checkpointer.close_sync()
+    except Exception:
+        logger.exception("[checkpointer] failed to close cleanly")
     storage_backend.close()
 
 
@@ -420,18 +434,30 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f"[chat] start user_id={user_id} thread_id={thread_id} message={message[:200]}")
     agent = get_agent(user_id)
-    # ONE merged thread per parent across the coach and Chief-of-Staff text
-    # surfaces (app.agent.thread_key) — the client's thread_id still scopes the
-    # stored transcript below, just not the agent's memory.
-    memory_key = agent_module.thread_key(user_id, "chat", thread_id)
+    # ONE merged agent thread per parent per CONVERSATION across the coach and
+    # Chief-of-Staff text surfaces. Which conversation is the parent's active
+    # one is server-side state (app/coach_threads.py) rather than the client's
+    # per-install `thread_id`, so a new conversation started on the phone is the
+    # same conversation the dashboard continues. `None` = the pre-sprint-2
+    # un-suffixed thread, so an in-flight beta chat stays continuous.
+    conversation_id = coach_threads.active_conversation_id(user_id)
+    memory_key = agent_module.thread_key(
+        user_id, "chat", thread_id, conversation_id=conversation_id
+    )
+    # The stored transcript is keyed by the conversation too — that's what the
+    # history list reads and what reopening a conversation replays.
+    transcript_key = conversation_id or thread_id
     # Cost: one coach turn = one workflow; session groups the whole thread.
     cost_cb = CostLoggingCallbackHandler(
-        feature="coach", workflow=new_workflow_id(), session=thread_id, user=user_id
+        feature="coach", workflow=new_workflow_id(), session=transcript_key, user=user_id
     )
     config = {"configurable": {"thread_id": memory_key}, "callbacks": [cost_cb]}
 
-    thread_messages = chat_memory.get_thread_messages(user_id, thread_id)
+    thread_messages = chat_memory.get_thread_messages(user_id, transcript_key)
     thread_messages.append({"role": "user", "content": message})
+    # Record the turn so the conversation appears in the history list with a
+    # real timestamp before it is ever closed/titled.
+    coach_threads.touch(user_id, conversation_id)
 
     # Self-heal a thread poisoned by a cancelled tool call before the turn
     # (see app/thread_repair.py — without this one interrupted turn breaks
@@ -981,6 +1007,63 @@ async def onboarding_chat_endpoint(request: ChatRequest, user_id: str = Depends(
         generate_onboarding_stream(request.message, request.thread_id, request.user_id),
         media_type="text/event-stream"
     )
+
+
+# ── Coach conversation history (sprint 2) ───────────────────────────
+
+@app.get("/coach/threads")
+def list_coach_threads(user_id: str, authenticated_user: str = Depends(current_user)):
+    """The parent's past coach conversations, newest first.
+
+    Titles are generated once (Haiku) and persisted, so this is a pure read
+    after the first call — a list render must never cost an LLM call per row.
+    VOICE conversations are deliberately absent: they live on their own
+    `{user}:default` thread and are not coach conversations
+    (memory `project_voice_v2_state`).
+
+    Response shape is locked against the iOS Codable structs by
+    `tests/test_coach_threads.py` — strict Codable turns any field/type drift
+    into a silently empty list, so the contract is asserted, not assumed.
+    """
+    authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    return {"threads": coach_threads.list_conversations(user_id)}
+
+
+@app.get("/coach/threads/{conversation_id}")
+def get_coach_thread(
+    conversation_id: str,
+    user_id: str,
+    authenticated_user: str = Depends(current_user),
+):
+    """One past conversation's transcript, and make it the active one.
+
+    Reopening is a mutation on purpose: the parent's next message must land in
+    the conversation they just opened, not the one that happened to be active.
+    """
+    authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    if not coach_threads.set_active(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="conversation_not_found")
+    messages = coach_threads.messages(user_id, conversation_id)
+    _track("coach_thread_opened", user_id)
+    return {"conversation_id": conversation_id, "messages": messages}
+
+
+@app.post("/coach/threads/close")
+def close_coach_thread(user_id: str, authenticated_user: str = Depends(current_user)):
+    """Close the current conversation (KEEPING it) and start a new one.
+
+    This is what the app's "new conversation" button calls now. It used to call
+    the client's `resetConversation()`, which WIPED the thread — the whole point
+    of the history list is that a closed conversation is still there.
+    """
+    authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    result = coach_threads.close_active(user_id)
+    persist_state(user_id)
+    _track("coach_thread_closed", user_id)
+    return {
+        "conversation_id": result["conversation_id"],
+        "closed": result["closed"],
+    }
 
 
 @app.get("/memory/{user_id}")
@@ -2180,8 +2263,13 @@ def delete_family(user_id: str, authenticated_user: str = Depends(current_user))
     Parquet snapshots in /app/data/*.parquet are re-exported immediately after
     the cascade so they forget the family NOW, not "on next export" (they are
     the durability path on Railway and would otherwise retain deleted kid data
-    until some later export ran). The in-memory LangGraph MemorySaver
-    checkpointer is NOT touched (process-local; discarded next restart).
+    until some later export ran).
+
+    The LangGraph checkpointer IS now swept (app/checkpointing.delete_user_threads).
+    It used to be a process-local MemorySaver whose contents evaporated on the
+    next restart; it is now a durable SQLite file holding every verbatim turn,
+    so "delete my data" has to reach it explicitly or the conversations outlive
+    the family.
     """
     authorize_user_match(authenticated=authenticated_user, claimed=user_id)
     # Grab the analytics id BEFORE the cascade deletes the account row, so we can
@@ -2200,6 +2288,12 @@ def delete_family(user_id: str, authenticated_user: str = Depends(current_user))
     # `export_all_parquet` can flush it back into `user_data`. Popping it here
     # makes the delete visible immediately and stops a re-export resurrecting it.
     profiling_service.remove_family(user_id)
+    # Agent conversation checkpoints are durable now — sweep every thread this
+    # family owns (parent text + voice, onboarding, each kid). Never raises;
+    # the DB cascade above already stands.
+    _threads_purged = checkpointing.delete_user_threads(user_id)
+    if _threads_purged:
+        counts["agent_threads"] = _threads_purged
     # Photos live outside the DB entirely — sweep the family's whole blob
     # prefix so "delete my data" covers them too (no-op when unconfigured).
     from app import blobs as _blobs

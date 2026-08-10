@@ -88,6 +88,9 @@ TAB_SELECTED = "#DAE0DF"
 INK_800 = "#1E1E1E"
 INK_HEADER = "#2B2925"
 NEUTRAL_500 = "#858585"
+CREAM_WARM = "#FCFBF8"
+WARM_GRAY_500 = "#989591"
+CHARCOAL_BTN = "#4A4741"
 
 PAIRS: list[tuple[str, str, str, float, str | None]] = [
     # (label, foreground, background, floor, deliberate-exception note)
@@ -118,6 +121,22 @@ PAIRS: list[tuple[str, str, str, float, str | None]] = [
      "conventionally red. Implemented as drawn pending his answer."),
     ("accent/default as text on paper",   TEAL_FILL, PAPER,       AA_TEXT, None),
 
+    # beta-v1 sprint-1 Home fidelity (2026-08-08). Dashboard 1's coach banner
+    # sits on the warmest cream; the FOR YOU / COMING UP eyebrow is the design's
+    # own light grey and is the one pair here that genuinely fails.
+    ("ink/header on bg/coachBanner",      INK_HEADER, CREAM_WARM, AA_TEXT, None),
+    ("ink/muted on bg/coachBanner",       INK_500,   CREAM_WARM,  AA_TEXT, None),
+    ("ink/eyebrow on paper",              WARM_GRAY_500, PAPER,   AA_TEXT,
+     "Greg's measured eyebrow grey (#989591 at Inter w700 13) — 2.98:1, a REAL "
+     "AA failure, worse than the accent waiver Miguel accepted on 2026-08-07. "
+     "Kept as drawn only because the eyebrow duplicates information carried by "
+     "the headline beside it (category + read time), so it is never the sole "
+     "carrier. #767169 would clear AA on both grounds at the same visual weight "
+     "and is a ONE-primitive change (HearthPrimitives.warmGray500). Escalate to "
+     "Greg with the accent question."),
+    ("ink/eyebrow on card",               WARM_GRAY_500, CARD_CREAM, AA_TEXT,
+     "Same eyebrow grey on the cream card ground — 2.69:1. See the note above."),
+
     # Kid accent.
     ("ink/onPhoto-dark on accent/kid",   INK_900,   SAFFRON,      AA_TEXT, None),
     ("ink/primary on accent/kid-tint",   INK_900,   SAFFRON_TINT, AA_TEXT, None),
@@ -130,7 +149,21 @@ PAIRS: list[tuple[str, str, str, float, str | None]] = [
 
     # Disabled control.
     ("ink/secondary on bg/disabled",     INK_700,   DISABLED,     AA_TEXT, None),
+
+    # beta-v1 sprint-1 funnel button (2026-08-08). Charcoal fill — white on it
+    # is 9.26:1. This is deliberately NOT the teal accent: the funnel reads sober.
+    ("paper on funnel button",           PAPER,     CHARCOAL_BTN, AA_TEXT, None),
+
+    # beta-v1 sprint-1 "create your account" auth pills (2026-08-09). The
+    # Google button's `#2B2925` fill is `ink/header`, reused as a BACKGROUND
+    # here rather than its usual text role.
+    ("paper on ink/header (auth pill)",  PAPER,     INK_HEADER,   AA_TEXT, None),
 ]
+
+# The two funnel border colors (#C9C5BE and #E9E4DC) are NOT registered as
+# contrast pairs. They are DECORATIVE strokes at 1.51:1 and 1.22:1 against their
+# grounds. The control's shape and fill already carry the boundary, so registering
+# them would report a failure for something that isn't a boundary indicator.
 
 
 def check_contrast() -> list[str]:

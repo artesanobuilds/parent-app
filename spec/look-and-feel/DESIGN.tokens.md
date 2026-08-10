@@ -19,12 +19,13 @@ The raw palette. Code should rarely reference these directly — use the semanti
 
 | Token | Hex | Use |
 |---|---|---|
-| `neutral/cream-50` | `#FAF7F2` | lightest ground (unused by default) |
+| `neutral/cream-50` | `#FCFBF8` | **Dashboard 1 coach banner** — warmest ground, distinct from cream-100 |
 | `neutral/cream-100` | `#F3F0EB` | **sober** surface (was the canvas pre-beta) |
 | `neutral/cream-150` | `#F5F3EF` | **card / sheet ground** — the account sheet, and the INK on teal cards |
 | `neutral/cream-200` | `#E9E4DC` | **canvas (default page bg)** |
 | `neutral/cream-300` | `#DAD4CA` | hairline / divider — darkened so it stays visible on cream-200 |
 | `neutral/warm-gray-400` | `#B8B4AC` | disabled control fill |
+| `neutral/warm-gray-500` | `#989591` | **eyebrow ink** — FOR YOU / COMING UP item category labels |
 | `neutral/gray-500` | `#858585` | neutral control fill — sign out (NOT the warm gray above) |
 | `neutral/sage-200` | `#DAE0DF` | **selected** state — tab pill, segmented control. Warmer than `brand/teal-100`; do not substitute |
 | `neutral/ink-900` | `#1A1A1A` | primary text on cream |
@@ -34,6 +35,10 @@ The raw palette. Code should rarely reference these directly — use the semanti
 | `neutral/ink-500` | `#666157` | muted text (warm gray). Was `#6F6A60`, which is **4.25:1 on cream-200 — an AA fail**. Do not revert. |
 | `neutral/ink-300` | `#8A8275` | tertiary / placeholder (exactly 3.00:1 on cream-200 — at the UI floor, never for instruction text) |
 | `neutral/paper` | `#FFFFFF` | elevated card bg |
+| `funnel/button-charcoal` | `#4A4741` | **funnel primary-button fill** (sprint-1, 2026-08-08) — white on it = 9.26:1. Deliberately NOT the teal accent: the funnel reads sober and minimal; teal is the in-app accent |
+| `funnel/border-input` | `#C9C5BE` | funnel pill input 1px stroke (1.51:1 on cream-50 — decorative, not a boundary indicator) |
+| `funnel/border-chip` | `#E9E4DC` | funnel chip outline 1px stroke (1.22:1 on cream-50 — decorative, not a boundary indicator) |
+| `brand/teal-deep` | `#0A5570` | deepest accent, **fill only** — the chat-input strip and the count badge on the Plan segment (sprint-2 measured). Cream on it = 7.44:1, paper = 8.25:1 |
 | `brand/teal-700` | `#12556F` | accent press / dense use |
 | `brand/teal-600` | `#1B7498` | accent as **text or icon on cream**. **Was `#186A8B` (4.78:1)**; set equal to teal-500 on 2026-08-07 for exact Figma fidelity — see the deviation note below |
 | `brand/teal-500` | `#1B7498` | accent **fill** — CTAs, avatars (white on it = 5.25:1) |
@@ -62,11 +67,13 @@ The names code consumes. Component specs reference these exclusively.
 | `bg/canvas` | `neutral/cream-200` | default page background |
 | `bg/elevated` | `neutral/paper` | card / sheet background |
 | `bg/sober` | `neutral/cream-100` | crisis-lock / kid-agent surface; quieter than canvas |
+| `bg/coachBanner` | `neutral/cream-50` | Dashboard 1 coach banner — warmest ground |
 | `bg/voice` | `surface/voice-navy` | kid voice-call surface — the only dark ground in a light-locked app |
 | `bg/disabled` | `neutral/warm-gray-400` | inert control fill. Pair with `ink/secondary`; **white on it is 2.07:1** |
 | `ink/primary` | `neutral/ink-900` | body text + headlines |
 | `ink/secondary` | `neutral/ink-700` | secondary text + softer headlines |
 | `ink/muted` | `neutral/ink-500` | metadata, captions, helper text |
+| `ink/eyebrow` | `neutral/warm-gray-500` | FOR YOU / COMING UP item eyebrows (category labels) |
 | `ink/placeholder` | `neutral/ink-300` | input placeholder, tertiary (UI ≥3:1, not for instruction text) |
 | `ink/onPhoto-dark` | `neutral/ink-900` | text on warm/light tiles (`photo/saffron`, `photo/rose`, `kid/saffron`) — AA-pass |
 | `ink/onPhoto-light` | `neutral/paper` | text on dark tiles (`photo/royal`, `photo/forest`, `bg/voice`) — AA-pass |
@@ -155,8 +162,12 @@ Page gutter on iOS = `spacing/700`. Section vertical rhythm = `spacing/800`–`s
 | `shape/none` | 0 | full-bleed, no rounding |
 | `shape/sm` | 4 | tags, small markers |
 | `shape/button` | 8 | **buttons / CTAs** (beta-v1: Greg's CTAs are tight rects, not capsules) |
+| `shape/seeAll` | 10 | COMING UP "See all" affordance (Dashboard 1) |
+| `shape/tile` | 12 | kid photo tile (Dashboard 1/2) |
 | `shape/md` | 12 | inputs, small cards |
 | `shape/lg` | 20 | primary cards |
+| `shape/sheet` | 24 | account/profile sheet |
+| `shape/section` | 28 | Home section card grounds (YOUR KIDS, coach banner) |
 | `shape/xl` | 28 | hero tiles, modal sheets |
 | `shape/pill` | 999 | selection + filter chips, avatar rings |
 

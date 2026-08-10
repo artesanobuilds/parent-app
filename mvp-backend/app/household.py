@@ -95,6 +95,15 @@ _CAREGIVER_ROLE = {
 COMMON_ATTRIBUTES = ("likes", "dislikes", "challenges", "excels_at", "goals")
 ROLE_ATTRIBUTES: Dict[str, tuple] = {
     "co_parent": ("co_parent_goals",),
+    # Sprint-1's `circle member` frame asks for Spirited / Easy-going /
+    # Sensitive. It is a real field, so it is a real attribute key — the
+    # alternative the iOS build reached for was stuffing it into `notes` behind
+    # a "Personality: " marker, which makes a structured value unqueryable and
+    # collides with whatever the parent types in their own note.
+    "other": ("personality",),
+    "nanny": ("personality",),
+    "grandparent": ("personality",),
+    "neighbour": ("personality",),
 }
 
 ATTRIBUTE_LABELS = {
@@ -104,6 +113,14 @@ ATTRIBUTE_LABELS = {
     "excels_at": "Excels at",
     "goals": "Goals for {name}",
     "co_parent_goals": "Co-Parent goals",
+    "personality": "Personality",
+}
+
+# Attribute keys whose value is ONE choice from a fixed list rather than a
+# free-text list. The client renders these as a picker; the server still stores
+# them in the same `attributes` bag, as a single-element list.
+ATTRIBUTE_CHOICES: Dict[str, tuple] = {
+    "personality": ("Spirited", "Easy-going", "Sensitive"),
 }
 
 # Light input hardening: these are free-text lists a parent types.
@@ -117,13 +134,20 @@ def allowed_attributes(role: str) -> tuple:
     return COMMON_ATTRIBUTES + ROLE_ATTRIBUTES.get(role, ())
 
 
-def attribute_fields(role: str, display_name: str) -> List[Dict[str, str]]:
+def attribute_fields(role: str, display_name: str) -> List[Dict[str, Any]]:
     """The disclosure rows the sheet renders, in order, already labelled."""
-    return [
-        {"key": key,
-         "label": ATTRIBUTE_LABELS[key].replace("{name}", display_name or "them")}
-        for key in allowed_attributes(role)
-    ]
+    fields: List[Dict[str, Any]] = []
+    for key in allowed_attributes(role):
+        field: Dict[str, Any] = {
+            "key": key,
+            "label": ATTRIBUTE_LABELS[key].replace("{name}", display_name or "them"),
+            # "list" = free text the parent adds to; "choice" = pick one of
+            # `choices`. Always present so iOS Codable never sees a missing key.
+            "kind": "choice" if key in ATTRIBUTE_CHOICES else "list",
+            "choices": list(ATTRIBUTE_CHOICES.get(key, ())),
+        }
+        fields.append(field)
+    return fields
 
 
 # --------------------------------------------------------------------------- #
@@ -235,9 +259,16 @@ def _mirror_caregiver(storage, user_id: str, *, display_name: str, role: str,
         return None
 
 
-def _member_out(row: Dict[str, Any], *, circle: set, presign: bool = True) -> Dict[str, Any]:
+def _member_out(
+    row: Dict[str, Any], *, circle: set, presign: bool = True,
+    pending: Optional[set] = None,
+) -> Dict[str, Any]:
     """The wire shape iOS decodes. Every key is ALWAYS present (Codable is
-    strict — one missing/mistyped field empties the whole list)."""
+    strict — one missing/mistyped field empties the whole list).
+
+    `pending` is the set of my roster ids that are waiting on the other person
+    (see `pending_outbound_member_ids`). Passed in rather than looked up per row
+    so a roster of N members is still one query."""
     role = row.get("role") or "other"
     display_name = row.get("display_name") or ""
     stored = row.get("attributes") or {}
@@ -268,6 +299,11 @@ def _member_out(row: Dict[str, Any], *, circle: set, presign: bool = True) -> Di
         "member_user_id": member_user_id,
         "linked": member_user_id is not None,
         "in_circle": member_user_id is not None and member_user_id in circle,
+        # Waiting on them: a pending request OR an unclaimed invite. Deliberately
+        # ONE flag for both, because distinguishing them in the UI would leak
+        # whether the email matched an existing account — the same
+        # enumeration-oracle rule POST /circle/contacts is built around.
+        "pending": bool(pending and row.get("id") in pending),
         "attributes": attributes,
         "attribute_fields": attribute_fields(role, display_name),
         "notes": row.get("notes"),
@@ -396,7 +432,9 @@ def get_household(user_id: str = Depends(current_user)):
 
     storage = _storage()
     circle = set(storage.circle_peer_ids(user_id))
-    members = [_member_out(m, circle=circle) for m in storage.list_household_members(user_id)]
+    pending = set(storage.pending_outbound_member_ids(user_id))
+    members = [_member_out(m, circle=circle, pending=pending)
+               for m in storage.list_household_members(user_id)]
     family = profiling_service.get_family_profile(user_id)
     children = [
         _child_out(name, profile or {})
@@ -414,7 +452,8 @@ def get_household(user_id: str = Depends(current_user)):
 def list_members(user_id: str = Depends(current_user)):
     storage = _storage()
     circle = set(storage.circle_peer_ids(user_id))
-    return {"members": [_member_out(m, circle=circle)
+    pending = set(storage.pending_outbound_member_ids(user_id))
+    return {"members": [_member_out(m, circle=circle, pending=pending)
                         for m in storage.list_household_members(user_id)]}
 
 
@@ -458,14 +497,18 @@ def create_member(body: MemberCreate, user_id: str = Depends(current_user)):
         caregiver_id=caregiver_id,
     )
     circle = set(storage.circle_peer_ids(user_id))
-    return {"member": _member_out(storage.get_household_member(member_id), circle=circle)}
+    return {"member": _member_out(storage.get_household_member(member_id), circle=circle,
+                            pending=set(storage.pending_outbound_member_ids(user_id)))}
 
 
 @router.get("/members/{member_id}")
 def get_member(member_id: str, user_id: str = Depends(current_user)):
     member = _owned_member(member_id, user_id)
-    circle = set(_storage().circle_peer_ids(user_id))
-    return {"member": _member_out(member, circle=circle)}
+    storage = _storage()
+    circle = set(storage.circle_peer_ids(user_id))
+    return {"member": _member_out(
+        member, circle=circle,
+        pending=set(storage.pending_outbound_member_ids(user_id)))}
 
 
 @router.patch("/members/{member_id}")
@@ -540,7 +583,8 @@ def patch_member(member_id: str, body: MemberPatch, user_id: str = Depends(curre
             logger.warning("[household] caregiver mirror update failed", exc_info=True)
 
     circle = set(storage.circle_peer_ids(user_id))
-    return {"member": _member_out(storage.get_household_member(member_id), circle=circle)}
+    return {"member": _member_out(storage.get_household_member(member_id), circle=circle,
+                            pending=set(storage.pending_outbound_member_ids(user_id)))}
 
 
 @router.delete("/members/{member_id}")
@@ -654,4 +698,5 @@ def attach_member_avatar(member_id: str, body: MemberAvatarAttach,
         except Exception:
             logger.warning("[household] old avatar delete failed", exc_info=True)
     circle = set(storage.circle_peer_ids(user_id))
-    return {"member": _member_out(storage.get_household_member(member_id), circle=circle)}
+    return {"member": _member_out(storage.get_household_member(member_id), circle=circle,
+                            pending=set(storage.pending_outbound_member_ids(user_id)))}

@@ -10,6 +10,197 @@ Every update we ship, newest first — what changed and how to find it. Features
 *app update* arrive on your phone through TestFlight; everything else is live the moment
 it's listed here.
 
+## August 9, 2026 — one smooth opening screen, and Settings all in one place
+
+**Opening the app is one continuous moment now** *(app update 1.87)* — the very first thing you
+see used to flash to a plain "MVP" screen before the plan page appeared; now the two blend
+together so it reads as a single loading screen, not two.
+
+**Settings is now one screen with everything about your family** *(app update 1.87)* — tap
+Settings and you'll find your account, your family's structure, everyone in your circle, care
+givers, the languages you speak at home, and how you want your coach to talk to you, each in its
+own card with a pencil to edit it. Everything that used to live in the old Settings list — your
+profile, Library, reporting a problem, the legal pages, signing out — is still there, just
+gathered into one place instead of scattered across screens.
+
+**A direct link from Home to Settings** *(app update 1.87)* — "Check your family settings" at the
+bottom of Home now actually takes you there.
+
+**Tap a family member to see their full profile** *(app update 1.87)* — parents, co-parents, and
+anyone in your circle now open a profile page (photo, role, what your coach has learned about
+them) instead of just a name in a list.
+
+**The keyboard gets out of the way** *(app update 1.87)* — tapping a dropdown during setup (like
+"Your household") used to leave the keyboard covering the screen. It now dismisses immediately.
+
+**Fixed: Continue could stay greyed out with no explanation** *(app update 1.87)* — on your
+child's setup screen, if every field looked filled in but Continue stayed disabled, it was
+almost always a missing name. The screen now tells you exactly what's missing.
+
+**Real vector icons for family activities** *(app update 1.87)* — the Arts & Crafts, Museums,
+Hiking, and other activity icons are now crisp at any size, matching the design exactly.
+
+## August 9, 2026 — plan first, a new trophy screen, and a sign-in fix
+
+**The plan page now opens the app** *(app update 1.86)* — you'll see the BASIC and FAMILY plans as
+the very first screen, before creating your account. **Nothing is charged and nothing is
+collected** — either button simply continues, same as before; it just moved to the front of the
+line to match the design.
+
+**A new trophy graphic on account creation** *(app update 1.86)* — "Create account" now shows the
+same star-trophy mark as the opening screen behind the card, replacing yesterday's placeholder.
+
+**Fixed: signing in with a different method could show a blank setup instead of your family**
+*(live now)* — if you created your account with Apple and later signed in with Google (or vice
+versa) using the same email address, the app sometimes treated it as a brand-new, empty account
+and sent you back through setup instead of home. Signing in now recognizes your existing account
+across sign-in methods, as long as the email matches and is verified.
+
+## August 9, 2026 — the setup flow, pixel-matched to the design
+
+**The first screen you ever see is now the real one** *(app update 1.85)* — the opening screen has
+the illustration it was designed with: a trophy cup of pencils on a stack of books, above the MVP
+wordmark. It had been missing entirely.
+
+**Fixed: the kid questions were cut off** *(app update 1.85)* — on "Tell us about your first", the
+Grade, Gender and personality buttons were hidden behind the Continue bar, so you couldn't reach
+them without a fight. The whole page fits on screen now. Spacing, type sizes and the button styling
+across every setup page were re-measured against the design and corrected.
+
+**The progress bar is calmer** *(app update 1.85)* — it was a heavy solid-blue bar from the very
+first question. It's now the soft wash it was designed as, deepening in colour as you get closer to
+the end.
+
+**A plan page after you sign up** *(app update 1.85)* — you'll see the BASIC and FAMILY plans before
+your family space is prepared. **Nothing is charged and nothing is collected** — either button
+simply continues. It's there so the flow is complete; payment isn't switched on.
+
+## August 8, 2026 — setup and profiles, as they were designed
+
+**The whole setup flow was rebuilt to match the design** *(app update 1.84)* — headings were a third
+too small, the Continue button was the wrong colour and shape, and the input fields had the wrong
+outline. It now looks the way it was meant to. The first question page also asks four things instead
+of six: your name, your household, your education style and your location. **Nothing you already
+entered was lost** — the questions we removed from setup (the languages you speak at home, and "what
+would help") are still there, now under Settings → your profile, where you can change them any time.
+
+**Fixed: a whole setup page you could never reach** *(app update 1.84)* — "What do you do in your free
+time?" sat in the flow after the kid questions, but the app jumped straight past it. You could only
+see it by pressing Back. It's now where it belongs, between the family-challenges page and signing in.
+
+**Every person in your family has a proper profile page now** *(app update 1.84)* — your kids, you,
+your co-parent and each Circle member. Each opens with a photo (tap the camera to change it) and their
+name, then the details your coach actually uses: what they like and dislike, what they find hard, what
+they're good at, and what you'd like them to work on. Kids also carry a birthday, grade and
+personality.
+
+**Your account sheet has three real states** *(app update 1.84)* — tap your avatar. If there's nothing
+to show yet it says so. **Saved** lists the articles you've bookmarked. **History** now genuinely shows
+your history: the Circle conversations you've been part of, with a link straight to Circle, and what
+you've talked to your coach about, with a link back into that chat.
+
+**Fixed: a second language at home was never actually saved** *(live now)* — if you told us your family
+speaks two languages, the second one was being discarded before it reached your profile. The app sent
+it and the server accepted it, but nothing stored it. Fixed. If you'd entered one before today it
+didn't survive, so it's worth re-adding under Settings → your profile.
+
+**Fixed: two things on your kids' profiles weren't being saved under the right name** *(live now)* —
+"Dislikes" was being filed as triggers and "Goals" as motivators, so what you typed showed up in the
+wrong place when your coach read it. Both now save as themselves.
+
+## August 8, 2026 — fixed: your kids disappearing from Home
+
+**Fixed: leaving Home and coming back could show no kids** *(app update 1.83)* — switching to
+another tab and returning sometimes left YOUR KIDS showing the "add your first child" message,
+as though your children weren't there. **Nothing was ever lost** — it was a loading fault, and
+the data was on the server the whole time.
+
+Two things caused it, and both are fixed. Returning to Home restarts the roster fetch, and the
+restart was cancelling the first one before it finished. And when the fetch didn't complete, the
+screen showed the same "no kids yet" message a brand-new family sees. Now overlapping refreshes
+wait for each other instead of cancelling, and if the roster genuinely can't be loaded you get
+**"Couldn't load your kids — they're safe, this is a connection problem, not missing data"** with
+a **Try again**, rather than a screen that implies your family is gone.
+
+## August 8, 2026 — adding someone by email, and a real Contacts screen
+
+**Add someone to your Circle by email — no link to send** *(app update 1.82)* — a nanny or a
+grandparent may already be on MVP, because they're already in someone else's circle. Open
+**Circle → Contacts → add contact**, type their email, and we handle both cases: if they have
+an account they get a request in their own Circle, and if they don't we set up an invite link
+for you to share. Either way you see the same confirmation.
+
+Two deliberate details. **We never tell you whether an email is already on MVP** — if we did,
+anyone could type addresses into the app to find out who has an account. And **the other person
+always has to accept**: no one lands in your Circle, or can start a conversation with you,
+until they say yes. You'll see requests waiting for *you* at the top of the Circle tab, with
+**Accept** and **Decline**.
+
+**A proper Contacts screen** *(app update 1.82)* — your people in one list, with the ones
+you're still waiting on marked as such, and a **⋯** on each row to copy their invite link, edit
+their profile, or remove them. Select several and **Invite selected** does them in one pass.
+
+**Everyone in your Circle now has a profile you can fill in** *(app update 1.82)* — tap a
+contact to record how they fit into your family: their relation, what they're good with, what
+they find hard, what you'd like them to focus on. A co-parent additionally gets **Co-Parent
+goals**; a nanny, grandparent or friend gets a **Personality** — Spirited, Easy-going or
+Sensitive. Your coach reads these, so a question about handoffs or bedtime can account for who
+is actually doing them.
+
+## August 8, 2026 — the Planner and the reading, to spec
+
+**Filter chips on the Planner board actually filter now** *(app update 1.82)* — **All / New /
+Deciding / Needs action** were described in the app but never built. They're there, with live
+counts, and the **Plan** tab itself carries a small badge with how many next steps are waiting
+on you.
+
+**Articles now say who they're for** *(app update 1.82 · groundwork live now)* — a line above
+each headline, like *WE TRIED IT · AGES 3–7 · 4 MIN*, so you can tell at a glance whether a
+piece is aimed at your kids' ages and how long it'll take. We're filling this in across the
+existing library, so some pieces will show only part of it for now.
+
+## August 8, 2026 — finishing your family's details, one person at a time
+
+**A guided pass through your family, right after you land on Home** *(app update 1.82)* —
+setting up a family used to end at "You're all set", with every detail about each child
+and each adult hidden behind Settings. Now the app walks you through it: after you reach
+Home for the first time it steps through each child, then the adults in your circle, then
+your own details — one person per screen, with the same editors you'd find in Settings.
+
+Every step has **Skip for now**, and the header has **Finish later** — both leave Home
+completely usable, and neither will nag you about it again on the next launch. If you close
+the app halfway through, it picks up on the same person you were on, not back at the start.
+
+**You can re-enter it any time from a child's tile on Home.** A tile that says *Set up
+Benjamin* opens the walk on Benjamin. For a child who's already introduced, press and hold
+their tile and choose *Finish setting up …*.
+
+**"+ Add another child" is now on Home** *(app update 1.82)* — under your kids' tiles.
+Previously adding a child meant Settings → Profile → Add a kid; that still works, and both
+lead to the same place.
+
+**"Add event" on Home now opens the Planner** *(app update 1.82)* — the row under COMING UP
+used to do nothing. It now takes you to the Planner, where you can paste a camp email, snap
+a photo of a flyer, or ask the coach to plan something.
+
+## August 8, 2026 — the coach remembers, and keeps your conversations
+
+**Your coach conversations are kept, and you can go back to them** *(app update 1.81)* —
+the Coach tab has a clock icon at the top: tap it for everything you've talked about,
+newest first, each with a short title and a line about what came of it. Tap one to reopen
+it and carry on. The pencil icon still starts a new conversation, but it no longer throws
+the old one away — previously "new conversation" erased what you'd just discussed, which is
+why this pair shipped together. Voice calls stay separate and don't appear in the list.
+
+**A fresh Coach tab now suggests what to ask** *(app update 1.81)* — three tappable
+starters, one of them using your own child's name. Tapping one sends it, so there's no
+blank-page moment.
+
+**The coach stops forgetting when we deploy** *(live now)* — until now, every time we
+shipped an update the coach lost the thread of whatever you were in the middle of. Its
+memory now lives on disk, so an update mid-conversation no longer costs you the context.
+Same for your kids' companions and a half-finished setup chat.
+
 ## August 8, 2026 — the design, properly
 
 **MVP now looks the way it was designed** *(app update 1.80)* — the last two updates were built

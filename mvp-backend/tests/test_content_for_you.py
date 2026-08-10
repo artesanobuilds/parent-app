@@ -38,7 +38,11 @@ os.environ.setdefault("OPENAI_API_KEY", "sk-test-dummy")
 # items must be identical.
 ARTICLE_KEYS = {
     "id", "category", "title", "subtitle", "emoji", "author",
-    "read_time", "summary", "tags",
+    # `kicker` + `age_range` added in migration v23 — they feed the reader's
+    # eyebrow ("WE TRIED IT · Ages 3–7 · 4 min"). They belong in BOTH payloads:
+    # For-You cards show the same eyebrow, and iOS decodes both endpoints with
+    # one model, so a key present in only one silently nils the other.
+    "read_time", "kicker", "age_range", "summary", "tags",
 }
 
 
@@ -250,5 +254,74 @@ def test_for_you_paginates_and_caps():
             assert client.get("/content/for-you?limit=0", headers=auth).status_code == 422
             assert client.get("/content/for-you?limit=1000", headers=auth).status_code == 422
             assert client.get("/content/for-you?offset=-1", headers=auth).status_code == 422
+    finally:
+        _reconnect_shared_storage(server)
+
+
+def test_the_reader_eyebrow_fields_survive_every_article_path():
+    """`kicker` + `age_range` (migration v23) feed the reader's eyebrow —
+    "WE TRIED IT · Ages 3–7 · 4 min".
+
+    Adding the columns is not shipping the feature. The first pass added them to
+    the DDL and the migration ONLY: no SELECT read them, no write path set them,
+    and the CMS had no field — so the eyebrow would have rendered blank forever
+    while every test passed. This asserts all five paths carry them, and that the
+    two endpoints iOS decodes with ONE model agree on the shape.
+    """
+    from fastapi.testclient import TestClient
+    import app.server as server
+
+    try:
+        with TestClient(server.app) as client:
+            _reconnect_shared_storage(server)
+            storage = server.storage_backend
+
+            made = storage.create_article({
+                "id": "art-eyebrow-1", "category": "cat-fy",
+                "title": "A Rainy Saturday, Nothing Bought",
+                "subtitle": "Four things to do with tape and a bedsheet",
+                "emoji": "", "author": "Miguel Alvarado", "read_time": "4 min",
+                "kicker": "WE TRIED IT", "age_range": "Ages 3–7",
+                "summary": "", "tags": ["rainy-day"], "content": "body",
+            })
+            assert made["kicker"] == "WE TRIED IT"
+            assert made["age_range"] == "Ages 3–7"
+
+            # detail read
+            got = storage.get_article("art-eyebrow-1")
+            assert (got["kicker"], got["age_range"]) == ("WE TRIED IT", "Ages 3–7")
+
+            # list read
+            listed = {a["id"]: a for a in storage.get_articles()}
+            assert listed["art-eyebrow-1"]["age_range"] == "Ages 3–7"
+
+            # search + word-scorer reads (separate SELECTs, each easy to miss)
+            found = storage.search_articles("Rainy Saturday")
+            assert found and found[0]["kicker"] == "WE TRIED IT"
+            scored = storage.score_articles_by_words(["rainy"])
+            assert scored and "age_range" in scored[0]
+
+            # a partial update must not blank the sibling column
+            patched = storage.update_article("art-eyebrow-1", {"kicker": "WE ASKED"})
+            assert patched["kicker"] == "WE ASKED"
+            assert patched["age_range"] == "Ages 3–7", "a partial PATCH wiped the other field"
+
+            # an article with NEITHER set decodes fine and yields no eyebrow —
+            # the client joins only non-empty parts, so '' must not become ' · '.
+            plain = storage.create_article({
+                "id": "art-eyebrow-2", "category": "cat-fy", "title": "Plain",
+                "subtitle": "", "emoji": "", "author": "MVP Editorial",
+                "read_time": "", "summary": "", "tags": [], "content": "body",
+            })
+            assert plain["kicker"] == "" and plain["age_range"] == ""
+
+            # …and the two HTTP payloads iOS decodes with one model agree.
+            over = client.get("/content/articles?limit=500")
+            assert over.status_code == 200, over.text
+            # /content/articles returns a bare LIST (the ranked feed wraps its
+            # items in an envelope) — the shape difference is the endpoint's, not
+            # the item's, and the item shape is what iOS decodes.
+            for item in over.json():
+                assert "kicker" in item and "age_range" in item, item["id"]
     finally:
         _reconnect_shared_storage(server)

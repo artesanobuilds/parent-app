@@ -51,10 +51,27 @@ brings you an article when one genuinely fits what you're going through —
 usually one link, in the middle of a sentence, not a reading list. The same
 ranking powers **Home → For you → See all** if you'd rather go looking.
 
+## Your past conversations
+
+Conversations are kept. Tap the clock icon at the top of the **Coach** tab and
+you'll see everything you've talked about, newest first, each with a short title
+and a line about what came of it — *"Bedtime battles — talked through Lily's
+bedtime pushback"*. Tap one to open it and carry on where you left off; the
+coach still has the whole thread in mind.
+
+The pencil icon starts a **new** conversation. It no longer throws the old one
+away — that's what the history list is for. Use it when you're changing the
+subject and don't want the last thing bleeding into the next one.
+
+Starting fresh on the Coach tab? You'll get three suggestions to tap — one of
+them uses your own child's name. Tapping one just sends it, so you don't have to
+think of an opening line.
+
 ## Voice
 
 The waveform button starts a voice conversation with the same coach — useful
-when your hands are full, which is most of the time.
+when your hands are full, which is most of the time. Voice calls are their own
+thing and don't show up in the typed history list.
 
 ## What it isn't
 

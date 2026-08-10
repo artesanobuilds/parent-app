@@ -8,6 +8,10 @@ __pycache__/
 *.pyc
 mvp-backend/data/*.duckdb
 mvp-backend/data/*.duckdb.wal
+# Durable LangGraph agent checkpoints (app/checkpointing.py) — every parent's
+# and kid's verbatim conversation. User state, never committed. SQLite in WAL
+# mode also writes -wal/-shm siblings.
+mvp-backend/data/agent_checkpoints.sqlite*
 mvp-backend/data/.last-sync-summary.json
 mvp-backend/data/.remote-checksums.json
 mvp-backend/data/.sync-audit.log

@@ -47,3 +47,23 @@ pocket: the [parenting coach](coach) and your kids'
 [companions](companions).
 
 ![Home in the iPhone app — your day, the kids' companions, and the community.](/dashboard/docs-assets/ios-home.png)
+
+## Filling in your family
+
+Signing up asks the essentials. The details that make the coach's advice specific — each
+child's birthday, grade and personality, and who else helps with them — come right after,
+as a guided pass you'll see the first time you land on Home. It steps through one person
+per screen: your children, then the adults in your circle, then you.
+
+Nothing about it is compulsory. Every step has **Skip for now**, and **Finish later** in
+the header closes it for good. Home works either way, and you can come back to any person
+later:
+
+- Tap **Set up {name}** on a child's tile on Home.
+- Press and hold a child's tile and choose **Finish setting up {name}**.
+- Or go to **Settings**, and tap the child under "Your family" — same editors.
+
+Close the app mid-way and it resumes on the person you were on.
+
+**Adding a child** is on Home too — **+ Add another child**, under the tiles (or
+**Settings → Your family → + Add a kid**; they're the same thing).

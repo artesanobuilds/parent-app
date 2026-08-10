@@ -113,6 +113,25 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Clear the VISIBLE transcript only.
+    ///
+    /// Distinct from the old `resetConversation()`, which also rotated the
+    /// client's thread id — that wiped the conversation. Coach conversations are
+    /// now server-side named threads (`/coach/threads/close`), so the client no
+    /// longer owns which conversation is active and must not rotate anything: it
+    /// just stops showing the closed conversation's messages.
+    func clearVisibleMessages() {
+        streamTask?.cancel()
+        messages = []
+    }
+
+    /// Show a reopened conversation's stored transcript.
+    func replaceMessages(_ msgs: [ChatMessage]) {
+        streamTask?.cancel()
+        messages = msgs
+    }
+
+    @available(*, deprecated, message: "Wipes the conversation. Coach uses CoachThreadService.closeCurrent (keeps it); other surfaces should use clearVisibleMessages().")
     func resetConversation() {
         streamTask?.cancel()
         messages = []

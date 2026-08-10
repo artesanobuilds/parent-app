@@ -140,3 +140,73 @@ def test_saving_basics_does_not_wipe_learned_fields():
             )
     finally:
         _reconnect_shared_storage(server)
+
+
+def test_secondary_language_is_actually_stored():
+    """The iOS seed has posted `secondary_language` since the Phase-3 Figma pass,
+    but `ParentProfile` had no such field — and `_apply_update` skips any key the
+    dataclass lacks (a `hasattr` guard), so every bilingual household's second
+    language was silently DISCARDED on write.
+
+    Found on 2026-08-08 while removing the language rows from the onboarding
+    funnel to match the design. The decision there was "match the screens, keep
+    the data" — which is only honest if the field is stored at all. It wasn't.
+
+    This test exists because the failure mode is invisible: the client sends it,
+    the server 200s, and nothing ever reads it back.
+    """
+    from app.profiling import ParentProfile
+
+    parent = ParentProfile()
+    parent.apply_update({"primary_language": "es", "secondary_language": "en"})
+    assert parent.primary_language == "es"
+    assert parent.secondary_language == "en", (
+        "secondary_language was dropped — _apply_update ignores keys that aren't "
+        "dataclass fields, so adding it to the wire payload alone does nothing"
+    )
+    # …and it must survive serialization, or the profile GET and the coach's
+    # context still never see it.
+    from dataclasses import asdict
+
+    assert asdict(parent).get("secondary_language") == "en", (
+        "stored on the object but absent from the serialized profile"
+    )
+
+
+def test_the_kid_editor_rows_store_under_their_own_names():
+    """The design's kid editor asks five things: Likes · Dislikes · Challenges ·
+    Excels at · Goals for {name}.
+
+    `dislikes` and a per-kid `goals` did not exist on `ChildProfile`, so the iOS
+    rows borrowed `triggers` and `motivators` — the label and the storage
+    disagreed, and any client that sent the honest key would have been silently
+    dropped by the whitelist derived from this dataclass. Both are real fields
+    now; this locks them so the mapping can't quietly regress to a synonym.
+    """
+    from dataclasses import asdict
+
+    from app.profiling import ChildProfile
+
+    kid = ChildProfile(name="Lily")
+    kid.apply_update({
+        "interests": ["dinosaurs"],
+        "dislikes": ["loud noises"],
+        "challenges": ["bathtime"],
+        "strengths": ["math"],
+        "goals": ["more independence"],
+    })
+    stored = asdict(kid)
+    for key, expected in (
+        ("interests", ["dinosaurs"]),
+        ("dislikes", ["loud noises"]),
+        ("challenges", ["bathtime"]),
+        ("strengths", ["math"]),
+        ("goals", ["more independence"]),
+    ):
+        assert stored.get(key) == expected, (
+            f"{key} did not round-trip — the kid editor's '{key}' row would look "
+            f"saved and not be"
+        )
+    # `triggers` / `motivators` keep their own meaning and must NOT be collateral.
+    assert stored["triggers"] == []
+    assert stored["motivators"] == []

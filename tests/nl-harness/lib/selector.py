@@ -48,7 +48,8 @@ MODULE_DEPENDENCY_MAP: dict[str, list[str]] = {
     # Profile + onboarding surface
     "mvp-backend/app/profiling.py": ["parent-onboarding-happy-path",
                                      "profile-avatar-upload",
-                                     "session-logout-and-delete"],
+                                     "session-logout-and-delete",
+                                     "family-settings-edit"],
     "mvp-backend/app/prompt_synthesis.py": ["parent-onboarding-happy-path", "kid-agent-lifecycle"],
     "mvp-backend/app/onboarding_agent.py": ["parent-onboarding-happy-path"],
     "mvp-backend/app/onboarding_warmup.py": ["onboarding-warmup-first-run"],
@@ -87,7 +88,7 @@ MODULE_DEPENDENCY_MAP: dict[str, list[str]] = {
     # Circle surface (beta-v1 sprint 2) — replaces the public board and 1:1 DMs,
     # both retired in migration v21.
     "mvp-backend/app/circle.py": ["circle-conversation-lifecycle"],
-    "mvp-backend/app/household.py": ["circle-conversation-lifecycle"],
+    "mvp-backend/app/household.py": ["circle-conversation-lifecycle", "family-settings-edit"],
 
     # Planner / chief-of-staff surface. The board payload is a cross-surface
     # contract (iOS decodes fit_score / fit_reason / todos / overlaps), so

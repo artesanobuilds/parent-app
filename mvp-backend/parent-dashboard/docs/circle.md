@@ -16,16 +16,44 @@ never met. That's gone. Circle is now private.
 
 ## Adding someone
 
-Open **Circle** and tap **Invite someone**. You get a link you can send however
-you already talk to that person — text, WhatsApp, email. When they open it they
-see who invited them and what it's for, and they can join.
+The quickest way is by email. Open **Circle → Contacts → add contact** and type
+their address. Two things can happen, and you don't have to know which in advance:
 
-You can also add someone as a plain contact without inviting them — useful for a
-sitter you want on the list before you're ready to give them app access. They
-just won't see anything until they accept an invite.
+- **They already have an MVP account** — a nanny often does, because she's already
+  in another family's Circle. They get a request in their own Circle tab, and once
+  they accept, you're connected. No link to send.
+- **They don't** — we set up an invite link for you to share however you already
+  talk to that person: text, WhatsApp, email.
+
+Either way you'll see the same message: *"Request sent. If they're on MVP they'll
+see it in their Circle; otherwise share the invite link with them."*
+
+**We don't tell you which one happened, on purpose.** If the app confirmed "yes,
+that address has an account", then anyone could type in email addresses to find out
+who uses MVP. So the answer looks the same both ways.
+
+**They always have to accept.** Typing someone's email doesn't put them in your
+Circle and doesn't let you message them — nothing happens on their side until they
+say yes. Requests waiting on *you* appear at the top of your Circle tab, with
+**Accept** and **Decline**.
+
+You can also add someone as a plain contact with no email at all — useful for a
+sitter you want on the list before you're ready to give her app access.
 
 Nothing you add is shared anywhere. A person in your Circle can't see your other
 Circle members' details, your plan, or your coach conversations.
+
+## Contacts
+
+**Circle → Contacts** is the list of your people. Anyone you're still waiting on is
+marked as such. The **⋯** on each row copies their invite link, opens their profile,
+or removes them; select several and **Invite selected** handles them in one pass.
+
+Tap a contact to fill in how they fit into your family — their relation, what
+they're good with, what they find hard, what you'd like them to focus on. A
+co-parent also gets **Co-Parent goals**; a nanny, grandparent or friend gets a
+**Personality** (Spirited, Easy-going, Sensitive). Your coach reads these, so a
+question about handoffs or bedtime can account for who's actually doing them.
 
 ## Conversations
 

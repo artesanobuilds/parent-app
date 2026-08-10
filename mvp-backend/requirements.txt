@@ -4,6 +4,13 @@
 # by tests/agents/ + tests/nl-harness/ — re-run both before changing these.
 langgraph==1.2.6
 langgraph-prebuilt==1.1.0
+# DURABLE agent checkpointer (app/checkpointing.py). NEW dependency: agent
+# context used to die on every restart (MemorySaver), which the coach history
+# list would have made visible to parents. Requires langgraph-checkpoint>=4.1
+# — satisfied by the 4.1.1 already pinned transitively by langgraph 1.2.6, so
+# this does NOT move langgraph or prebuilt (keep those minor-aligned or startup
+# ImportErrors follow). Pulls aiosqlite + sqlite-vec.
+langgraph-checkpoint-sqlite==3.1.1
 langchain==1.3.10
 langchain-core==1.4.8
 langchain-openai==1.1.6

@@ -70,17 +70,18 @@ class LogoutRequest(BaseModel):
 def resolve_account(
     storage, *, provider: str, provider_sub: str, email, email_verified: bool,
     legacy_user_id=None, legacy_token=None,
-) -> tuple[str, bool, bool]:
+) -> tuple[str, bool, bool, bool]:
     """Find-or-create-or-CLAIM an account for a verified provider identity.
     Shared by /auth/login (Apple/Google native) and /auth/exchange-code (Google
     web redirect) so BOTH paths can claim a legacy account. Returns
-    (user_id, is_new_account, linked_legacy)."""
+    (user_id, is_new_account, linked_legacy, linked_by_email)."""
     existing = storage.get_identity(provider, provider_sub)
     if existing is not None:
-        return existing["user_id"], False, False
+        return existing["user_id"], False, False, False
 
     user_id = None
     linked_legacy = False
+    linked_by_email = False
     if legacy_user_id and legacy_token:
         legacy_owner = storage.lookup_auth_token(legacy_token)
         if legacy_owner == legacy_user_id and not storage.user_has_any_identity(legacy_user_id):
@@ -90,6 +91,28 @@ def resolve_account(
                 user_id=user_id, actor=user_id, action="auth.legacy_claimed",
                 details={"provider": provider},
             )
+
+    # Same person, second provider: an explicit legacy-token claim (above)
+    # always wins when both apply — it's a stronger proof than an email match.
+    # Otherwise, if a DIFFERENT provider already holds an account at this
+    # VERIFIED email, attach here instead of minting a second account. This is
+    # what was missing 2026-08-09: a parent with an Apple-identity account
+    # (real profile, family data) signed in with Google for the first time and
+    # got routed back through onboarding because Google silently created a
+    # brand-new, empty user_id at the same email. Verified-only in BOTH
+    # directions — see `find_identity_user_by_verified_email` — so an
+    # unconfirmed incoming email can never be used to hijack an existing
+    # family, and Apple private-relay addresses (which won't match anything)
+    # correctly fall through to minting their own account.
+    if user_id is None and email_verified:
+        user_id = storage.find_identity_user_by_verified_email(email)
+        if user_id is not None:
+            linked_by_email = True
+            storage.write_audit_event(
+                user_id=user_id, actor=user_id, action="auth.linked_by_verified_email",
+                details={"provider": provider},
+            )
+
     is_new_account = False
     if user_id is None:
         import uuid
@@ -100,7 +123,7 @@ def resolve_account(
         user_id=user_id, provider=provider, provider_sub=provider_sub,
         email=email, email_verified=email_verified,
     )
-    return user_id, is_new_account, linked_legacy
+    return user_id, is_new_account, linked_legacy, linked_by_email
 
 
 def _issue_session(storage, user_id: str, *, platform, device_name) -> dict:
@@ -140,7 +163,7 @@ def auth_login(body: LoginRequest, request: Request):
             raise HTTPException(status_code=401, detail=f"invalid id_token: {exc}")
         raise HTTPException(status_code=401, detail="invalid id_token")
 
-    user_id, is_new_account, linked_legacy = resolve_account(
+    user_id, is_new_account, linked_legacy, linked_by_email = resolve_account(
         storage, provider=body.provider, provider_sub=provider_sub,
         email=email, email_verified=email_verified,
         legacy_user_id=body.legacy_user_id, legacy_token=body.legacy_token,
@@ -149,6 +172,7 @@ def auth_login(body: LoginRequest, request: Request):
     session = _issue_session(storage, user_id, platform=body.platform, device_name=body.device_name)
     session["is_new_account"] = is_new_account
     session["linked_legacy"] = linked_legacy
+    session["linked_by_email"] = linked_by_email
 
     # Analytics (no-op until Phase 3 wires it). Kept behind a lazy import so
     # this module has no hard dependency on the analytics package.
@@ -157,7 +181,8 @@ def auth_login(body: LoginRequest, request: Request):
         analytics_capture(
             "login_succeeded", user_id,
             {"provider": body.provider, "platform": body.platform or "unknown",
-             "is_new_account": is_new_account, "linked_legacy": linked_legacy},
+             "is_new_account": is_new_account, "linked_legacy": linked_legacy,
+             "linked_by_email": linked_by_email},
         )
     except Exception:
         pass
@@ -228,7 +253,7 @@ def auth_exchange_code(body: ExchangeCodeRequest, request: Request):
     if ident is None:
         raise HTTPException(status_code=401, detail="invalid or expired login code")
     storage = _storage()
-    user_id, is_new_account, linked_legacy = resolve_account(
+    user_id, is_new_account, linked_legacy, linked_by_email = resolve_account(
         storage, provider=ident["provider"], provider_sub=ident["sub"],
         email=ident.get("email"), email_verified=bool(ident.get("email_verified")),
         legacy_user_id=body.legacy_user_id, legacy_token=body.legacy_token,
@@ -236,6 +261,7 @@ def auth_exchange_code(body: ExchangeCodeRequest, request: Request):
     session = _issue_session(storage, user_id, platform=body.platform, device_name=body.device_name)
     session["is_new_account"] = is_new_account
     session["linked_legacy"] = linked_legacy
+    session["linked_by_email"] = linked_by_email
     return session
 
 
@@ -272,6 +298,7 @@ def auth_pairing_login(body: PairingLoginRequest, request: Request):
     session = _issue_session(_storage(), user_id, platform=body.platform or "web", device_name=body.device_name)
     session["is_new_account"] = False
     session["linked_legacy"] = False
+    session["linked_by_email"] = False
     return session
 
 

@@ -2,14 +2,30 @@ import SwiftUI
 
 /// beta-v1 Home — a dashboard, not a browse surface.
 ///
-/// Top to bottom, in the design's order (verified against Figma `account01`,
-/// node 870:1234, by absolute y): the parent's avatar, one card per kid
-/// (YOUR KIDS), the coach's current nudge, a ranked FOR YOU preview, then
-/// what's COMING UP. The photo banner, featured card, community carousel and
-/// topic grid the pre-beta Home rendered are gone; browsing now lives behind
+/// Top to bottom, in the design's order (verified against Figma
+/// `Onboarding - Dashboard 1`, node 754:4553, round-2 addendum in
+/// `docs/design/beta-v1-sprint2.md`): the parent's avatar, one card per kid
+/// (YOUR KIDS), what's COMING UP, a ranked FOR YOU preview, then the coach's
+/// current nudge (COACH) with a "Check your family settings" link beneath
+/// it. The photo banner, featured card, community carousel and topic grid
+/// the pre-beta Home rendered are gone; browsing now lives behind
 /// Settings → Library.
 struct HomeView: View {
     let username: String
+    /// Switch to the Planner tab. Supplied by `MainTabView` (the tab owner) —
+    /// the same idiom `SettingsView`'s `onOpenPlan` already uses. This is what
+    /// finally gives Dashboard 1's COMING UP "Add event" row a real destination:
+    /// the one existing add-to-plan flow (`IngestView` / the door sheet) needs a
+    /// `PlanViewModel`, which `MainTabView` owns and hands to `PlanView`. Home
+    /// routing there reuses that single plan-mutation path instead of forking a
+    /// second one (`feedback_standalone_flows`). Nil hides the row rather than
+    /// rendering a dead control.
+    var onOpenPlanner: (() -> Void)?
+    /// Switch to the Settings tab. Same idiom as `onOpenPlanner` — there is no
+    /// tab-selection binding/environment in this app, so each cross-tab link
+    /// is a closure `MainTabView` hands down. Backs the "Check your family
+    /// settings" row, which used to be inert header-detail text.
+    var onOpenSettings: (() -> Void)?
 
     @EnvironmentObject private var contentVM: ContentViewModel
     @EnvironmentObject private var configuration: ServerConfiguration
@@ -53,9 +69,36 @@ struct HomeView: View {
     /// The avatar / account sheet (Sprint-1 gap). See `AccountSheetView`.
     @State private var isShowingAccount = false
 
+    // MARK: The onboarding tail (Phase F)
+    //
+    // Greg's canvas order puts the profile editors AFTER Dashboard 1 — the
+    // parent lands on Home first and is then walked through each kid and each
+    // adult. `SetupTailView` is that walk; this is its two entry points.
+    //
+    //  * AUTOMATIC, once: on the first Home the parent sees, when the walk has
+    //    neither been finished nor deferred and a kid is still pending
+    //    (`SetupTailStore.shouldAutoPresent`, keyed by kid profile key).
+    //  * FROM A TILE: "Set up Benjamin" carries that kid's stable profile key
+    //    and the walk opens on them. Same code path, not a parallel one.
+    /// Non-nil presents the tail; the payload carries the stop to open on.
+    @State private var setupTailEntry: SetupTailEntry?
+    /// One auto-present attempt per appearance of this view, so a dismissal
+    /// (which persists `deferred`/`finished`) can't immediately re-trigger.
+    @State private var didConsiderAutoTail = false
+    /// "+ Add another child" (Dashboard 1). Presents the SAME `AddKidSheet` as
+    /// Settings → Profile, so there is one add-a-kid write path.
+    @State private var isShowingAddKid = false
+
+    /// Identifiable payload for `.sheet(item:)`. `stopID` nil = start at the
+    /// first pending stop; otherwise it's `SetupStop.kidID(profileKey)`.
+    struct SetupTailEntry: Identifiable {
+        let stopID: String?
+        var id: String { stopID ?? "first-pending" }
+    }
+
     private var refreshToken: Int { homeRefreshToken &+ localRefreshToken }
     private var forYouPreview: [ForYouItem] { Array(contentVM.forYouItems.prefix(2)) }
-    private var comingUpPreview: [ComingUpEntry] { Array(dashboard.comingUp.prefix(3)) }
+    private var comingUpPreview: [ComingUpEntry] { Array(dashboard.comingUp.prefix(2)) }
 
     /// True for a genuinely new family: the coach warm-up hasn't produced a
     /// nudge YET (not merely "still loading" — `hasLoadedNudge` gates that)
@@ -68,6 +111,13 @@ struct HomeView: View {
         dashboard.hasLoadedNudge && dashboard.nudge == nil && !hasAnyCompanion
     }
 
+    /// Page ground branches per dashboard state (beta-v1 spec):
+    /// Dashboard 1 (first run): `#F3F0EB` (cream-100/bgSober).
+    /// Dashboard 2 (populated): `#E9E4DC` (cream-200/bgCanvas).
+    private var pageGround: Color {
+        isFirstRunDashboard ? .bgSober : .bgCanvas
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -78,12 +128,10 @@ struct HomeView: View {
 
                     parentAvatarRow
 
-                    // Section order is the DESIGN's, verified against `account01`
-                    // (node 870:1234) by absolute y: YOUR KIDS (138) → COACH →
-                    // FOR YOU (687) → COMING UP (1241). We previously led with
-                    // COACH and ended with FOR YOU — both pairs inverted. The
-                    // kids come first because the dashboard is about them; the
-                    // coach's nudge is a response to them, not the headline.
+                    // Section order per beta-v1-sprint1.md measured frames
+                    // (Dashboard 1/2 by absolute y): YOUR KIDS → COMING UP →
+                    // FOR YOU → COACH. The kids are first because the dashboard
+                    // is about them; the coach's nudge is last as a response.
                     if let baseURL = configuration.baseURL, !username.isEmpty {
                         KidsHomeSection(
                             userID: username,
@@ -95,22 +143,31 @@ struct HomeView: View {
                             onOpenCoach: openCoach,
                             firstRunPrompt: isFirstRunDashboard
                                 ? "Help us get to know your kids a little more:" : nil,
-                            onCompanionPresenceChanged: { hasAnyCompanion = $0 }
+                            onCompanionPresenceChanged: { hasAnyCompanion = $0 },
+                            isFirstRun: isFirstRunDashboard,
+                            onEnterSetup: { kidKey in
+                                setupTailEntry = SetupTailEntry(stopID: SetupStop.kidID(kidKey))
+                            },
+                            onAddChild: { isShowingAddKid = true }
                         )
                     }
 
-                    coachSection
+                    comingUpSection
 
                     forYouSection
 
-                    comingUpSection
+                    coachSection
+
+                    if let onOpenSettings {
+                        familySettingsLinkRow(onOpenSettings)
+                    }
 
                     Spacer(minLength: .hearth600)
                 }
                 .padding(.horizontal, .hearth700)
                 .padding(.top, .hearth300)
             }
-            .background(Color.bgCanvas.ignoresSafeArea())
+            .background(pageGround.ignoresSafeArea())
             // iOS 17+: .navigationBarHidden(true) is deprecated and leaves the
             // nav bar's reserved vertical space visible as a band.
             .toolbar(.hidden, for: .navigationBar)
@@ -129,6 +186,7 @@ struct HomeView: View {
                 // come back to Home from another tab.
                 await contentVM.loadForYou(force: refreshToken > 0)
                 if let profile = try? await profileTask { apply(profile: profile) }
+                considerAutoSetupTail()
             }
             .sheet(isPresented: $isShowingCoach) {
                 if let coachVM {
@@ -147,7 +205,47 @@ struct HomeView: View {
                     // a much squarer card than the design.
                     .presentationCornerRadius(.hearthRadiusSheet)
             }
+            // The tail. onDismiss bumps the token so the kid tiles re-read the
+            // profile the walk just filled in.
+            .sheet(item: $setupTailEntry, onDismiss: { localRefreshToken &+= 1 }) { entry in
+                setupTailSheet(entry)
+            }
+            // "+ Add another child". The same sheet Settings → Profile presents,
+            // and its verified write returns the fresh family, which is folded
+            // straight into Home's state.
+            .sheet(isPresented: $isShowingAddKid, onDismiss: { localRefreshToken &+= 1 }) {
+                AddKidSheet(baseURL: configuration.baseURL, userID: username) { profile in
+                    apply(profile: profile)
+                }
+            }
         }
+    }
+
+    @ViewBuilder
+    private func setupTailSheet(_ entry: SetupTailEntry) -> some View {
+        if let baseURL = configuration.baseURL, !username.isEmpty {
+            SetupTailView(
+                userID: username,
+                baseURL: baseURL,
+                entryStopID: entry.stopID,
+                onNeedsRefresh: { localRefreshToken &+= 1 }
+            )
+            .presentationCornerRadius(.hearthRadiusSheet)
+        }
+    }
+
+    /// Open the tail by itself the first time — once per appearance, and only
+    /// when the store says this parent hasn't finished or deferred it. Progress
+    /// is keyed by kid PROFILE KEY, so adding or deleting a kid can't make a
+    /// finished walk look unfinished (or vice versa).
+    private func considerAutoSetupTail() {
+        guard !didConsiderAutoTail, !username.isEmpty else { return }
+        didConsiderAutoTail = true
+        guard setupTailEntry == nil, !familyChildren.isEmpty else { return }
+        guard SetupTailStore.shouldAutoPresent(
+            kidKeys: Array(familyChildren.keys), userID: username
+        ) else { return }
+        setupTailEntry = SetupTailEntry(stopID: nil)
     }
 
     /// Fold a freshly-fetched family into Home's state. Called both by the
@@ -158,7 +256,15 @@ struct HomeView: View {
             parentDisplayName = name
         }
         parentAvatarURL = profile.parent?.avatarUrl
-        familyChildren = profile.children ?? [:]
+        // Only overwrite the roster with a NON-empty one, unless we've never had
+        // one. `children` is nil/empty on a partial or failed decode as well as
+        // for a genuinely childless family, and blanking a known-good roster is
+        // indistinguishable to the parent from losing their kids. The kid tiles
+        // own the authoritative empty state (`KidsHomeViewModel.hasLoadedOnce`).
+        let fetched = profile.children ?? [:]
+        if !fetched.isEmpty || familyChildren.isEmpty {
+            familyChildren = fetched
+        }
     }
 
     // MARK: - Legal re-accept banner
@@ -238,15 +344,48 @@ struct HomeView: View {
 
     // MARK: - COACH
 
-    /// "This morning" normally; first-run swaps in "Check your family
-    /// settings" (Dashboard 1) since there's genuinely no nudge to date yet.
     private var coachHeaderDetail: String {
-        isFirstRunDashboard
-            ? "Check your family settings"
-            : (dashboard.nudge?.timeOfDayLabel ?? HomeWhen.partOfDay(Date()))
+        dashboard.nudge?.timeOfDayLabel ?? HomeWhen.partOfDay(Date())
+    }
+
+    /// "Check your family settings" — was inert header-detail text on
+    /// Dashboard 1 (first run only); now a real tappable row to the new
+    /// Settings tab root, shown in both dashboard states since it's the
+    /// doorway to the consolidated family-settings screen, not a first-run
+    /// hint. Per the frame: a quiet pill row, teal label, right chevron.
+    private func familySettingsLinkRow(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: .hearth400) {
+                Text("Check your family settings")
+                    .font(.hearthBodyMD.weight(.bold))
+                    .foregroundColor(.accentDefault)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.accentDefault)
+            }
+            .padding(.horizontal, .hearth600)
+            .padding(.vertical, .hearth500)
+            .background(Color.bgElevated)
+            .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusSeeAll, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private var coachSection: some View {
+        coachSectionBody
+            // COACH has a section ground that branches per dashboard state:
+            // Dashboard 1 (first run): `#FCFBF8` r=28 pad 30 (bgCoachBanner).
+            // Dashboard 2 (populated): `#F5F3EF` r=28 pad 30 (bgCard).
+            .padding(30)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: .hearthRadiusSection, style: .continuous)
+                    .fill(isFirstRunDashboard ? Color.bgCoachBanner : Color.bgCard)
+            )
+    }
+
+    private var coachSectionBody: some View {
         VStack(alignment: .leading, spacing: .hearth400) {
             HomeSectionHeader(
                 icon: "bubble.left",
@@ -329,34 +468,40 @@ struct HomeView: View {
                     }
                 }
 
+                // "See all" affordance (Dashboard 1/2): white `#FFFFFF` r=10.
                 NavigationLink(value: ComingUpRoute()) {
-                    HomeCTALabel(title: "See all")
+                    Text("See all")
+                        .font(.hearthTitleMD)
+                        .foregroundColor(.accentOnCanvas)
+                        .padding(.horizontal, .hearth400)
+                        .padding(.vertical, .hearth300)
+                        .background(Color.bgElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusSeeAll, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .padding(.top, .hearth300)
             }
 
-            if isFirstRunDashboard {
-                addEventRow
+            if isFirstRunDashboard, let onOpenPlanner {
+                addEventRow(onOpenPlanner)
             }
         }
+        // COMING UP is BARE (no card ground) — the design distinguishes the
+        // "your family right now" sections (YOUR KIDS, COACH) from the editorial
+        // ones (FOR YOU, COMING UP) by grounding the former and leaving the latter
+        // on the canvas.
     }
 
-    /// First-run-only "Add event" affordance (Dashboard 1). Deliberately a
-    /// UI-only stub, same category of decision as the paywall's Buy button:
-    /// the one existing "add to plan" flow (`IngestView`) needs a
-    /// `PlanViewModel`, which is owned/instantiated by `MainTabView` and
-    /// handed to `PlanView` directly rather than through the environment —
-    /// Home has no reachable instance without editing a file outside this
-    /// slice's ownership. Forking a second, parallel plan-mutation path just
-    /// to backfill this button would repeat the mistake
-    /// `feedback_standalone_flows` warns about. TODO: wire this to the real
-    /// add-event flow once `PlanViewModel` (or an equivalent) is reachable
-    /// from Home.
-    private var addEventRow: some View {
-        Button {
-            // Intentionally no-op — see doc comment above.
-        } label: {
+    /// First-run-only "Add event" affordance (Dashboard 1). NOW WIRED (Phase F):
+    /// it routes to the Planner tab, which owns the real add-to-plan flows
+    /// (`IngestView` — paste a camp email / snap a flyer — and the "Plan
+    /// something" door sheet). Home deliberately does NOT get its own
+    /// plan-mutation path: `PlanViewModel` is owned by `MainTabView`, and a
+    /// second parallel writer is the mistake `feedback_standalone_flows` warns
+    /// about. Routing keeps one writer and still gives the parent somewhere real
+    /// to land.
+    private func addEventRow(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack(spacing: .hearth300) {
                 Image(systemName: "plus.circle.fill")
                     .font(.system(size: 16, weight: .semibold))
@@ -374,7 +519,7 @@ struct HomeView: View {
         }
         .buttonStyle(.plain)
         .padding(.top, .hearth300)
-        .accessibilityHint("Not yet available")
+        .accessibilityHint("Opens the planner")
     }
 
     // MARK: - FOR YOU
@@ -413,6 +558,16 @@ struct HomeView: View {
                 .padding(.top, .hearth300)
             }
         }
+        // FOR YOU is a white card (beta-v1 spec: Dashboard 1/2 both have
+        // `#FFFFFF` r=28, distinct from the bare COMING UP). Dashboard 1 pad 30,
+        // Dashboard 2 pad 28/30 — using 30 uniformly.
+        .padding(30)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: .hearthRadiusSection, style: .continuous)
+                .fill(Color.bgElevated)
+        )
+        .hearthCardElevation()
     }
 }
 
@@ -487,15 +642,18 @@ private struct ComingUpRow: View {
     let entry: ComingUpEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        // Editorial treatment per beta-v1 spec (Dashboard 2): lead item is
+        // Fraunces w700 38/40 tracking -0.38, body is Inter w400 13/18.
+        VStack(alignment: .leading, spacing: .hearth300) {
             Text(entry.title)
-                .font(.hearthTitleMD)
-                .foregroundColor(.inkSecondary)
+                .font(.hearthDisplaySM)
+                .tracking(-0.38)
+                .foregroundColor(.inkHeader)
                 .fixedSize(horizontal: false, vertical: true)
             if !entry.detail.isEmpty {
                 Text(entry.detail)
-                    .font(.hearthBodyMD)
-                    .foregroundColor(.inkMuted)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkDisplay)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -516,21 +674,26 @@ private struct ForYouRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        // Editorial treatment per beta-v1 spec (Dashboard 1/2): eyebrow Inter
+        // w700 13 in `#989591`, lead item Fraunces w700 38/40 tracking -0.38,
+        // body Inter w400 13. The big headline makes this section read as
+        // editorial rather than a list.
+        VStack(alignment: .leading, spacing: .hearth300) {
             if let reasonText {
                 Text(reasonText)
-                    .font(.hearthBodyMD)
-                    .foregroundColor(.inkMuted)
+                    .font(.hearthBodySMBold)
+                    .foregroundColor(.inkEyebrow)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Text(item.title)
-                .font(.hearthTitleLG)
-                .foregroundColor(.inkSecondary)
+                .font(.hearthDisplaySM)
+                .tracking(-0.38)
+                .foregroundColor(.inkHeader)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
             if reasonText == nil, !item.subtitle.isEmpty {
                 Text(item.subtitle)
-                    .font(.hearthBodyMD)
+                    .font(.hearthBodySM)
                     .foregroundColor(.inkMuted)
                     .lineLimit(2)
             }

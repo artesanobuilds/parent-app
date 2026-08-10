@@ -3,7 +3,7 @@
 The anonymous community board is gone. Circle is now *your actual people*, and
 this module owns the threads you have with them.
 
-Three decisions worth knowing before editing:
+Five decisions worth knowing before editing:
 
 1. **A new model, not a widened DM.** The retired `dm_conversations` table was
    structurally 1:1 — a UNIQUE index on the canonically ordered participant
@@ -25,9 +25,23 @@ Three decisions worth knowing before editing:
    account yet) may be added freely, because an unclaimed participant row has
    `user_id IS NULL` and matches nobody until they claim an invite.
 
-Claiming an invite is what turns a one-sided roster entry into a real mutual
-link: it binds `household_members.member_user_id` on BOTH sides and fills in
-the pending `circle_participants.user_id` rows for that member.
+4. **TWO doors into that link, ONE binding.** Sprint 2 adds the email path
+   ("if that person already exists in the system, no need to invite them"), so
+   the mutual link can now be established by claiming an invite OR by accepting
+   a request. Both call `_bind_mutual_link` — the single implementation of "we
+   are now peers". A second copy of that block is a second thing that can
+   drift, on the one surface where drift means a stranger in your thread.
+
+5. **The email lookup is not an oracle.** `POST /circle/contacts` returns the
+   IDENTICAL body and status whether the email belongs to an MVP user or to
+   nobody, so it cannot be used to enumerate the user base. A match creates a
+   PENDING `circle_requests` row and NOTHING else — no participant row, no peer
+   entry, no read access. Only the recipient's accept binds the link.
+
+Claiming an invite (or accepting a request) is what turns a one-sided roster
+entry into a real mutual link: it binds `household_members.member_user_id` on
+BOTH sides and fills in the pending `circle_participants.user_id` rows for that
+member.
 """
 from __future__ import annotations
 
@@ -41,6 +55,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.auth import current_user
+from app.rate_limit import enforce
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +164,14 @@ class ParticipantsAdd(BaseModel):
 
 class InviteCreate(BaseModel):
     member_id: Optional[str] = None
+
+
+class ContactAdd(BaseModel):
+    """Add someone to your Circle by email. `display_name` is only ever used
+    for the requester's OWN roster row — it never overwrites what the other
+    person calls themselves."""
+    email: str
+    display_name: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -286,12 +309,16 @@ def _resolve_members(member_ids: List[str], user_id: str) -> List[Dict[str, Any]
 
 @router.get("/conversations")
 def list_conversations(user_id: str = Depends(current_user)):
+    enforce(user_id, "config")
     convs = _storage().list_circle_conversations_for_user(user_id)
     return {"conversations": [_conversation_out(c, user_id) for c in convs]}
 
 
 @router.post("/conversations")
 def create_conversation(body: ConversationCreate, user_id: str = Depends(current_user)):
+    # A new thread is a message send in disguise (it carries the opening post),
+    # so it draws on the message bucket, not config.
+    enforce(user_id, "message")
     title = (body.title or "").strip()[:MAX_TITLE_CHARS]
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
@@ -314,6 +341,7 @@ def create_conversation(body: ConversationCreate, user_id: str = Depends(current
 
 @router.get("/conversations/{conversation_id}")
 def get_conversation(conversation_id: str, user_id: str = Depends(current_user)):
+    enforce(user_id, "config")
     conv = _conversation_or_404(conversation_id, user_id)
     messages = _storage().list_circle_messages(conversation_id)
     return {
@@ -325,6 +353,7 @@ def get_conversation(conversation_id: str, user_id: str = Depends(current_user))
 @router.patch("/conversations/{conversation_id}")
 def patch_conversation(conversation_id: str, body: ConversationPatch,
                        user_id: str = Depends(current_user)):
+    enforce(user_id, "config")
     _owned_conversation_or_404(conversation_id, user_id)
     sent = body.model_dump(exclude_unset=True)
     fields: Dict[str, Any] = {}
@@ -342,6 +371,7 @@ def patch_conversation(conversation_id: str, body: ConversationPatch,
 
 @router.delete("/conversations/{conversation_id}")
 def delete_conversation(conversation_id: str, user_id: str = Depends(current_user)):
+    enforce(user_id, "config")
     _owned_conversation_or_404(conversation_id, user_id)
     _storage().delete_circle_conversation(conversation_id)
     return {"ok": True}
@@ -350,6 +380,7 @@ def delete_conversation(conversation_id: str, user_id: str = Depends(current_use
 @router.post("/conversations/{conversation_id}/messages")
 def post_message(conversation_id: str, body: MessageCreate,
                  user_id: str = Depends(current_user)):
+    enforce(user_id, "message")
     _conversation_or_404(conversation_id, user_id)
     text = (body.body or "").strip()[:MAX_BODY_CHARS]
     if not text:
@@ -366,6 +397,7 @@ def post_message(conversation_id: str, body: MessageCreate,
 @router.post("/conversations/{conversation_id}/participants")
 def add_participants(conversation_id: str, body: ParticipantsAdd,
                      user_id: str = Depends(current_user)):
+    enforce(user_id, "config")
     _owned_conversation_or_404(conversation_id, user_id)
     members = _resolve_members(list(body.member_ids or []), user_id)
     storage = _storage()
@@ -379,6 +411,7 @@ def add_participants(conversation_id: str, body: ParticipantsAdd,
 
 @router.post("/conversations/{conversation_id}/read")
 def mark_read(conversation_id: str, user_id: str = Depends(current_user)):
+    enforce(user_id, "config")
     _conversation_or_404(conversation_id, user_id)
     _storage().mark_circle_conversation_read(conversation_id, user_id)
     return {"ok": True}
@@ -404,11 +437,62 @@ def _invite_expired(invite: Dict[str, Any]) -> bool:
     return bool(expires and expires <= datetime.now(timezone.utc))
 
 
+def _bind_mutual_link(
+    holder_user_id: str,
+    other_user_id: str,
+    *,
+    member_id: Optional[str],
+    holder_note: str,
+    other_note: str,
+) -> str:
+    """THE binding. The single implementation of "these two accounts are now
+    Circle peers", called by both doors into the link (claiming an invite and
+    accepting a request). Returns the holder-side member id.
+
+    `holder_user_id` is the side that already has (or should have) a roster row
+    for the other person — the inviter, or the requester. Three writes, and
+    `circle_peer_ids` returns each for the other only once ALL of them land:
+
+      • the holder's roster row gets `member_user_id = other_user_id`
+        (created now if `member_id` is None — an open invite, or a request whose
+        roster row was deleted before it was answered)
+      • the other side gets a reciprocal roster row pointing back
+      • pending `circle_participants` rows for that member get their user_id,
+        so threads the holder already created become readable at this moment
+
+    There must be exactly ONE copy of this. Two would be two things that can
+    drift, on the surface where drift means a stranger reads a family's thread.
+    """
+    storage = _storage()
+    other_name = _display_name(other_user_id) or "A parent"
+    if not member_id:
+        member_id = storage.add_household_member(
+            holder_user_id, display_name=other_name, role="other", kind="adult",
+            notes=holder_note,
+        )
+    storage.update_household_member(member_id, {"member_user_id": other_user_id})
+
+    # The reciprocal side. Idempotent: if the other party already has a row
+    # pointing at the holder, reuse it rather than duplicating the person.
+    reciprocal = storage.find_household_member_by_account(other_user_id, holder_user_id)
+    if reciprocal is None:
+        holder_name = _display_name(holder_user_id) or "A parent"
+        storage.add_household_member(
+            other_user_id, display_name=holder_name, role="other", kind="adult",
+            member_user_id=holder_user_id,
+            notes=other_note,
+        )
+
+    storage.bind_circle_participant_account(member_id, other_user_id)
+    return member_id
+
+
 @router.post("/invites")
 def create_invite(body: InviteCreate, user_id: str = Depends(current_user)):
     """Mint a share link. `member_id` binds the invite to a roster row, so
     claiming it links that specific person; an open invite (no member_id)
     creates the roster row at claim time."""
+    enforce(user_id, "config")
     storage = _storage()
     member_id = body.member_id or None
     if member_id is not None:
@@ -471,6 +555,7 @@ def claim_invite(token: str, user_id: str = Depends(current_user)):
     After this, `circle_peer_ids` returns each for the other and every thread
     they were added to becomes readable — and not one moment before.
     """
+    enforce(user_id, "config")
     storage = _storage()
     invite = storage.get_invite_token(token)
     if invite is None:
@@ -485,31 +570,223 @@ def claim_invite(token: str, user_id: str = Depends(current_user)):
         raise HTTPException(status_code=400, detail="you can't claim your own invite")
 
     member_id = invite.get("member_id")
-    claimer_name = _display_name(user_id) or "A parent"
     if member_id:
         member = storage.get_household_member(member_id)
         if member is None or member.get("user_id") != inviter:
             raise HTTPException(status_code=404, detail="invite target no longer exists")
-    else:
-        # Open invite: the roster row is created now, from the claimer's own
-        # account name (the inviter never typed one in).
-        member_id = storage.add_household_member(
-            inviter, display_name=claimer_name, role="other", kind="adult",
-            notes="Joined through a Circle invite link.",
-        )
-    storage.update_household_member(member_id, {"member_user_id": user_id})
 
-    # The reciprocal side. Idempotent: if the claimer already has a row
-    # pointing at the inviter, reuse it rather than duplicating the person.
-    reciprocal = storage.find_household_member_by_account(user_id, inviter)
-    if reciprocal is None:
-        inviter_name = _display_name(inviter) or "A parent"
-        storage.add_household_member(
-            user_id, display_name=inviter_name, role="other", kind="adult",
-            member_user_id=inviter,
-            notes="Linked through a Circle invite link.",
-        )
-
-    storage.bind_circle_participant_account(member_id, user_id)
+    # The binding lives in ONE place, shared with request-accept below (an open
+    # invite passes member_id=None and the helper creates the roster row from
+    # the claimer's own account name — the inviter never typed one in).
+    member_id = _bind_mutual_link(
+        inviter, user_id, member_id=member_id,
+        holder_note="Joined through a Circle invite link.",
+        other_note="Linked through a Circle invite link.",
+    )
     storage.claim_invite_token(token, user_id)
     return {"ok": True, "member_id": member_id, "inviter_user_id": inviter}
+
+
+# --------------------------------------------------------------------------- #
+# Contacts by email — the silent request
+# --------------------------------------------------------------------------- #
+# "If you type in an email address and that person already exists in the system,
+# no need to invite them — just pull them from the system. A nanny could already
+# be in someone else's circle."
+#
+# Pulling them in still requires their consent, and looking for them must not
+# tell you whether they exist. Hence: ONE response shape for every outcome, and
+# a match creates a PENDING request rather than a link.
+
+
+# The response for POST /circle/contacts, byte-identical on every path. It is a
+# module constant precisely so no future branch can accidentally enrich one
+# side of the fork ("...and here's their name!") and turn the endpoint into an
+# enumeration oracle. If this ever needs to carry more, it has to carry the
+# same more on all five paths (matched, no-match, self, already-a-peer,
+# duplicate-pending).
+_CONTACT_ACK = {"status": "sent"}
+
+MAX_EMAIL_CHARS = 320  # RFC-ish local@domain ceiling; bounds the lookup key
+
+
+def _notify_circle_request(to_user_id: str, from_user_id: str) -> None:
+    """Tell the recipient someone asked to join their Circle. Env-gated APNs
+    (app/push), reusing the device-verified channel; fire-and-forget on a
+    daemon thread so a slow APNs call never holds the request open — and so the
+    matched path doesn't become measurably slower than the no-match one."""
+    import threading
+
+    from app import push
+
+    if not push.is_enabled():
+        return
+    asker = _display_name(from_user_id) or "A parent"
+    threading.Thread(
+        target=lambda: push.send_push(
+            storage=_storage(),
+            user_id=to_user_id,
+            title="Someone wants to join your Circle",
+            body=f"{asker} asked to connect. Tap to accept or decline.",
+            data={"type": "circle_request", "from_user_id": from_user_id},
+        ),
+        daemon=True,
+    ).start()
+
+
+@router.post("/contacts")
+def add_contact(body: ContactAdd, user_id: str = Depends(current_user)):
+    """Add someone to your Circle by email.
+
+    The response is `{"status": "sent"}` with a 200 on EVERY path — matched,
+    unmatched, yourself, already a peer, duplicate. That is the security
+    property: a caller cannot use this route to learn whether an email belongs
+    to an MVP user. Do not add a branch that returns anything else.
+
+    Matched  -> a PENDING circle_requests row + a local roster row (so the
+                contacts list shows the pending contact) + a push to them.
+                No peer link, no participant row, no read access.
+    No match -> today's invite-token path, unchanged.
+    """
+    enforce(user_id, "config")
+    storage = _storage()
+
+    email = (body.email or "").strip().lower()[:MAX_EMAIL_CHARS]
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="a valid email is required")
+    display_name = (body.display_name or "").strip()[:120] or None
+
+    # Exactly one hit, or nothing. Zero and many are the SAME outcome (see
+    # storage.find_account_by_email) — an ambiguous email must never auto-link.
+    match = storage.find_account_by_email(email)
+
+    if match and match != user_id:
+        already_peer = match in set(storage.circle_peer_ids(user_id))
+        pending = storage.find_pending_circle_request(
+            from_user_id=user_id, to_user_id=match
+        )
+        # Both are silent no-ops: re-asking someone who already accepted, or
+        # asking twice, must not stack rows — and must not be distinguishable
+        # from a first ask by the response.
+        if not already_peer and pending is None:
+            # The requester's own roster row, created UP FRONT so the contacts
+            # list can render the pending contact. It carries no
+            # member_user_id, so it grants nothing until the accept binds it
+            # (a linked-but-not-mutual row is just an address book entry —
+            # circle_peer_ids requires both directions).
+            member_id = storage.add_household_member(
+                user_id,
+                display_name=display_name or (_display_name(match) or "A parent"),
+                role="other", kind="adult", email=email,
+                notes="Circle request sent — waiting on them to accept.",
+            )
+            storage.create_circle_request(
+                from_user_id=user_id, to_user_id=match, from_member_id=member_id,
+            )
+            _notify_circle_request(match, user_id)
+        return dict(_CONTACT_ACK)
+
+    if match == user_id:
+        # Your own email. Silent no-op — not even a 400, because a 400 here
+        # would tell an attacker which email is theirs vs. merely unknown.
+        return dict(_CONTACT_ACK)
+
+    # No match (or an ambiguous one): mint an invite link exactly as before.
+    # A roster row so the contacts list shows who was invited, then the token.
+    member_id = storage.add_household_member(
+        user_id, display_name=display_name or email.split("@")[0],
+        role="other", kind="adult", email=email,
+        notes="Invited to MVP — waiting on them to join.",
+    )
+    token = secrets.token_urlsafe(24)
+    storage.create_invite_token(
+        user_id, member_id=member_id, token=token, ttl_days=INVITE_TTL_DAYS
+    )
+    # Deliberately NOT returned: an invite URL in the response body is present
+    # on one branch and absent on the other, which is exactly the tell this
+    # endpoint exists to avoid. The client fetches the link from
+    # POST /circle/invites when it wants something to share.
+    return dict(_CONTACT_ACK)
+
+
+# --------------------------------------------------------------------------- #
+# Requests — the consent step
+# --------------------------------------------------------------------------- #
+
+
+def _request_out(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Wire shape. Every key ALWAYS present (iOS Codable is strict). The
+    requester's NAME is included — the recipient has to know who is asking to
+    decide — but never their email or anything else about their household."""
+    from_user_id = row.get("from_user_id") or ""
+    name = _display_name(from_user_id) or "A parent"
+    return {
+        "id": row.get("id"),
+        "from_user_id": from_user_id,
+        "from_name": name,
+        "initials": _initials(name),
+        "status": row.get("status") or "pending",
+        "created_at": row.get("created_at"),
+    }
+
+
+def _inbound_request_or_404(request_id: str, user_id: str) -> Dict[str, Any]:
+    """Existence check FIRST, then ownership — the `_conversation_or_404`
+    pattern. A third party gets the same 404 for "no such request" and "not
+    yours", so they learn nothing about requests between other people."""
+    request = _storage().get_circle_request(request_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="request not found")
+    if request.get("to_user_id") != user_id:
+        raise HTTPException(status_code=404, detail="request not found")
+    return request
+
+
+@router.get("/requests")
+def list_requests(user_id: str = Depends(current_user)):
+    """My pending INBOUND requests — the ones I can act on."""
+    enforce(user_id, "config")
+    rows = _storage().list_circle_requests_for_user(user_id, status="pending")
+    return {"requests": [_request_out(r) for r in rows]}
+
+
+@router.post("/requests/{request_id}/accept")
+def accept_request(request_id: str, user_id: str = Depends(current_user)):
+    """Consent. THIS is the moment the link becomes mutual — through the same
+    `_bind_mutual_link` that claiming an invite runs, so there is exactly one
+    code path for "we are now peers"."""
+    enforce(user_id, "config")
+    storage = _storage()
+    request = _inbound_request_or_404(request_id, user_id)
+    if request.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="this request was already answered")
+
+    requester = request["from_user_id"]
+    member_id = request.get("from_member_id")
+    if member_id:
+        member = storage.get_household_member(member_id)
+        # The requester may have deleted the roster row while waiting. Passing
+        # None re-creates it rather than binding someone else's row.
+        if member is None or member.get("user_id") != requester:
+            member_id = None
+
+    _bind_mutual_link(
+        requester, user_id, member_id=member_id,
+        holder_note="Circle request accepted.",
+        other_note="Joined their Circle.",
+    )
+    storage.set_circle_request_status(request_id, "accepted")
+    return {"ok": True, "status": "accepted", "from_user_id": requester}
+
+
+@router.post("/requests/{request_id}/decline")
+def decline_request(request_id: str, user_id: str = Depends(current_user)):
+    """Refusal. Establishes NOTHING — no roster binding on either side. The row
+    is kept (not deleted) so the requester's pending contact resolves and a
+    re-ask isn't blocked by the duplicate-pending guard."""
+    enforce(user_id, "config")
+    request = _inbound_request_or_404(request_id, user_id)
+    if request.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="this request was already answered")
+    _storage().set_circle_request_status(request_id, "declined")
+    return {"ok": True, "status": "declined", "from_user_id": request["from_user_id"]}

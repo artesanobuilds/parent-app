@@ -6,6 +6,7 @@ private struct CircleThreadResponse: Codable {
     let messages: [CircleMessage]
 }
 private struct HouseholdMembersResponse: Codable { let members: [HouseholdMember] }
+private struct CircleRequestsResponse: Codable { let requests: [CircleRequest] }
 
 /// REST client for the `/circle/*` + `/household/members` endpoints. Same
 /// shape as the other REST clients: static funcs, Bearer via `AuthService`, base URL
@@ -18,6 +19,14 @@ enum CircleService {
         /// A conversation that's been deleted, or a stale push deep link —
         /// callers fall back to the conversation LIST, never crash.
         var isNotFound: Bool { if case .status(404) = self { return true }; return false }
+        /// The only 400 `POST /circle/contacts` returns: a malformed email.
+        var isBadRequest: Bool { if case .status(400) = self { return true }; return false }
+        /// 409. Two meanings, both non-alarming: a circle request somebody
+        /// ALREADY answered (another device, or a double tap — refresh, don't
+        /// alert), and "that MVP name is already used in your household".
+        var isConflict: Bool { if case .status(409) = self { return true }; return false }
+        /// Alias for the request-inbox reading of a 409.
+        var isAlreadyAnswered: Bool { isConflict }
     }
 
     @MainActor
@@ -112,6 +121,66 @@ enum CircleService {
     static func householdMembers(userID: String, baseURL: URL) async throws -> [HouseholdMember] {
         let data = try await request("household/members", userID: userID, baseURL: baseURL)
         return try JSONDecoder().decode(HouseholdMembersResponse.self, from: data).members
+    }
+
+    @MainActor
+    static func member(id: String, userID: String, baseURL: URL) async throws -> HouseholdMember {
+        let data = try await request("household/members/\(id)", userID: userID, baseURL: baseURL)
+        return try JSONDecoder().decode(HouseholdMemberEnvelope.self, from: data).member
+    }
+
+    /// PATCH one member. Partial update: ONLY the keys in `fields` are touched,
+    /// so a Basics-only save can't blank the attributes the coach learned. The
+    /// `attributes` bag, when sent, must be the WHOLE decoded object for the
+    /// keys being changed — never spliced strings (the server role-scopes it and
+    /// 400s on a key that doesn't belong to the role).
+    @MainActor
+    static func updateMember(id: String, fields: [String: Any],
+                             userID: String, baseURL: URL) async throws -> HouseholdMember {
+        let data = try await request("household/members/\(id)", method: "PATCH", body: fields,
+                                     userID: userID, baseURL: baseURL)
+        return try JSONDecoder().decode(HouseholdMemberEnvelope.self, from: data).member
+    }
+
+    /// Remove a roster row. The server cascades the mirrored caregivers row and
+    /// the member's avatar blob (CLAUDE.md: deletes cascade).
+    @MainActor
+    static func deleteMember(id: String, userID: String, baseURL: URL) async throws {
+        _ = try await request("household/members/\(id)", method: "DELETE",
+                              userID: userID, baseURL: baseURL)
+    }
+
+    /// Add a contact by email. 200 on every path with a body that is always
+    /// `{"status": "sent"}`; only a malformed email is a 400. Callers MUST NOT
+    /// branch their copy on the result — see `CircleContactAck`.
+    @MainActor
+    @discardableResult
+    static func addContact(email: String, displayName: String? = nil,
+                           userID: String, baseURL: URL) async throws -> CircleContactAck {
+        var payload: [String: Any] = ["email": email]
+        if let displayName, !displayName.isEmpty { payload["display_name"] = displayName }
+        let data = try await request("circle/contacts", method: "POST", body: payload,
+                                     userID: userID, baseURL: baseURL)
+        return try JSONDecoder().decode(CircleContactAck.self, from: data)
+    }
+
+    /// My pending INBOUND requests — the ones I can act on.
+    @MainActor
+    static func requests(userID: String, baseURL: URL) async throws -> [CircleRequest] {
+        let data = try await request("circle/requests", userID: userID, baseURL: baseURL)
+        return try JSONDecoder().decode(CircleRequestsResponse.self, from: data).requests
+    }
+
+    /// Accept (`accept: true`) or decline an inbound request. A 409 means it was
+    /// already answered — `isAlreadyAnswered`, handled as "refresh", not an error.
+    @MainActor
+    @discardableResult
+    static func respondToRequest(id: String, accept: Bool,
+                                 userID: String, baseURL: URL) async throws -> CircleRequestAction {
+        let verb = accept ? "accept" : "decline"
+        let data = try await request("circle/requests/\(id)/\(verb)", method: "POST", body: [:],
+                                     userID: userID, baseURL: baseURL)
+        return try JSONDecoder().decode(CircleRequestAction.self, from: data)
     }
 
     @MainActor

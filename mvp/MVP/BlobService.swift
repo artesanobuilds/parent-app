@@ -9,8 +9,10 @@ import UIKit
 /// self-heal pattern as the onboarding seed and the legal accept.
 enum BlobService {
 
-    /// Pending attach: ["kid_name": String? , "key": String] JSON. One slot —
-    /// last upload wins, which matches "the newest photo is the one I meant".
+    /// Pending attach: `AvatarTarget.stashDescriptor` + ["key": String] JSON.
+    /// One slot — last upload wins, which matches "the newest photo is the one
+    /// I meant". A stash written by an older build carried only `kid_name`;
+    /// `AvatarTarget.fromStash` still reads it.
     static let pendingAttachKey = "pending_avatar_attach"
 
     enum BlobError: LocalizedError {
@@ -24,11 +26,12 @@ enum BlobService {
         }
     }
 
-    /// Upload an avatar and attach it to the parent (kidName == nil) or a kid.
-    /// Throws on presign/PUT failure; a failed ATTACH is stashed + retried on
-    /// next launch instead of throwing (the bytes are already uploaded).
+    /// Upload an avatar and attach it to whatever `target` names — the parent,
+    /// one kid, or one household member. Throws on presign/PUT failure; a failed
+    /// ATTACH is stashed + retried on next launch instead of throwing (the bytes
+    /// are already uploaded).
     @MainActor
-    static func uploadAvatar(_ image: UIImage, kidName: String?,
+    static func uploadAvatar(_ image: UIImage, target: AvatarTarget,
                              userID: String, baseURL: URL) async throws {
         let prepared = image.squareCropped().normalizedForUpload(maxDimension: 512)
         guard let jpeg = prepared.jpegData(compressionQuality: 0.85) else {
@@ -70,8 +73,8 @@ enum BlobService {
 
         // 3. Attach — durable. Stash BEFORE the attempt (kill-safety), clear
         //    only on confirmed success.
-        stashPendingAttach(kidName: kidName, key: key)
-        if await attach(kidName: kidName, key: key, userID: userID, baseURL: baseURL) {
+        stashPendingAttach(target: target, key: key)
+        if await attach(target: target, key: key, userID: userID, baseURL: baseURL) {
             clearPendingAttach()
         }
     }
@@ -92,7 +95,7 @@ enum BlobService {
             clearPendingAttach()
             return
         }
-        if await attach(kidName: json["kid_name"] as? String, key: key,
+        if await attach(target: AvatarTarget.fromStash(json), key: key,
                         userID: userID, baseURL: baseURL) {
             clearPendingAttach()
         }
@@ -101,10 +104,9 @@ enum BlobService {
     // MARK: - Internals
 
     @MainActor
-    private static func attach(kidName: String?, key: String,
+    private static func attach(target: AvatarTarget, key: String,
                                userID: String, baseURL: URL) async -> Bool {
-        let path = kidName.map { "profile/kids/\($0)/avatar" } ?? "profile/avatar"
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        var request = URLRequest(url: baseURL.appendingPathComponent(target.attachPath))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 15
@@ -115,15 +117,16 @@ enum BlobService {
         guard let (_, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse else { return false }
         if (200..<300).contains(http.statusCode) { return true }
-        // 4xx = permanent (kid renamed/deleted, foreign key): retrying next
-        // launch can't fix it — drop the stash so it doesn't retry forever.
+        // 4xx = permanent (kid renamed/deleted, member removed, foreign key):
+        // retrying next launch can't fix it — drop the stash so it doesn't
+        // retry forever.
         if (400..<500).contains(http.statusCode) { clearPendingAttach() }
         return false
     }
 
-    private static func stashPendingAttach(kidName: String?, key: String) {
+    private static func stashPendingAttach(target: AvatarTarget, key: String) {
         var json: [String: Any] = ["key": key]
-        if let kidName { json["kid_name"] = kidName }
+        for (k, v) in target.stashDescriptor { json[k] = v }
         if let data = try? JSONSerialization.data(withJSONObject: json) {
             UserDefaults.standard.set(data, forKey: pendingAttachKey)
         }

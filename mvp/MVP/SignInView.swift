@@ -14,13 +14,6 @@ struct SignInView: View {
     /// it already has a profile (returning user → skip onboarding).
     var onSignedIn: (AuthService.SignInOutcome) -> Void
 
-    /// beta-v1: sign-in moved INSIDE the onboarding funnel (Greg's "Securing
-    /// your family's space"), where the parent's name is already known and the
-    /// generic "Welcome" reads wrong. Both default to nil so the standalone
-    /// gate — and the DEBUG harness — keep their original copy.
-    var titleOverride: String? = nil
-    var subtitleOverride: String? = nil
-
     @State private var errorMessage: String?
     @State private var busy = false
     /// Current raw nonce for an in-flight Apple request (we send its sha256 to
@@ -55,86 +48,108 @@ struct SignInView: View {
         return AuthService.shared.legacyToken(for: uid)
     }
 
-    // A returning user (post-logout) still has their display name cached —
-    // greet them by name instead of the generic new-install "Welcome".
-    @AppStorage("parent_display_name") private var parentDisplayName = ""
+    /// `754:4943` "Create account": Inter w400 **27.23/33**. No token at this
+    /// size — `hearthDisplayMD` (28pt) is the closest fixed step but it's
+    /// Fraunces, the wrong family entirely, so this composes the sans family
+    /// directly at the measured size rather than reach for a display token.
+    private static let cardTitleFont =
+        Font.custom(HearthFontFamily.sans, size: 27, relativeTo: .title2)
 
     var body: some View {
-        VStack(spacing: .hearth600) {
-            Spacer(minLength: .hearth700)
-
-            Text(titleOverride ?? (parentDisplayName.isEmpty ? "Welcome" : "Welcome back, \(parentDisplayName)"))
-                .font(.hearthDisplayLG)
+        // `create your account` (`754:4943`): "Create account" title, then
+        // straight into the two auth pills — the frame has no subtitle at
+        // all. Sign-in is now the SECOND screen in the funnel (right after
+        // `.plan`, before `.splash`), so the old "Welcome back." splash-jumper
+        // case this once branched on no longer exists — the design shows one
+        // state for this card, and now the code does too.
+        VStack(spacing: .hearth500) {
+            Text("Create account")
+                .font(Self.cardTitleFont)
                 .foregroundColor(.inkPrimary)
                 .multilineTextAlignment(.center)
-                .lineSpacing(.hearthLineDisplayLG)
-                .lineLimit(3)
-                .minimumScaleFactor(0.6)
-                .padding(.horizontal, .hearth700)
-
-            Text(subtitleOverride ?? "Sign in to keep your family's plan in sync across your devices.")
-                .font(.hearthBodyMD)
-                .foregroundColor(.inkSecondary)
-                .multilineTextAlignment(.center)
-                .lineSpacing(.hearthLineBodyMD)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, .hearth700)
-
-            Spacer(minLength: .hearth500)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
 
             // Consent sits ABOVE the buttons it gates — a checkbox below two
             // greyed-out buttons reads as an afterthought and hides the reason
-            // they're disabled.
+            // they're disabled. Not in the frame at all (see the file-level
+            // doc comment); kept because it is a blocking legal requirement,
+            // not a visual one.
             legalConsentRow
-                .padding(.horizontal, .hearth700)
 
-            SignInWithAppleButton(.signIn) { request in
-                let nonce = Self.randomNonce()
-                currentNonce = nonce
-                request.requestedScopes = [.fullName, .email]
-                request.nonce = Self.sha256(nonce)
-            } onCompletion: { result in
-                handleApple(result)
+            VStack(spacing: .hearth400) {
+                googleButton
+                appleButton
             }
-            .signInWithAppleButtonStyle(.black)
-            .frame(height: 52)
-            .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous))
-            .padding(.horizontal, .hearth700)
-            .disabled(busy || !agreedToLegal)
-            .opacity(agreedToLegal ? 1 : 0.4)
-
-            Button(action: signInWithGoogle) {
-                HStack(spacing: .hearth400) {
-                    Image(systemName: "globe")
-                        .font(.system(size: 16, weight: .regular))
-                        .foregroundColor(.accentOnCanvas)
-                    Text("Continue with Google")
-                        .font(.hearthTitleMD)
-                        .foregroundColor(.inkPrimary)
-                }
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .background(Color.bgElevated)
-                .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous))
-                .hearthCardElevation()
-            }
-            .padding(.horizontal, .hearth700)
-            .disabled(busy || !agreedToLegal)
-            .opacity(agreedToLegal ? 1 : 0.4)
 
             if let errorMessage {
                 Text(errorMessage)
                     .font(.hearthBodySM)
                     .foregroundColor(.statusError)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, .hearth700)
             }
 
-            Spacer(minLength: .hearth700)
+            // Design's "Already have an account? Sign in" — there is no
+            // second auth flow to route to (sign-in and sign-up ARE the same
+            // flow here, per the two buttons above), so this is inert text
+            // rather than a button that would just repeat what's already
+            // on-screen. See the hand-off report.
+            Text("Already have an account? Sign in")
+                .font(.hearthBodySM)
+                .foregroundColor(.inkSecondary)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.bgCanvas)
+        .padding(.horizontal, .hearth800)
+        .padding(.top, .hearth1000)
+        .padding(.bottom, .hearth1000)
+        .frame(maxWidth: .infinity)
         .overlay { if busy { ProgressView().tint(.accentOnCanvas) } }
         .trackScreen("sign_in")
+    }
+
+    /// Measured `754:4943` "Continue with Google": `#2B2925` fill
+    /// (`inkHeader` — the same token as the design's own card-header ink,
+    /// exact hex match), r≈**100** (a 50pt-tall pill clips identically to a
+    /// `Capsule`), white label. Google's real multi-color "G" glyph needs
+    /// per-channel hex the token linter forbids outside `Theme.swift`; kept
+    /// as the existing SF Symbol, now tinted white to sit on the dark fill —
+    /// see the hand-off report.
+    private var googleButton: some View {
+        Button(action: signInWithGoogle) {
+            HStack(spacing: .hearth400) {
+                Image(systemName: "globe")
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundColor(.inkOnPhotoLight)
+                Text("Continue with Google")
+                    .font(.hearthTitleMD)
+                    .foregroundColor(.inkOnPhotoLight)
+            }
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .background(Color.inkHeader)
+            .clipShape(Capsule())
+        }
+        .disabled(busy || !agreedToLegal)
+        .opacity(agreedToLegal ? 1 : 0.4)
+    }
+
+    /// Measured `754:4943` "Sign up with Apple" — the native button's OWN
+    /// label text, not ours to override, so this uses the `.signUp` style
+    /// (not `.signIn`) specifically to match that copy. `.black` is already
+    /// the design's dark-pill fill; `Capsule` matches the ~r100 measured
+    /// radius on a 50pt-tall control.
+    private var appleButton: some View {
+        SignInWithAppleButton(.signUp) { request in
+            let nonce = Self.randomNonce()
+            currentNonce = nonce
+            request.requestedScopes = [.fullName, .email]
+            request.nonce = Self.sha256(nonce)
+        } onCompletion: { result in
+            handleApple(result)
+        }
+        .signInWithAppleButtonStyle(.black)
+        .frame(height: 50)
+        .clipShape(Capsule())
+        .disabled(busy || !agreedToLegal)
+        .opacity(agreedToLegal ? 1 : 0.4)
     }
 
     /// Blocking consent row — a real checkbox the parent must tick, not "by
@@ -297,15 +312,21 @@ struct SignInTestHarness: View {
                 }
             }.padding()
         } else {
-            SignInView { outcome in
-                let cred = AuthService.shared.credential(for: outcome.userId)
-                result = """
-                user_id: \(outcome.userId)
-                has_profile: \(outcome.hasProfile)
-                analytics_id: \(cred?.analyticsId ?? "-")
-                access: \(String((cred?.accessToken ?? "").prefix(24)))…
-                refresh: \(cred?.refreshToken != nil ? "stored" : "none")
-                """
+            // Standalone here (unlike the funnel's `.signIn` step), so this
+            // harness supplies its own ground — `SignInView` itself no longer
+            // paints one now that it's meant to sit inside the funnel's card.
+            ZStack {
+                Color.bgCanvas.ignoresSafeArea()
+                SignInView { outcome in
+                    let cred = AuthService.shared.credential(for: outcome.userId)
+                    result = """
+                    user_id: \(outcome.userId)
+                    has_profile: \(outcome.hasProfile)
+                    analytics_id: \(cred?.analyticsId ?? "-")
+                    access: \(String((cred?.accessToken ?? "").prefix(24)))…
+                    refresh: \(cred?.refreshToken != nil ? "stored" : "none")
+                    """
+                }
             }
         }
     }

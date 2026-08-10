@@ -54,6 +54,8 @@ extension Color {
     /// Disabled control fill (Greg's inert "Continue"). Pair with `inkSecondary`,
     /// never with `inkOnPhotoLight` — white on this fill is 2.07:1.
     static let bgDisabled    = Color(hex: HearthPrimitives.warmGray400)
+    /// Dashboard 1 coach banner (`#FCFBF8`) — warmer than `bgCard`, distinct from `bgSober`.
+    static let bgCoachBanner = Color(hex: HearthPrimitives.creamWarm)
 
     // Ink
     static let inkPrimary     = Color(hex: HearthPrimitives.ink900)
@@ -64,6 +66,8 @@ extension Color {
     static let inkSecondary   = Color(hex: HearthPrimitives.ink700)
     static let inkMuted       = Color(hex: HearthPrimitives.ink500)
     static let inkPlaceholder = Color(hex: HearthPrimitives.ink300)
+    /// Eyebrow ink for FOR YOU / COMING UP items (`#989591`).
+    static let inkEyebrow     = Color(hex: HearthPrimitives.warmGray500)
     static let inkOnPhotoDark  = Color(hex: HearthPrimitives.ink900)
     static let inkOnPhotoLight = Color(hex: HearthPrimitives.paper)
     /// Ink on a teal card (`#F5F3EF`). Deliberately the warm cream, not pure
@@ -76,8 +80,10 @@ extension Color {
     static let inkOnPhoto      = Color(hex: HearthPrimitives.paper)
 
     // Borders
-    static let borderHairline = Color(hex: HearthPrimitives.creamHairline)
-    static let borderStrong   = Color(hex: HearthPrimitives.ink300)
+    static let borderHairline    = Color(hex: HearthPrimitives.creamHairline)
+    static let borderStrong      = Color(hex: HearthPrimitives.ink300)
+    static let borderInputPill   = Color(hex: HearthPrimitives.borderInput)
+    static let borderChipOutline = Color(hex: HearthPrimitives.borderChip)
 
     // Accent — teal (beta-v1)
     //
@@ -91,6 +97,15 @@ extension Color {
     static let accentOnCanvas = Color(hex: HearthPrimitives.teal600)
     static let accentPress    = Color(hex: HearthPrimitives.teal700)
     static let accentTint     = Color(hex: HearthPrimitives.teal100)
+    /// Deepest accent — FILL only (chat-input strip, count badges). Cream on it
+    /// measures 7.44:1, paper 8.25:1.
+    static let accentDeep     = Color(hex: HearthPrimitives.tealDeep)
+
+    // Funnel buttons (beta-v1 sprint-1)
+    //
+    // The charcoal button fill used throughout the onboarding funnel.
+    // Deliberately NOT the teal accent — the funnel is sober.
+    static let bgButtonFunnel = Color(hex: HearthPrimitives.charcoalBtn)
 
     // Kid accent — saffron (beta-v1)
     //
@@ -213,9 +228,11 @@ enum HearthPrimitives {
     // Neutrals
     static let creamCanvas     = "#E9E4DC"   // cream-200 — default page bg (beta-v1)
     static let creamSober      = "#F3F0EB"   // cream-100 — sober surface (the pre-beta canvas)
+    static let creamWarm       = "#FCFBF8"   // cream-50 — Dashboard 1 coach banner
     static let creamHairline   = "#DAD4CA"   // cream-300 — dividers; darkened to stay visible on the new canvas
     static let paper           = "#FFFFFF"   // paper      — elevated card bg
     static let warmGray400     = "#B8B4AC"   // disabled control fill
+    static let warmGray500     = "#989591"   // eyebrow ink in FOR YOU / COMING UP
     static let ink900          = "#1A1A1A"   // primary text
     static let ink800          = "#1E1E1E"   // sheet headline + subtitle (account sheet)
     static let ink700          = "#2D2D2D"   // softer primary
@@ -225,6 +242,13 @@ enum HearthPrimitives {
     static let cardCream       = "#F5F3EF"   // sheet/card ground; also the INK on teal article cards
     static let tabSelected     = "#DAE0DF"   // selected tab pill + selected segmented control
     static let neutralGray500  = "#858585"   // sign-out fill (neutral, not the warm warmGray400)
+
+    // Funnel buttons — charcoal (beta-v1 sprint-1)
+    //
+    // The funnel's primary-button fill on EVERY sprint-1 frame. White on it is
+    // 9.26:1. This is deliberately NOT the teal accent — the funnel reads sober
+    // and minimal; teal is the in-app accent. Miguel's explicit call 2026-08-08.
+    static let charcoalBtn     = "#4A4741"   // FILL only — see above
 
     // Brand — teal (beta-v1)
     //
@@ -242,6 +266,19 @@ enum HearthPrimitives {
     static let teal600         = "#1B7498"   // accent as TEXT/ICON on cream — see note above
     static let teal700         = "#12556F"   // accent press
     static let teal100         = "#DCE9EF"   // accent tint
+    // Sprint-2 measured: the chat-input strip and the count badge on the Plan
+    // segment. Darker than `teal700` and used as a FILL only.
+    static let tealDeep        = "#0A5570"
+
+    // Funnel borders (beta-v1 sprint-1)
+    //
+    // 1px strokes on the funnel's r=32 pill inputs and "What's on your mind?"
+    // tag items. These are DECORATIVE — they measure 1.51:1 and 1.22:1 against
+    // their grounds. The control's shape and fill already carry the boundary, so
+    // do not treat these as boundary indicators or register them as UI-contrast
+    // pairs.
+    static let borderInput     = "#C9C5BE"   // pill input stroke
+    static let borderChip      = "#E9E4DC"   // chip outline stroke
 
     // Kid accent (beta-v1)
     static let kidSaffron      = "#E89C2E"

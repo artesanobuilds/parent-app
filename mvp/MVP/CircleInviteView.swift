@@ -1,19 +1,27 @@
 import SwiftUI
 
 /// Invite flow ("invite preview" frames). Ships "Copy link to invite" +
-/// share-preview card and a manual "add contact" entry. CSV import and the
-/// LinkedIn connect button are explicitly OUT of scope for this pass.
+/// share-preview card, an "add contact" entry that goes through
+/// `POST /circle/contacts`, and a way into the full Contacts screen.
+/// CSV import and the LinkedIn connect button are drawn in the frames and
+/// explicitly NOT rendered — a control that does nothing reads as broken.
 struct CircleInviteView: View {
     let userID: String
     let baseURL: URL
+    /// Bubbled up so the presenting surface re-fetches its roster after a
+    /// contact is added here (CLAUDE.md: after a mutation the source-of-truth
+    /// view re-fetches).
+    var onRosterChanged: () -> Void = {}
 
     @State private var invite: CircleInvite?
     @State private var creating = false
     @State private var errorMessage: String?
     @State private var copied = false
     @State private var showingAddContact = false
-    @State private var contactName = ""
-    @State private var addedContacts: [String] = []
+    @State private var showingContacts = false
+    /// The single identical confirmation from `POST /circle/contacts` — see
+    /// `AddContactSheet`. Never personalised with what the server "found".
+    @State private var contactNotice: String?
     @Environment(\.dismiss) private var dismiss
 
     private var inviterName: String {
@@ -34,37 +42,13 @@ struct CircleInviteView: View {
                             .foregroundColor(.inkMuted)
                     }
 
-                    Button {
-                        showingAddContact = true
-                    } label: {
-                        HStack(spacing: .hearth400) {
-                            Image(systemName: "person.crop.circle.badge.plus")
-                                .foregroundColor(.accentOnCanvas)
-                            Text("add contact")
-                                .font(.hearthBodyMD)
-                                .foregroundColor(.inkPrimary)
-                            Spacer()
-                        }
-                        .padding(.hearth500)
-                        .background(Color.bgElevated)
-                        .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
-                    }
+                    tile(symbol: "person.crop.circle.badge.plus", label: "add contact",
+                         chevron: false) { showingAddContact = true }
 
-                    if !addedContacts.isEmpty {
-                        VStack(alignment: .leading, spacing: .hearth300) {
-                            ForEach(addedContacts, id: \.self) { name in
-                                HStack(spacing: .hearth400) {
-                                    Circle()
-                                        .fill(Color.accentTint)
-                                        .frame(width: 32, height: 32)
-                                        .overlay(Text(initials(for: name)).font(.hearthLabel).foregroundColor(.accentOnCanvas))
-                                    Text(name).font(.hearthBodyMD).foregroundColor(.inkPrimary)
-                                    Spacer()
-                                    Text("Invited").font(.hearthBodySM).foregroundColor(.statusSuccess)
-                                }
-                            }
-                        }
-                    }
+                    tile(symbol: "person.2", label: "See all contacts",
+                         chevron: true) { showingContacts = true }
+
+                    if let contactNotice { noticeBanner(contactNotice) }
 
                     Divider().background(Color.borderHairline)
 
@@ -85,16 +69,58 @@ struct CircleInviteView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .alert("Add contact", isPresented: $showingAddContact) {
-                TextField("Contact name", text: $contactName)
-                Button("Add") { Task { await addContact() } }
-                Button("Cancel", role: .cancel) { contactName = "" }
-            } message: {
-                Text("We'll generate a personal invite link for them.")
+            .sheet(isPresented: $showingAddContact) {
+                AddContactSheet(userID: userID, baseURL: baseURL) { message in
+                    contactNotice = message
+                    onRosterChanged()
+                }
+            }
+            .sheet(isPresented: $showingContacts) {
+                CircleContactsView(userID: userID, baseURL: baseURL,
+                                   onRosterChanged: onRosterChanged)
             }
             .task { await ensureInvite() }
             .trackScreen("circle_invite")
         }
+    }
+
+    /// One tappable row in the `invite preview` action list. Extracted so the
+    /// body stays short (SwiftUI's "unable to type-check in reasonable time" is
+    /// usually an over-long body).
+    @ViewBuilder
+    private func tile(symbol: String, label: String, chevron: Bool,
+                      action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: .hearth400) {
+                Image(systemName: symbol)
+                    .foregroundColor(.accentOnCanvas)
+                Text(label)
+                    .font(.hearthBodyMD)
+                    .foregroundColor(.inkPrimary)
+                Spacer()
+                if chevron {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.inkSecondary)
+                }
+            }
+            .padding(.hearth500)
+            .background(Color.bgElevated)
+            .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func noticeBanner(_ message: String) -> some View {
+        Text(message)
+            .font(.hearthBodySM)
+            .foregroundColor(.inkPrimary)
+            .padding(.hearth400)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: .hearthRadiusTile, style: .continuous)
+                    .fill(Color.bgCard)
+            )
     }
 
     private var linkSection: some View {
@@ -151,12 +177,6 @@ struct CircleInviteView: View {
         }
     }
 
-    private func initials(for name: String) -> String {
-        let parts = name.split(separator: " ")
-        let letters = parts.prefix(2).compactMap { $0.first }
-        return letters.isEmpty ? "?" : String(letters).uppercased()
-    }
-
     private func ensureInvite() async {
         guard invite == nil else { return }
         creating = true
@@ -175,19 +195,4 @@ struct CircleInviteView: View {
         withAnimation(.hearthFast) { copied = false }
     }
 
-    /// Generates a personalized invite for a manually-added contact. There is
-    /// no backend endpoint yet to persist a named household member from iOS
-    /// (`/circle/invites` only accepts an OPTIONAL existing `member_id`), so
-    /// this mints a fresh link and tracks the name locally for this sheet's
-    /// lifetime — the recipient still lands on the same claim flow.
-    private func addContact() async {
-        let name = contactName.trimmingCharacters(in: .whitespacesAndNewlines)
-        contactName = ""
-        guard !name.isEmpty else { return }
-        if let created = try? await CircleService.createInvite(userID: userID, baseURL: baseURL) {
-            invite = created
-            addedContacts.append(name)
-            Analytics.capture("circle_invite_contact_added", [:])
-        }
-    }
 }

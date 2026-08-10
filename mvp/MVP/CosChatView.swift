@@ -143,16 +143,25 @@ struct CosChatView: View {
 
     // MARK: - User Message (pill)
 
+    /// Measured `planner 5` (same component as `coach-001`): deep-teal bubble,
+    /// pad 16, r=12 with an 8pt bottom-leading tail, body 14 in warm cream.
     private func userMessageRow(_ message: ChatMessage) -> some View {
         HStack {
             Spacer(minLength: 60)
             Text(message.content)
-                .font(.hearthBodyMD)
-                .foregroundColor(.inkOnPhotoLight)
-                .padding(.horizontal, .hearth500)
-                .padding(.vertical, .hearth400)
-                .background(Color.accentDefault)
-                .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous))
+                .font(.hearthBodySM)
+                .foregroundColor(.inkOnCard)
+                .padding(.hearth500)
+                .background(Color.accentDeep)
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: .hearthRadiusTile,
+                        bottomLeadingRadius: .hearthRadiusButton,
+                        bottomTrailingRadius: .hearthRadiusTile,
+                        topTrailingRadius: .hearthRadiusTile,
+                        style: .continuous
+                    )
+                )
         }
         .padding(.horizontal, .hearth500)
         .padding(.vertical, .hearth300)
@@ -207,23 +216,20 @@ struct CosChatView: View {
 
     // MARK: - Input Area
 
+    /// Measured `planner 5`: the composer sits on the deep-teal strip
+    /// (`#0A5570`, 16pt top corners) with a white r=8 field inside — same
+    /// component as the coach tab's.
     private var inputArea: some View {
         VStack(spacing: 0) {
-            Divider().background(Color.borderHairline)
-
             HStack(alignment: .bottom, spacing: .hearth400) {
                 TextField("Ask about your plan", text: $messageText, axis: .vertical)
-                    .font(.hearthBodyMD)
+                    .font(.hearthBodySM)
                     .foregroundColor(.inkPrimary)
                     .padding(.horizontal, .hearth500)
                     .padding(.vertical, .hearth400)
                     .background(
-                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                        RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous)
                             .fill(Color.bgElevated)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                                    .stroke(Color.borderStrong, lineWidth: 1)
-                            )
                     )
                     .lineLimit(1...4)
                     .disabled(viewModel.isSending || viewModel.isUserIDMissing)

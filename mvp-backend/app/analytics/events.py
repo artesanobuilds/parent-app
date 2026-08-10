@@ -23,6 +23,11 @@ EVENTS: dict[str, set[str]] = {
     # Conversational agents (COUNTS + LIFECYCLE — never content)
     "chat_opened": {"agent_kind"},                   # opened coach / a companion (engagement)
     "parent_chat_message_sent": {"thread_kind"},
+    # Coach conversation history (sprint 2): does the parent actually go BACK to
+    # past conversations, and do they start new ones? Counts only — no titles,
+    # no ids, nothing about what was discussed.
+    "coach_thread_opened": set(),
+    "coach_thread_closed": set(),
     "kid_chat_message_sent": {"agent_id"},
     "voice_session_ended": {"surface", "duration_s"},  # pairs with voice_session_started → duration
     # Research / activity planning

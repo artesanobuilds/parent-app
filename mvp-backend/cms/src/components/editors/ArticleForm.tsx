@@ -148,6 +148,32 @@ export default function ArticleForm({
         </div>
       </div>
 
+      {/* Eyebrow — renders above the headline in the app as
+          "KICKER · AGE RANGE · READ TIME", joining only the parts that are set.
+          Leaving either blank is fine; the app never shows a stray separator. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div>
+          <label className={labelClass}>Kicker</label>
+          <input
+            type="text"
+            className={inputClass}
+            value={article.kicker ?? ''}
+            onChange={(e) => field('kicker', e.target.value)}
+            placeholder="WE TRIED IT"
+          />
+        </div>
+        <div>
+          <label className={labelClass}>Age Range</label>
+          <input
+            type="text"
+            className={inputClass}
+            value={article.age_range ?? ''}
+            onChange={(e) => field('age_range', e.target.value)}
+            placeholder="Ages 3–7"
+          />
+        </div>
+      </div>
+
       {/* Summary */}
       <div>
         <label className={labelClass}>Summary</label>

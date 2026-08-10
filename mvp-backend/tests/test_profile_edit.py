@@ -148,6 +148,52 @@ def test_patch_profile_and_add_kid_round_trip():
         _reconnect_shared_storage(server)
 
 
+def test_patch_secondary_language_and_guidance_style_round_trip():
+    """The consolidated-Settings 'Language at home' and 'MVP coach settings'
+    cards (round-2, 2026-08-09) added iOS editors for two fields that already
+    existed on ParentProfile but had no write path exercised end-to-end:
+    `secondary_language` (previously silently dropped for every bilingual
+    household) and `guidance_style`. Both are ordinary dataclass fields, so
+    `_PARENT_FIELDS` already accepts them — this pins that acceptance and the
+    round-trip so a future field rename breaks loudly."""
+    from fastapi.testclient import TestClient
+    import app.server as server
+
+    try:
+        with TestClient(server.app) as client:
+            user_id = "profile-edit-language-coach-user"
+            tok = client.post("/auth/issue-token", json={"user_id": user_id}).json()["token"]
+            auth = {"Authorization": f"Bearer {tok}"}
+
+            r = client.patch(
+                "/profile",
+                json={"secondary_language": "es", "guidance_style": "concise scripts"},
+                headers=auth,
+            )
+            assert r.status_code == 200, r.text
+            parent = r.json()["parent"]
+            assert parent["secondary_language"] == "es"
+            assert parent["guidance_style"] == "concise scripts"
+
+            got = client.get("/profile", headers=auth).json()["parent"]
+            assert got["secondary_language"] == "es"
+            assert got["guidance_style"] == "concise scripts"
+
+            # An explicit "" clears it (same idiom every other string field
+            # uses — the iOS editor sends "" for an unset picker, never a
+            # missing key).
+            r = client.patch("/profile", json={"secondary_language": ""}, headers=auth)
+            assert r.json()["parent"]["secondary_language"] == ""
+
+            # Older iOS builds that never send these keys must not break —
+            # a PATCH with neither key present leaves both untouched.
+            r = client.patch("/profile", json={"name": "Bilingual Household"}, headers=auth)
+            assert r.status_code == 200, r.text
+            assert r.json()["parent"]["guidance_style"] == "concise scripts"
+    finally:
+        _reconnect_shared_storage(server)
+
+
 def test_delete_family_evicts_in_memory_profile():
     """DELETE /family must forget the family from the in-memory profiling_service,
     not only the DB. Regression: GET /profile reads the process-local singleton,

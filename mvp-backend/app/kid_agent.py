@@ -20,9 +20,9 @@ from typing import Any, Dict, List, Optional
 
 from langchain_openai import ChatOpenAI
 from langchain_tavily import TavilySearch
-from langgraph.checkpoint.memory import MemorySaver
 from langchain.agents import create_agent
 
+from app.checkpointing import checkpointer as _kid_checkpointer
 from app.profiling import profiling_service
 from app.prompt_synthesis import (
     SynthesisResult,
@@ -42,10 +42,11 @@ logger = logging.getLogger(__name__)
 # dependency mid-feature; swap-target tracked in roadmap.md.
 KID_RUNTIME_MODEL = os.getenv("KID_RUNTIME_MODEL", "gpt-5.2")
 
-# Shared in-memory checkpointer for kid threads. Same caveat as the parent
-# agent: this is process-local; production needs a SQL/DuckDB-backed
-# checkpointer (also tracked in plan Phase 0).
-_kid_checkpointer = MemorySaver()
+# Kid threads share the ONE durable SQLite checkpointer with the parent and
+# onboarding agents (app/checkpointing.py) — imported above under the name this
+# module's `create_agent` call already used, so the call site is unchanged. Kid
+# thread ids are `kid:{user}:{kid}:{thread}`; the delete cascade sweeps them by
+# that prefix.
 
 
 # ── Cache ────────────────────────────────────────────────────────────

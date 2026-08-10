@@ -73,31 +73,45 @@ struct MVPApp: App {
                     PushRegistration.requestAndRegister()
                 }
         } else {
-            // beta-v1 INVERTS the old order. Sign-in used to be a launch gate:
-            // `userName.isEmpty → SignInView`, and nothing could be typed until
-            // an account existed. Greg's funnel asks everything first and
-            // authenticates at the end ("Securing your family's space"), so the
-            // whole pre-account funnel now lives inside OnboardingView.
+            // 2026-08-09: the order INVERTED AGAIN, back toward auth-first —
+            // Miguel's 1:47pm Figma screenshot showed the canvas order as
+            // `choose a plan` → `create your account` → the branded splash,
+            // with the actual questionnaire only starting after both. The
+            // whole thing (paywall, sign-in, splash, AND the questionnaire)
+            // still lives inside one `OnboardingView` / one `flow` — only the
+            // ORDER of steps within it changed, not this launch-gate check.
             //
-            // Only the ORDER changed. `onboarding_completed`, `user_name` and
-            // `parent_display_name` keep exactly their old meanings:
+            // `onboarding_completed`, `user_name` and `parent_display_name`
+            // keep exactly their old meanings regardless of internal step
+            // order:
             //   • user_name           — the server-resolved opaque account id
             //   • parent_display_name — the greeting name
             //   • onboarding_completed— the funnel reached "Take me home"
             //
-            // The safety of asking-before-auth rests entirely on
-            // `OnboardingDraft`: every answer is written to UserDefaults as it
-            // is entered and discarded ONLY when /profile/seed confirms 200
-            // (see flushPendingSeed below). Without that, an abandoned Apple
-            // sheet would lose a family — the same class of bug as the
-            // localhost-fallback seed loss.
+            // Answers are still collected into `OnboardingDraft` and posted
+            // once at the ring screen — that durability story (every answer
+            // written to UserDefaults as it's entered, discarded ONLY when
+            // /profile/seed confirms 200, see flushPendingSeed below) is
+            // unchanged by which step number sign-in happens to occupy.
             //
             // The BACKEND still decides new-vs-returning: `hasProfile` means
             // this account already has data (same parent, new device or after a
             // reinstall) → onboarding ends immediately and the app opens.
             OnboardingView(
-                signInRequired: userName.isEmpty
-                    || AuthService.shared.credential(for: userName) == nil,
+                // `UITEST_SKIP_SIGNIN=1` (DEBUG only) lets headless simulator
+                // driving reach the funnel screens past the sign-in wall,
+                // which can't otherwise be crossed without real Apple/Google
+                // OAuth. Mirrors the existing `TEST_SIGNIN` harness idiom
+                // above — never gated on anything but #if DEBUG + the env var.
+                signInRequired: {
+                    #if DEBUG
+                    if ProcessInfo.processInfo.environment["UITEST_SKIP_SIGNIN"] == "1" {
+                        return false
+                    }
+                    #endif
+                    return userName.isEmpty
+                        || AuthService.shared.credential(for: userName) == nil
+                }(),
                 onSignedIn: { outcome in
                     userName = outcome.userId
                     // Consent capture moved onto the sign-in screen's fine

@@ -30,11 +30,20 @@ struct APIArticle: Codable, Identifiable, Hashable {
     let summary: String
     let tags: [String]
     let content: String?
+    /// Sprint-2: eyebrow kicker (e.g. "WE TRIED IT"). Backend migration v23 adds
+    /// this column as `TEXT NOT NULL DEFAULT ''`. Declared optional so older
+    /// backends continue to decode.
+    let kicker: String?
+    /// Sprint-2: age range for the eyebrow (e.g. "Ages 3-7"). Backend migration
+    /// v23 adds this column as `TEXT NOT NULL DEFAULT ''`. Declared optional so
+    /// older backends continue to decode.
+    let ageRange: String?
 
     enum CodingKeys: String, CodingKey {
         case id, category, title, subtitle, emoji, author
         case readTime = "read_time"
-        case summary, tags, content
+        case summary, tags, content, kicker
+        case ageRange = "age_range"
     }
 }
 

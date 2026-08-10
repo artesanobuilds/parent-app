@@ -1,20 +1,25 @@
 import SwiftUI
 
-/// The avatar / account sheet — Sprint-1 gap in `docs/design/beta-v1-sprint2.md`
-/// ("the avatar / account sheet"). Presented from `HomeView`'s header avatar.
+/// The avatar / account sheet — beta-v1 sprint-1 `account01` / `account 02` /
+/// `account 03`, presented from `HomeView`'s header avatar.
 ///
-/// The Figma spec shows three states (account01/02/03); this is ONE view that
-/// adapts — the greeting subtitle and the Saved/History content change with
-/// what's actually loaded, rather than three near-duplicate screens. The
-/// "In your Circle" section from account03 is deliberately NOT built here:
-/// Circle's DM data model lives in `CircleView.swift`, which this slice must
-/// not touch — folding it in would mean a second, parallel read of Circle
-/// state (see `feedback_standalone_flows`).
+/// THREE STATES, all built, and the segmented control really switches them:
 ///
-/// HISTORY IS A PROXY: this app has no article-view log today. "History"
-/// renders the same saved articles as "Saved", just ordered by recency —
-/// there is nothing else to show it. See the PR report for the flag to the
-/// orchestrator.
+///   `account01` — nothing yet. "No recent activity. Your history and saved
+///                 articles can be found here.", neither segment filled, then
+///                 the Account card + Cancel / Sign out.
+///   `account 02` — **Saved** selected: the teal r18 article cards, each with an
+///                 eyebrow (`Care · 2 min`), a Fraunces 38/40 headline and a
+///                 working bookmark, then Family interests, then Account.
+///   `account 03` — **History** selected: `In your Circle` rows (title, "M
+///                 started this — 4 replies", an avatar stack) with a
+///                 **Go to Circle** link, then `Coach advice` rows with a
+///                 **Chat with the coach** link, then Family interests, Account.
+///
+/// History is REAL history now, not a re-ordering of Saved: the Circle rows are
+/// the parent's own conversations (`GET /circle/conversations`) and the coach
+/// rows are their past coach threads (`GET /coach/threads`). Every row opens the
+/// thing it names, in this sheet's own navigation stack.
 struct AccountSheetView: View {
     let userID: String
     let parentDisplayName: String
@@ -23,16 +28,37 @@ struct AccountSheetView: View {
     @EnvironmentObject private var configuration: ServerConfiguration
     @EnvironmentObject private var session: AppSession
     @Environment(\.dismiss) private var dismiss
+    // Smoke-and-mirrors paywall pick, persisted at Buy-tap (PaywallView) —
+    // display-only, nothing charged. Same keys FamilySettingsView reads.
+    @AppStorage("picked_plan_name") private var pickedPlanName = ""
+    @AppStorage("picked_plan_billing") private var pickedPlanBilling = ""
 
     enum Tab { case saved, history }
 
-    @State private var tab: Tab = .saved
+    /// nil = `account01`'s "nothing picked yet". Resolved to `.saved` the moment
+    /// the parent taps a segment.
+    @State private var tab: Tab?
     @State private var savedItems: [SavedItem] = []
     @State private var articleMeta: [String: APIArticle] = [:]
+    @State private var conversations: [CircleConversation] = []
+    @State private var coachThreads: [CoachThreadSummary] = []
     @State private var loading = true
     @State private var selectedInterests: Set<String> = []
     @State private var interestError: String?
     @State private var showingLogoutConfirm = false
+    /// The in-sheet coach surface, built lazily so opening the sheet doesn't
+    /// spin up a chat view model nobody asked for.
+    @State private var coachVM: ChatViewModel?
+    @State private var openingThreadID: String?
+    @State private var route: AccountRoute?
+
+    /// Where a History row goes. Both destinations live in THIS sheet's stack —
+    /// the sheet can't switch tabs, and a row that silently did nothing would be
+    /// exactly the dead affordance this pass exists to remove.
+    private enum AccountRoute: Hashable {
+        case circleThread(String)
+        case coach
+    }
 
     private var firstName: String {
         parentDisplayName.split(separator: " ").first.map(String.init) ?? ""
@@ -45,11 +71,10 @@ struct AccountSheetView: View {
         savedItems.filter { $0.itemType == "article" }
     }
 
-    private var historyArticles: [SavedItem] {
-        savedArticles.sorted { ($0.savedAt ?? "") > ($1.savedAt ?? "") }
+    /// `account01` is the state where there is nothing in EITHER segment.
+    private var hasActivity: Bool {
+        !savedArticles.isEmpty || !conversations.isEmpty || !coachThreads.isEmpty
     }
-
-    private var hasActivity: Bool { !savedArticles.isEmpty }
 
     var body: some View {
         NavigationStack {
@@ -58,7 +83,7 @@ struct AccountSheetView: View {
                     header
                     tabToggle
                     activityContent
-                    interestsSection
+                    if hasActivity { interestsSection }
                     accountSection
                 }
                 // ~30pt on every edge, per the Figma sheet (`account 02`).
@@ -71,6 +96,9 @@ struct AccountSheetView: View {
             .background(Color.bgCard.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .withContentNavigationDestinations()
+            .navigationDestination(item: $route) { destination in
+                routeDestination(destination)
+            }
             .safeAreaInset(edge: .bottom) { footer }
         }
         .task { await load() }
@@ -95,14 +123,33 @@ struct AccountSheetView: View {
         .onAppear { Analytics.capture("account_sheet_shown", [:]) }
     }
 
+    @ViewBuilder
+    private func routeDestination(_ destination: AccountRoute) -> some View {
+        switch destination {
+        case .circleThread(let id):
+            CircleThreadView(conversationId: id, userID: userID,
+                             baseURL: configuration.baseURL,
+                             onNotFound: { route = nil })
+        case .coach:
+            if let coachVM {
+                AgentView(viewModel: coachVM, configuration: configuration)
+            }
+        }
+    }
+
     // MARK: - Load
 
     private func load() async {
         guard let baseURL = configuration.baseURL, !userID.isEmpty else { loading = false; return }
         async let itemsTask = try? SavedService.list(userID: userID, baseURL: baseURL)
         async let profileTask = try? ProfileService.getProfile(baseURL: baseURL, userID: userID)
+        async let conversationsTask = try? CircleService.conversations(userID: userID,
+                                                                      baseURL: baseURL)
+        async let threadsTask = try? CoachThreadService.threads(userID: userID, baseURL: baseURL)
         let items = await itemsTask ?? []
         savedItems = items
+        conversations = await conversationsTask ?? []
+        coachThreads = await threadsTask ?? []
         if let activities = await profileTask?.parent?.familyActivities {
             selectedInterests = Set(activities)
         }
@@ -127,8 +174,7 @@ struct AccountSheetView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: .hearth300) {
-            // Fraunces w700 38/40 — the design's editorial headline. Was
-            // `hearthDisplayMD` (28/600), two steps too small.
+            // Fraunces w700 38/40 — the design's editorial headline.
             Text(firstName.isEmpty ? "Hi there!" : "Hi \(firstName)!")
                 .font(.hearthDisplaySM)
                 .tracking(-0.38)
@@ -145,31 +191,37 @@ struct AccountSheetView: View {
 
     private var tabToggle: some View {
         HStack(spacing: .hearth300) {
-            tabButton(.saved, label: "Saved")
-            tabButton(.history, label: "History")
+            tabButton(.saved, label: "Saved", symbol: "bookmark")
+            tabButton(.history, label: "History", symbol: "clock.arrow.circlepath")
         }
     }
 
-    /// Label-only, radius 10, selected = `bgSelected` with a TEAL label.
-    ///
-    /// Three corrections off the Figma: the design's buttons carry no leading
-    /// icon, the corner is a 10pt radius rather than a capsule, and the selected
-    /// state is the pale `#DAE0DF` ground with teal text — not a solid teal fill
-    /// with white text, which read far heavier than the design.
-    private func tabButton(_ value: Tab, label: String) -> some View {
+    /// Radius 10; selected = the pale `#DAE0DF` ground with a teal label, per
+    /// `account 02`/`03`. In `account01` NEITHER is filled, which is exactly
+    /// what `tab == nil` renders.
+    private func tabButton(_ value: Tab, label: String, symbol: String) -> some View {
         Button { tab = value } label: {
-            Text(label)
-                .font(.hearthButtonLabel)
-                .foregroundColor(.accentOnCanvas)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, .hearth400)
-                .padding(.vertical, .hearth300)
-                .background(
-                    RoundedRectangle(cornerRadius: .hearthRadiusControl, style: .continuous)
-                        .fill(tab == value ? Color.bgSelected : Color.bgElevated)
-                )
+            HStack(spacing: .hearth300) {
+                Image(systemName: symbol)
+                    .font(.system(size: 14, weight: .regular))
+                Text(label)
+                    .font(.hearthButtonLabel)
+            }
+            .foregroundColor(.accentOnCanvas)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, .hearth400)
+            .padding(.vertical, .hearth300)
+            .background(
+                RoundedRectangle(cornerRadius: .hearthRadiusControl, style: .continuous)
+                    .fill(tab == value ? Color.bgSelected : Color.bgElevated)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: .hearthRadiusControl, style: .continuous)
+                            .stroke(Color.accentDefault, lineWidth: 0.83)
+                    )
+            )
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(tab == value ? [.isSelected] : [])
     }
 
     // MARK: - Saved / History content
@@ -179,30 +231,31 @@ struct AccountSheetView: View {
         if loading {
             ProgressView().frame(maxWidth: .infinity).padding(.vertical, .hearth600)
         } else {
-            let list = tab == .saved ? savedArticles : historyArticles
-            if list.isEmpty {
-                Text("Nothing saved yet. Tap the bookmark on any article and it'll wait for you here.")
-                    .font(.hearthBodySM)
-                    .foregroundColor(.inkMuted)
-            } else {
-                VStack(alignment: .leading, spacing: .hearth400) {
-                    // History has no article-view log today — this is the
-                    // saved list, just ordered by recency. Said out loud so a
-                    // parent seeing identical cards in both tabs isn't
-                    // confused into thinking something's broken.
-                    if tab == .history {
-                        Text("Showing your saved articles, most recent first")
-                            .font(.hearthCaptionMono)
-                            .foregroundColor(.inkMuted)
-                    }
-                    ForEach(list) { item in
-                        SavedArticleCard(
-                            item: item,
-                            meta: articleMeta[item.itemRef],
-                            categoryName: categoryName(for:),
-                            onUnsave: { unsave(item) }
-                        )
-                    }
+            switch tab {
+            case .none:      EmptyView()          // `account01`
+            case .saved:     savedList            // `account 02`
+            case .history:   historyList          // `account 03`
+            }
+        }
+    }
+
+    // MARK: `account 02` — Saved
+
+    @ViewBuilder
+    private var savedList: some View {
+        if savedArticles.isEmpty {
+            Text("Nothing saved yet. Tap the bookmark on any article and it'll wait for you here.")
+                .font(.hearthBodySM)
+                .foregroundColor(.inkMuted)
+        } else {
+            VStack(alignment: .leading, spacing: .hearth400) {
+                ForEach(savedArticles) { item in
+                    SavedArticleCard(
+                        item: item,
+                        meta: articleMeta[item.itemRef],
+                        categoryName: categoryName(for:),
+                        onUnsave: { unsave(item) }
+                    )
                 }
             }
         }
@@ -215,6 +268,174 @@ struct AccountSheetView: View {
         }
     }
 
+    // MARK: `account 03` — History
+
+    @ViewBuilder
+    private var historyList: some View {
+        VStack(alignment: .leading, spacing: .hearth500) {
+            if conversations.isEmpty && coachThreads.isEmpty {
+                Text("Nothing here yet. Your Circle conversations and coach chats show up as you go.")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+            }
+            if !conversations.isEmpty { circleSection }
+            if !coachThreads.isEmpty { coachSection }
+        }
+    }
+
+    private var circleSection: some View {
+        VStack(alignment: .leading, spacing: .hearth300) {
+            historyHeader("In your Circle", link: "Go to Circle", action: goToCircle)
+            ForEach(conversations) { conversation in
+                circleRow(conversation)
+            }
+        }
+    }
+
+    private func circleRow(_ conversation: CircleConversation) -> some View {
+        Button { route = .circleThread(conversation.id) } label: {
+            historyCard {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text(conversation.title)
+                        .font(.hearthChipLabel)
+                        .tracking(-0.14)
+                        .foregroundColor(.inkHeader)
+                        .multilineTextAlignment(.leading)
+                    Text(conversationSubtitle(conversation))
+                        .font(.hearthBodyMD)
+                        .foregroundColor(.inkSecondary)
+                        .multilineTextAlignment(.leading)
+                    AvatarStack(initials: conversation.participants?.map(\.initials) ?? [])
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(conversation.title). \(conversationSubtitle(conversation))")
+    }
+
+    /// The design's "M started this — 4 replies", from the server's own
+    /// `starter_name` / `reply_count`.
+    private func conversationSubtitle(_ conversation: CircleConversation) -> String {
+        let starter = (conversation.starterIsMe ?? false)
+            ? "You"
+            : (conversation.starterName ?? "Someone")
+        let replies = conversation.replyCount ?? 0
+        let repliesText = replies == 1 ? "1 reply" : "\(replies) replies"
+        return "\(starter) started this — \(repliesText)"
+    }
+
+    private var coachSection: some View {
+        VStack(alignment: .leading, spacing: .hearth300) {
+            historyHeader("Coach advice", link: "Chat with the coach",
+                          action: { Task { await openCoach(thread: nil) } })
+            ForEach(coachThreads) { thread in
+                coachRow(thread)
+            }
+        }
+    }
+
+    private func coachRow(_ thread: CoachThreadSummary) -> some View {
+        Button { Task { await openCoach(thread: thread) } } label: {
+            historyCard {
+                HStack(alignment: .top, spacing: .hearth400) {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Text(thread.title)
+                            .font(.hearthChipLabel)
+                            .tracking(-0.14)
+                            .foregroundColor(.inkHeader)
+                            .multilineTextAlignment(.leading)
+                        if !thread.summary.isEmpty {
+                            Text(thread.summary)
+                                .font(.hearthBodyMD)
+                                .foregroundColor(.inkSecondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                    Spacer(minLength: .hearth400)
+                    if openingThreadID == thread.conversationId {
+                        ProgressView().scaleEffect(0.7)
+                    }
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(openingThreadID != nil)
+        .accessibilityLabel("\(thread.title). \(thread.summary)")
+    }
+
+    private func historyHeader(_ title: String, link: String,
+                               action: @escaping () -> Void) -> some View {
+        HStack {
+            Text(title)
+                .font(.hearthBodySMBold)
+                .foregroundColor(.inkHeader)
+            Spacer(minLength: .hearth400)
+            Button(action: action) {
+                Text(link)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkHeader)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// The measured history card: white, r12, 9pt padding, 1px `#A4A4A4`
+    /// stroke. `borderStrong` (#8A8275) is the nearest token — a touch warmer
+    /// and slightly darker, which reads correctly on this cream.
+    private func historyCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                    .fill(Color.bgElevated)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                            .stroke(Color.borderStrong, lineWidth: 1)
+                    )
+            )
+    }
+
+    /// Open the coach. `thread == nil` is the "Chat with the coach" link — the
+    /// current conversation, untouched. A thread opens THAT conversation, which
+    /// the server also makes active, so the parent's next message continues it.
+    private func openCoach(thread: CoachThreadSummary?) async {
+        guard let baseURL = configuration.baseURL else { return }
+        if coachVM == nil {
+            let vm = ChatViewModel(configuration: configuration, mode: .coaching)
+            vm.setUserID(userID)
+            coachVM = vm
+        }
+        if let thread {
+            openingThreadID = thread.conversationId
+            defer { openingThreadID = nil }
+            guard let stored = try? await CoachThreadService.open(
+                conversationID: thread.conversationId, userID: userID, baseURL: baseURL
+            ) else {
+                interestError = "Couldn't open that conversation. Try again."
+                return
+            }
+            coachVM?.replaceMessages(stored.map {
+                ChatMessage(role: $0.role == "user" ? .user : .assistant, content: $0.content)
+            })
+        }
+        route = .coach
+    }
+
+    /// "Go to Circle" — the sheet can't switch tabs itself, so it uses the SAME
+    /// deep-link path a tapped Circle push takes: stash the conversation id and
+    /// post the notification `MainTabView` already listens for. Closing the
+    /// sheet first is what lets the tab change be visible.
+    ///
+    /// It needs a conversation to route to, which is why the link only renders
+    /// when the parent has at least one.
+    private func goToCircle() {
+        guard let newest = conversations.first else { return }
+        UserDefaults.standard.set(newest.id, forKey: AppDelegate.pendingDMDeeplinkKey)
+        dismiss()
+        NotificationCenter.default.post(name: .dmPushTapped, object: nil)
+    }
+
     // MARK: - Family interests
 
     private var interestsSection: some View {
@@ -222,19 +443,14 @@ struct AccountSheetView: View {
             // Inter w700 13, `inkHeader`, mixed case, NO icon — the sheet's own
             // header style, which differs from the dashboard masthead
             // (`hearthSectionHeader`). Verified separately against `account 02`.
-            HStack {
-                Text("Family interests")
-                    .font(.hearthBodySMBold)
-                    .foregroundColor(.inkHeader)
-                Spacer(minLength: .hearth400)
-                // Every known option already fits in the grid below — no
-                // destination to push to yet. Same stubbed-CTA pattern as
-                // HomeView's first-run "Add event" row.
-                Text("See all")
-                    .font(.hearthBodySM)
-                    .foregroundColor(.inkHeader)
-                    .accessibilityHint("Not yet available")
-            }
+            //
+            // The design's "See all" is deliberately NOT drawn: every known
+            // option already fits the grid below, so the link would have nothing
+            // to open. A dead "See all" is the exact class of control this pass
+            // is removing.
+            Text("Family interests")
+                .font(.hearthBodySMBold)
+                .foregroundColor(.inkHeader)
             LazyVGrid(
                 columns: Array(repeating: GridItem(.flexible(), spacing: .hearth300), count: 3),
                 spacing: .hearth300
@@ -279,14 +495,22 @@ struct AccountSheetView: View {
         }
     }
 
+    /// The design's five rows are Username / MVP Email / Password / Plan /
+    /// Billing. Real-data-only (Miguel's call, 2026-08-09): MVP has no
+    /// account email endpoint and no password concept (Apple/Google sign-in
+    /// only), so those two rows are OMITTED rather than shown as "Not set" —
+    /// a fabricated-looking blank still implies the field exists. Plan and
+    /// Billing show the smoke-and-mirrors plan picked at the onboarding
+    /// paywall, IF one was ever persisted (`@AppStorage`, set at Buy-tap);
+    /// existing installs that never saw the paywall show neither row.
     private var accountCard: some View {
         VStack(alignment: .leading, spacing: .hearth400) {
-            // MVP Email / Password / Plan / Billing have no backing field
-            // anywhere in the app today (no auth email, no billing state) —
-            // per CLAUDE.md, omitted rather than faked. Username is the
-            // parent's profile display name, the closest real identity value.
-            if !parentDisplayName.isEmpty {
-                accountRow(label: "Username", value: parentDisplayName)
+            accountRow(label: "Username", value: parentDisplayName)
+            if !pickedPlanName.isEmpty {
+                accountRow(label: "Plan", value: pickedPlanName)
+            }
+            if !pickedPlanBilling.isEmpty {
+                accountRow(label: "Billing", value: pickedPlanBilling)
             }
         }
         .padding(.hearth600)
@@ -298,14 +522,15 @@ struct AccountSheetView: View {
     }
 
     private func accountRow(label: String, value: String) -> some View {
-        HStack {
+        HStack(alignment: .top, spacing: .hearth700) {
             Text(label)
-                .font(.hearthBodySM)
+                .font(.hearthBodyMD)
                 .foregroundColor(.inkMuted)
-            Spacer()
-            Text(value)
-                .font(.hearthBodyMD.weight(.semibold))
-                .foregroundColor(.inkPrimary)
+            Spacer(minLength: .hearth400)
+            Text(value.isEmpty ? "Not set" : value)
+                .font(.hearthBodyMD)
+                .foregroundColor(value.isEmpty ? .inkPlaceholder : .inkMuted)
+                .multilineTextAlignment(.trailing)
         }
     }
 
@@ -348,6 +573,30 @@ struct AccountSheetView: View {
         .padding(.vertical, .hearth500)
         .background(Color.bgCard)
         .disabled(session.isWorking)
+    }
+}
+
+// MARK: - Avatar stack (the Circle rows' participants)
+
+/// The measured 28pt teal circles with a white w900 initial. Drawn edge to edge
+/// rather than overlapped, per `account 03`.
+private struct AvatarStack: View {
+    let initials: [String]
+
+    var body: some View {
+        HStack(spacing: .hearth300) {
+            ForEach(Array(initials.prefix(4).enumerated()), id: \.offset) { _, letter in
+                Circle()
+                    .fill(Color.accentDefault)
+                    .frame(width: 28, height: 28)
+                    .overlay(
+                        Text(String(letter.prefix(1)).uppercased())
+                            .font(.hearthBodySM.weight(.black))
+                            .foregroundColor(.inkOnCard)
+                    )
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -416,8 +665,19 @@ private struct InterestTile: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: .hearth300) {
-                Image(systemName: symbol)
-                    .font(.system(size: 20, weight: .medium))
+                // Same Figma-exported vector set as the onboarding free-time
+                // grid (`ProfileOptions.interestIconName`); SF Symbol
+                // fallback for any option without a matching icon export.
+                if let iconName = ProfileOptions.interestIconName(for: label) {
+                    Image(iconName)
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 20, height: 20)
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 20, weight: .medium))
+                }
                 Text(label)
                     .font(.hearthBodySMBold)
                     .multilineTextAlignment(.center)
@@ -440,5 +700,6 @@ private struct InterestTile: View {
             .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusControl, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }

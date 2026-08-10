@@ -21,6 +21,13 @@ struct AgentView: View {
     /// Message ids whose reply was saved this session (fills the bookmark).
     @State private var savedReplyIds: Set<UUID> = []
 
+    /// Presents the past-conversations list (coach-002).
+    @State private var isShowingHistory = false
+
+    /// True while `POST /coach/threads/close` is in flight, so a double tap on
+    /// "new conversation" can't open two threads.
+    @State private var isClosingConversation = false
+
     private var lastAssistantMessage: ChatMessage? {
         viewModel.messages.last(where: {
             $0.role == .assistant && !$0.content.isEmpty && !$0.isStreaming
@@ -57,7 +64,21 @@ struct AgentView: View {
             VStack(spacing: 0) {
                 Divider()
                     .background(Color.borderHairline)
-                messageList
+                // The Coach tab's own empty state (coach-000). Home's inline
+                // coachSection banner is a different surface and is untouched.
+                if viewModel.messages.isEmpty {
+                    ScrollView {
+                        CoachFirstRunView(
+                            userID: viewModel.currentUserID,
+                            baseURL: configuration.baseURL,
+                            onSend: { prompt in viewModel.send(prompt) }
+                        )
+                        .padding(.top, .hearth700)
+                    }
+                    .background(Color.bgCanvas)
+                } else {
+                    messageList
+                }
                 inputArea
             }
             // The coach cites content as [Title](mvp://library/{id}) (see
@@ -111,8 +132,17 @@ struct AgentView: View {
                         }
                         .accessibilityLabel("Talk to your coach")
                         Button {
-                            withAnimation(.hearthBase) { viewModel.resetConversation() }
-                            contentCards = [:]
+                            isShowingHistory = true
+                        } label: {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundColor(.inkPrimary)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("Past conversations")
+                        Button {
+                            startNewConversation()
                         } label: {
                             Image(systemName: "square.and.pencil")
                                 .font(.system(size: 17, weight: .medium))
@@ -120,6 +150,8 @@ struct AgentView: View {
                                 .frame(width: 44, height: 44)
                                 .contentShape(Rectangle())
                         }
+                        .disabled(isClosingConversation)
+                        .accessibilityLabel("New conversation")
                         Button {
                             saveLastReply()
                         } label: {
@@ -147,6 +179,32 @@ struct AgentView: View {
                         }
                     )
                     .environmentObject(contentVM)
+                }
+            }
+            .sheet(isPresented: $isShowingHistory) {
+                if let baseURL = configuration.baseURL {
+                    NavigationStack {
+                        CoachHistoryView(
+                            userID: viewModel.currentUserID,
+                            baseURL: baseURL,
+                            onOpen: { stored in
+                                // Replace the visible transcript with the
+                                // reopened conversation's. The server already
+                                // made it the active thread, so the next
+                                // message continues THIS conversation.
+                                viewModel.replaceMessages(
+                                    stored.map {
+                                        ChatMessage(
+                                            role: $0.role == "user" ? .user : .assistant,
+                                            content: $0.content
+                                        )
+                                    }
+                                )
+                                contentCards = [:]
+                                savedReplyIds = []
+                            }
+                        )
+                    }
                 }
             }
             .alert(
@@ -213,16 +271,27 @@ struct AgentView: View {
 
     // MARK: - User Message (Pill Style)
 
+    /// Measured `coach-001`: the parent's bubble is the DEEP teal (`#0A5570`),
+    /// pad 16 all round, radius 12 with an 8pt bottom-LEADING corner (the
+    /// speech-tail), body 14 in the warm cream — not the mid teal at r=20 this
+    /// shipped with.
     private func userMessageRow(_ message: ChatMessage) -> some View {
         HStack {
             Spacer(minLength: 60)
             Text(message.content)
-                .font(.hearthBodyMD)
-                .foregroundColor(.inkOnPhotoLight)
-                .padding(.horizontal, .hearth500)
-                .padding(.vertical, .hearth400)
-                .background(Color.accentDefault)
-                .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous))
+                .font(.hearthBodySM)
+                .foregroundColor(.inkOnCard)
+                .padding(.hearth500)
+                .background(Color.accentDeep)
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: .hearthRadiusTile,
+                        bottomLeadingRadius: .hearthRadiusButton,
+                        bottomTrailingRadius: .hearthRadiusTile,
+                        topTrailingRadius: .hearthRadiusTile,
+                        style: .continuous
+                    )
+                )
         }
         .padding(.horizontal, .hearth500)
         .padding(.vertical, .hearth300)
@@ -278,25 +347,22 @@ struct AgentView: View {
 
     // MARK: - Input Area
 
+    /// Measured `coach-001`/`coach-000`: the composer sits on the DEEP teal
+    /// strip (`#0A5570`) with 16pt top corners — not a hairline divider on
+    /// canvas — and the field inside is white at r=8, body 14. The disclaimer
+    /// stays below the strip on canvas (it isn't part of the frame's strip).
     private var inputArea: some View {
-        VStack(spacing: .hearth300) {
-            Divider()
-                .background(Color.borderHairline)
-
+        VStack(spacing: 0) {
             HStack(alignment: .bottom, spacing: .hearth400) {
                 // Text field
                 TextField("Type your question", text: $messageText, axis: .vertical)
-                    .font(.hearthBodyMD)
+                    .font(.hearthBodySM)
                     .foregroundColor(.inkPrimary)
                     .padding(.horizontal, .hearth500)
                     .padding(.vertical, .hearth400)
                     .background(
-                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                        RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous)
                             .fill(Color.bgElevated)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                                    .stroke(Color.borderStrong, lineWidth: 1)
-                            )
                     )
                     .lineLimit(1...4)
                     .disabled(viewModel.isSending || configuration.baseURL == nil || viewModel.isUserIDMissing)
@@ -319,27 +385,69 @@ struct AgentView: View {
                 }
                 .disabled(!canSend)
             }
-            .padding(.horizontal, .hearth500)
-            .padding(.top, .hearth300)
+            // Measured strip padding: 12 top / 18 sides.
+            .padding(.horizontal, .hearth600)
+            .padding(.vertical, .hearth400)
+            .background(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: .hearthRadiusCard,
+                    bottomLeadingRadius: 0,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: .hearthRadiusCard,
+                    style: .continuous
+                )
+                .fill(Color.accentDeep)
+                .ignoresSafeArea(edges: .bottom)
+            )
 
             // Disclaimer — wrap, don't truncate. "Learn more" sits inline at
             // the end via Markdown so the whole disclaimer stays one logical
-            // sentence that can break at the page gutter.
+            // sentence that can break at the page gutter. Rendered ON the deep
+            // strip (cream ink, 7.44:1) so the strip owns the bottom edge as in
+            // the frame.
             Text((try? AttributedString(
                 markdown: "Coach can make mistakes and is not a crisis line. [Learn more](mvp://learn-more)"
             )) ?? AttributedString("Coach can make mistakes and is not a crisis line."))
                 .font(.hearthCaptionMono)
-                .foregroundColor(.inkMuted)
-                .tint(.inkMuted)
+                .foregroundColor(.inkOnCard)
+                .tint(.inkOnCard)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, .hearth500)
                 .padding(.bottom, .hearth300)
+                .background(Color.accentDeep.ignoresSafeArea(edges: .bottom))
         }
-        .background(Color.bgCanvas)
     }
 
     // MARK: - Helpers
+
+    /// Close the current conversation (keeping it) and start a new one.
+    ///
+    /// This used to be `viewModel.resetConversation()`, which WIPED the thread.
+    /// The server is the source of truth for which conversation is active, so
+    /// the local transcript is only cleared once the close is confirmed —
+    /// otherwise a failed call would leave the app showing an empty chat that
+    /// still appends to the old conversation (CLAUDE.md: don't navigate away
+    /// assuming success).
+    private func startNewConversation() {
+        guard !isClosingConversation,
+              let baseURL = configuration.baseURL,
+              !viewModel.currentUserID.isEmpty else { return }
+        isClosingConversation = true
+        Task {
+            do {
+                _ = try await CoachThreadService.closeCurrent(
+                    userID: viewModel.currentUserID, baseURL: baseURL
+                )
+                withAnimation(.hearthBase) { viewModel.clearVisibleMessages() }
+                contentCards = [:]
+                savedReplyIds = []
+            } catch {
+                viewModel.errorMessage = "Couldn't start a new conversation. Try again."
+            }
+            isClosingConversation = false
+        }
+    }
 
     private var canSend: Bool {
         !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

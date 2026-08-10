@@ -302,7 +302,67 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
     # must not share a txn with an UPDATE).
     (22, "tracked_activities.add_fit_fields",
      lambda con: _add_tracked_activity_fit_fields(con)),
+    # beta-v1 sprint 2 Phase B, three things in ONE version:
+    #
+    #   1. circle_requests — "type an email, and if that person already exists
+    #      in the system, pull them from the system." The match creates a
+    #      PENDING request; only the recipient's accept binds the mutual
+    #      household_members link. The table is NEW, so CIRCLE_DDL's
+    #      CREATE-IF-NOT-EXISTS (indexes included) already covers fresh DBs;
+    #      this mirrors it for existing volumes.
+    #   2/3. articles.kicker + articles.age_range — the article eyebrow
+    #      ("WE TRIED IT · Ages 3–7 · 4 min"), consumed by Phase E. Both are
+    #      also in CONTENT_DDL so a fresh install gets them from the DDL; the
+    #      guarded ALTERs converge an existing DB on the same shape.
+    #
+    # Pure DDL, no UPDATE anywhere: a CREATE INDEX must never share a
+    # transaction with an UPDATE (memory debugging_duckdb_ddl_gotchas — that
+    # combination took prod down on 2026-07-11). Column-presence guards make
+    # the whole body idempotent across a replay.
+    (23, "circle_requests.create_and_article_eyebrow",
+     lambda con: _add_circle_requests_and_article_eyebrow(con)),
 ]
+
+
+def _add_circle_requests_and_article_eyebrow(con) -> None:
+    """Migration v23: the Circle request inbox + the article eyebrow columns."""
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS circle_requests ("
+        "id TEXT PRIMARY KEY, from_user_id TEXT NOT NULL, to_user_id TEXT NOT NULL, "
+        "from_member_id TEXT, status TEXT NOT NULL DEFAULT 'pending', "
+        "created_at TIMESTAMPTZ DEFAULT now(), responded_at TIMESTAMPTZ)"
+    )
+    # Indexes live HERE, with the CREATE TABLE, so an existing volume gets them
+    # in the same committed transaction as the table they index.
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_circle_requests_to "
+        "ON circle_requests (to_user_id, status)"
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_circle_requests_from "
+        "ON circle_requests (from_user_id, status)"
+    )
+    # NOTE: "at most one PENDING row per (from_user_id, to_user_id)" is NOT a
+    # DB constraint — DuckDB has no partial unique index, and a full UNIQUE on
+    # the pair would wrongly block a re-ask after a decline. It is enforced in
+    # app/circle.py (find_pending_circle_request before insert), the same
+    # posture as the one-draft-per-slug rule in LEGAL_DDL.
+    article_cols = {
+        r[0] for r in con.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'articles'"
+        ).fetchall()
+    }
+    # DuckDB rejects a constraint on ADD COLUMN outright — "Adding columns with
+    # constraints not yet supported" — so `NOT NULL DEFAULT ''` is a parser error,
+    # not a no-op. It raised on every fresh-DB bootstrap. `DEFAULT ''` alone
+    # backfills existing rows with '' and is what the reader needs: the eyebrow
+    # joins only non-empty parts, so '' and NULL render the same. The bootstrap
+    # DDL still declares NOT NULL, so new installs keep the stricter column.
+    if "kicker" not in article_cols:
+        con.execute("ALTER TABLE articles ADD COLUMN kicker TEXT DEFAULT ''")
+    if "age_range" not in article_cols:
+        con.execute("ALTER TABLE articles ADD COLUMN age_range TEXT DEFAULT ''")
 
 # FK-safe order: children (reactions, messages, replies) before their parents.
 _RETIRED_TABLES = (

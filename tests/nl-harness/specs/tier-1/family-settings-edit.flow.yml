@@ -1,0 +1,52 @@
+spec:
+  name: family-settings-edit
+  tier: 1
+  modules: [profile]
+  intent: >
+    The consolidated Settings tab root (round-2, 2026-08-09 — 7 cards
+    replacing the old plain-List SettingsView) reads GET /profile and
+    GET /household/members, and its "Language at home" and "MVP coach
+    settings" cards write two profile fields (secondary_language,
+    guidance_style) that previously had no editor. This pins the read+write
+    contract those two cards depend on: an edit sticks, round-trips through a
+    fresh GET, and nothing else in the profile is disturbed by it.
+
+  personas:
+    parent:
+      preset: existing-parent
+
+  preconditions: []
+
+  invariants:
+    - "GET /profile returns the parent's current secondary_language and guidance_style"
+    - "PATCH /profile with secondary_language + guidance_style returns 200 and echoes both back"
+    - "A follow-up GET /profile reflects the same two values"
+    - "PATCHing an unrelated field (name) does not reset secondary_language or guidance_style"
+    - "GET /household/members succeeds for the authenticated parent (the roster the circle/care-giver cards read)"
+
+  boundary_contracts:
+    - endpoint: GET /profile
+      as: parent
+      status: 200
+      response_includes: [parent]
+
+    - endpoint: PATCH /profile
+      as: parent
+      body: { secondary_language: "es", guidance_style: "concise scripts" }
+      status: 200
+      response_includes: [parent]
+
+    - endpoint: GET /profile
+      as: parent
+      status: 200
+      response_includes: [parent]
+
+    - endpoint: GET /household/members
+      as: parent
+      status: 200
+      response_includes: [members]
+
+    - endpoint: PATCH /profile
+      as: anonymous
+      body: { secondary_language: "es" }
+      status: 401

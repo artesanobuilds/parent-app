@@ -41,6 +41,25 @@ struct OnboardingDraft: Codable, Equatable {
     /// without a resolved account is walked back to sign-in.
     var stepIndex: Int = 0
 
+    /// Schema version for what `stepIndex` means within `OnboardingView.flow`.
+    /// A draft saved by pre-versioning code has NO `flowVersion` key at all,
+    /// so `load()` backfills this default of 1 — that absence IS the
+    /// migration signal. Bumped by `OnboardingView.resumeIfNeeded`, the ONLY
+    /// writer of this field, right after it applies (or skips) each one-time
+    /// remap. Never set this anywhere else, or a legitimately-current index
+    /// could be shifted twice.
+    ///
+    ///  - v1 — predates the `.plan` (paywall) step (added 2026-08-09).
+    ///  - v2 — `.plan` sits directly before `.warmup`, at the END of the
+    ///    funnel, after `.signIn`. Every v1 index at or after the old warmup
+    ///    position shifts by +1 to land in v2.
+    ///  - v3 — `.plan` and `.signIn` moved to the START of the funnel, before
+    ///    `.splash` and the questionnaire (2026-08-09, same day — the design
+    ///    changed again within hours). This is a REORDER, not an insertion,
+    ///    so v2→v3 re-homes onto the SAME NAMED STEP rather than shifting a
+    ///    position.
+    var flowVersion: Int = 1
+
     // Screen 1 — "Let's get acquainted"
     var parentName: String = ""
     var household: String = ""

@@ -28,6 +28,8 @@ export function ArticleEditor() {
     category: '',
     author: '',
     read_time: '',
+    kicker: '',
+    age_range: '',
     summary: '',
     tags: [],
     content: '',

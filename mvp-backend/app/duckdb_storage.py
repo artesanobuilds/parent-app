@@ -115,7 +115,8 @@ class DuckDBStorage(StorageBackend):
     Tables:
         user_data(user_id, name, data, updated_at)
         categories(id, name, emoji, description)
-        articles(id, category, title, subtitle, emoji, author, read_time, summary, tags, content, created_at, updated_at)
+        articles(id, category, title, subtitle, emoji, author, read_time, kicker, age_range,
+                 summary, tags, content, created_at, updated_at)
     """
 
     DDL = """
@@ -148,6 +149,8 @@ class DuckDBStorage(StorageBackend):
         summary     TEXT NOT NULL DEFAULT '',
         tags        TEXT[] NOT NULL DEFAULT [],
         content     TEXT NOT NULL DEFAULT '',
+        kicker      TEXT NOT NULL DEFAULT '',  -- eyebrow label, e.g. WE TRIED IT (added in migration v23)
+        age_range   TEXT NOT NULL DEFAULT '',  -- eyebrow age band, e.g. Ages 3-7 (added in migration v23)
         created_at  TIMESTAMPTZ DEFAULT now(),
         updated_at  TIMESTAMPTZ DEFAULT now()
     );
@@ -405,6 +408,35 @@ class DuckDBStorage(StorageBackend):
 
     CREATE INDEX IF NOT EXISTS idx_invite_tokens_user
         ON invite_tokens (user_id, created_at);
+
+    -- Circle requests (beta-v1 sprint 2). "Type an email, and if that person
+    -- is already an MVP user, pull them from the system instead of inviting
+    -- them." A match does NOT create the mutual link - it creates a PENDING
+    -- request here, and only the recipient's accept binds
+    -- household_members.member_user_id on both sides. Same authorization
+    -- primitive as invite_tokens, with the consent step made explicit.
+    --
+    -- from_member_id is the REQUESTER's own roster row (nullable): the row is
+    -- created up front so the contacts list can show a pending contact, but a
+    -- request may outlive it (the requester can delete the member).
+    -- No semicolons anywhere in these comments - the bootstrap splits the DDL
+    -- constant on the semicolon, so one inside a comment truncates a statement.
+    CREATE TABLE IF NOT EXISTS circle_requests (
+        id             TEXT PRIMARY KEY,       -- stable uuid
+        from_user_id   TEXT NOT NULL,          -- who asked
+        to_user_id     TEXT NOT NULL,          -- who must consent
+        from_member_id TEXT,                   -- requester's household_members.id, NULL if it went away
+        status         TEXT NOT NULL DEFAULT 'pending',  -- pending|accepted|declined
+        created_at     TIMESTAMPTZ DEFAULT now(),
+        responded_at   TIMESTAMPTZ
+    );
+
+    -- The inbox query: "my pending inbound requests".
+    CREATE INDEX IF NOT EXISTS idx_circle_requests_to
+        ON circle_requests (to_user_id, status);
+
+    CREATE INDEX IF NOT EXISTS idx_circle_requests_from
+        ON circle_requests (from_user_id, status);
     """
 
     # Family Companion (kid agent + handoff). Real tables, not blobs:
@@ -1059,6 +1091,9 @@ class DuckDBStorage(StorageBackend):
         ("circle_participants", "circle_participants.parquet"),
         ("circle_messages", "circle_messages.parquet"),
         ("invite_tokens", "invite_tokens.parquet"),
+        # Circle requests (beta-v1 sprint 2) — the email-match consent step.
+        # A pending request IS a user's intent; losing it strands the ask.
+        ("circle_requests", "circle_requests.parquet"),
     ]
 
     def __init__(self, db_path: Path | str | None = None) -> None:
@@ -1290,20 +1325,21 @@ class DuckDBStorage(StorageBackend):
         where = f"WHERE {' AND '.join(clauses)} " if clauses else ""
         params.append(limit)
         rows = self._con.execute(
-            "SELECT id, category, title, subtitle, emoji, author, read_time, summary, tags "
+            "SELECT id, category, title, subtitle, emoji, author, read_time, kicker, age_range, summary, tags "
             f"FROM articles {where}ORDER BY id LIMIT ?",
             params,
         ).fetchall()
         return [
             {"id": r[0], "category": r[1], "title": r[2], "subtitle": r[3],
-             "emoji": r[4], "author": r[5], "read_time": r[6], "summary": r[7],
-             "tags": list(r[8]) if r[8] else []}
+             "emoji": r[4], "author": r[5], "read_time": r[6],
+             "kicker": r[7], "age_range": r[8], "summary": r[9],
+             "tags": list(r[10]) if r[10] else []}
             for r in rows
         ]
 
     def get_article(self, article_id: str) -> Optional[Dict[str, Any]]:
         row = self._con.execute(
-            "SELECT id, category, title, subtitle, emoji, author, read_time, summary, tags, content "
+            "SELECT id, category, title, subtitle, emoji, author, read_time, kicker, age_range, summary, tags, content "
             "FROM articles WHERE id = ?",
             [article_id],
         ).fetchone()
@@ -1311,13 +1347,14 @@ class DuckDBStorage(StorageBackend):
             return None
         return {
             "id": row[0], "category": row[1], "title": row[2], "subtitle": row[3],
-            "emoji": row[4], "author": row[5], "read_time": row[6], "summary": row[7],
-            "tags": list(row[8]) if row[8] else [], "content": row[9],
+            "emoji": row[4], "author": row[5], "read_time": row[6],
+            "kicker": row[7], "age_range": row[8], "summary": row[9],
+            "tags": list(row[10]) if row[10] else [], "content": row[11],
         }
 
     def search_articles(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         rows = self._con.execute(
-            "SELECT id, category, title, subtitle, emoji, author, read_time, summary, tags "
+            "SELECT id, category, title, subtitle, emoji, author, read_time, kicker, age_range, summary, tags "
             "FROM articles "
             "WHERE title ILIKE ? OR subtitle ILIKE ? OR summary ILIKE ? OR array_to_string(tags, ' ') ILIKE ? "
             "ORDER BY id LIMIT ?",
@@ -1325,8 +1362,9 @@ class DuckDBStorage(StorageBackend):
         ).fetchall()
         return [
             {"id": r[0], "category": r[1], "title": r[2], "subtitle": r[3],
-             "emoji": r[4], "author": r[5], "read_time": r[6], "summary": r[7],
-             "tags": list(r[8]) if r[8] else []}
+             "emoji": r[4], "author": r[5], "read_time": r[6],
+             "kicker": r[7], "age_range": r[8], "summary": r[9],
+             "tags": list(r[10]) if r[10] else []}
             for r in rows
         ]
 
@@ -1343,16 +1381,17 @@ class DuckDBStorage(StorageBackend):
         # and rejects the plain columns ("column title must appear in the GROUP
         # BY clause"), so the bare-HAVING form 500s on every call.
         sql = (
-            f"SELECT id, category, title, subtitle, emoji, author, read_time, summary, tags "
-            f"FROM (SELECT id, category, title, subtitle, emoji, author, read_time, summary, tags, "
+            f"SELECT id, category, title, subtitle, emoji, author, read_time, kicker, age_range, summary, tags "
+            f"FROM (SELECT id, category, title, subtitle, emoji, author, read_time, kicker, age_range, summary, tags, "
             f"({cases}) AS score FROM articles) "
             f"WHERE score > 0 ORDER BY score DESC LIMIT ?"
         )
         rows = self._con.execute(sql, words + [limit]).fetchall()
         return [
             {"id": r[0], "category": r[1], "title": r[2], "subtitle": r[3],
-             "emoji": r[4], "author": r[5], "read_time": r[6], "summary": r[7],
-             "tags": list(r[8]) if r[8] else []}
+             "emoji": r[4], "author": r[5], "read_time": r[6],
+             "kicker": r[7], "age_range": r[8], "summary": r[9],
+             "tags": list(r[10]) if r[10] else []}
             for r in rows
         ]
 
@@ -1360,11 +1399,14 @@ class DuckDBStorage(StorageBackend):
 
     def create_article(self, data: Dict[str, Any]) -> Dict[str, Any]:
         self._con.execute(
-            "INSERT INTO articles (id, category, title, subtitle, emoji, author, read_time, summary, tags, content, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())",
+            "INSERT INTO articles (id, category, title, subtitle, emoji, author, read_time, "
+            "kicker, age_range, summary, tags, content, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())",
             [data["id"], data["category"], data["title"], data.get("subtitle", ""),
              data.get("emoji", ""), data.get("author", "MVP Editorial"),
-             data.get("read_time", ""), data.get("summary", ""),
+             data.get("read_time", ""),
+             data.get("kicker", ""), data.get("age_range", ""),
+             data.get("summary", ""),
              data.get("tags", []), data.get("content", "")],
         )
         return self.get_article(data["id"])
@@ -1375,7 +1417,8 @@ class DuckDBStorage(StorageBackend):
             return None
         fields = []
         values = []
-        for key in ("category", "title", "subtitle", "emoji", "author", "read_time", "summary", "tags", "content"):
+        for key in ("category", "title", "subtitle", "emoji", "author", "read_time",
+                    "kicker", "age_range", "summary", "tags", "content"):
             if key in data:
                 fields.append(f"{key} = ?")
                 values.append(data[key])
@@ -1897,6 +1940,44 @@ class DuckDBStorage(StorageBackend):
                 "provider_sub": provider_sub, "email": email,
                 "email_verified": email_verified}
 
+    def find_identity_user_by_verified_email(self, email: Optional[str]) -> Optional[str]:
+        """Return the user_id of the SINGLE account with a VERIFIED identity at
+        `email`, or None on zero or many matches.
+
+        Exists so a parent who signs up with Apple, then later signs in with
+        Google using the SAME email, lands on the SAME account instead of
+        minting a second one — the "sent me to onboarding" bug (2026-08-09):
+        Google was creating a fresh user_id with zero profile data even though
+        an Apple-identity account with the same address and a real profile
+        already existed.
+
+        Verified-only, both directions:
+          - the STORED identity we match against must have `email_verified`,
+            so a spoofed/unconfirmed address on file can't be used to hijack
+            an existing family, and
+          - the CALLER only invokes this when the INCOMING provider payload
+            also says the email is verified (checked by the caller, not here) —
+            an unverified incoming email must never be trusted enough to link
+            into someone else's account.
+
+        Exactly one match required, same idiom as `find_account_by_email`
+        (auth_identities) and `find_unclaimed_account_by_email`
+        (consent_records): an ambiguous email is treated as no match rather
+        than guessing, because auto-linking the wrong family is much worse
+        than making the parent create a second account and merge later.
+        """
+        if not email:
+            return None
+        needle = email.strip().lower()
+        if not needle:
+            return None
+        rows = self._con.execute(
+            "SELECT DISTINCT user_id FROM auth_identities "
+            "WHERE lower(trim(email)) = ? AND email_verified",
+            [needle],
+        ).fetchall()
+        return rows[0][0] if len(rows) == 1 else None
+
     def user_has_any_identity(self, user_id: str) -> bool:
         row = self._con.execute(
             "SELECT 1 FROM auth_identities WHERE user_id = ? LIMIT 1", [user_id],
@@ -2311,6 +2392,20 @@ class DuckDBStorage(StorageBackend):
             self._con.execute(
                 "UPDATE invite_tokens SET claimed_by = NULL WHERE claimed_by = ?",
                 [user_id],
+            )
+
+            # Circle requests in EITHER direction die with the account
+            # (CLAUDE.md: deletes cascade). A surviving row would point a
+            # stranger's inbox at a dead user_id — and a re-issued id would
+            # inherit an accept it never asked for.
+            deleted["circle_requests"] = self._con.execute(
+                "SELECT count(*) FROM circle_requests "
+                "WHERE from_user_id = ? OR to_user_id = ?",
+                [user_id, user_id],
+            ).fetchone()[0]
+            self._con.execute(
+                "DELETE FROM circle_requests WHERE from_user_id = ? OR to_user_id = ?",
+                [user_id, user_id],
             )
 
             for table in [
@@ -4996,6 +5091,116 @@ class DuckDBStorage(StorageBackend):
         self._con.execute(
             "UPDATE invite_tokens SET claimed_by = ?, claimed_at = now() WHERE token = ?",
             [claimed_by, token],
+        )
+
+    # circle_requests -------------------------------------------------------
+    # The email-match path: a request is a PENDING intent, never a link. Only
+    # `accept_circle_request` in app/circle.py binds the mutual roster rows,
+    # through the same helper claim_invite uses. This layer is deliberately
+    # dumb about who may accept what.
+
+    _REQUEST_COLS = (
+        "id", "from_user_id", "to_user_id", "from_member_id", "status",
+        "created_at", "responded_at",
+    )
+
+    def _request_row(self, row: Any) -> Dict[str, Any]:
+        return self._row_to_dict(
+            self._REQUEST_COLS, row, ts_cols=("created_at", "responded_at"),
+        )
+
+    def find_account_by_email(self, email: Optional[str]) -> Optional[str]:
+        """Return the user_id of the SINGLE account whose auth identity email
+        matches `email` (case-insensitive). None on zero OR many matches.
+
+        `auth_identities.email` is nullable and neither lowercased nor unique
+        (Apple private relay means absence is normal, and one person can hold
+        an Apple AND a Google identity), so "exactly one DISTINCT user_id"
+        is the only safe predicate — same idiom as
+        `find_unclaimed_account_by_email`. An ambiguous match is treated as no
+        match: never auto-link a family on a fuzzy hit."""
+        if not email:
+            return None
+        needle = email.strip().lower()
+        if not needle:
+            return None
+        rows = self._con.execute(
+            "SELECT DISTINCT user_id FROM auth_identities "
+            "WHERE lower(trim(email)) = ? AND email IS NOT NULL",
+            [needle],
+        ).fetchall()
+        return rows[0][0] if len(rows) == 1 else None
+
+    def create_circle_request(
+        self, *, from_user_id: str, to_user_id: str,
+        from_member_id: Optional[str] = None,
+    ) -> str:
+        import uuid
+        request_id = f"cr-{uuid.uuid4().hex[:12]}"
+        self._con.execute(
+            "INSERT INTO circle_requests (id, from_user_id, to_user_id, "
+            "from_member_id, status, created_at) VALUES (?, ?, ?, ?, 'pending', now())",
+            [request_id, from_user_id, to_user_id, from_member_id],
+        )
+        return request_id
+
+    def get_circle_request(self, request_id: str) -> Optional[Dict[str, Any]]:
+        row = self._con.execute(
+            f"SELECT {', '.join(self._REQUEST_COLS)} FROM circle_requests WHERE id = ?",
+            [request_id],
+        ).fetchone()
+        return self._request_row(row) if row else None
+
+    def find_pending_circle_request(
+        self, *, from_user_id: str, to_user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """The duplicate-pending guard's lookup. DuckDB has no partial unique
+        index, so "one pending per ordered pair" is enforced in code (here plus
+        the caller); this is the read half."""
+        row = self._con.execute(
+            f"SELECT {', '.join(self._REQUEST_COLS)} FROM circle_requests "
+            "WHERE from_user_id = ? AND to_user_id = ? AND status = 'pending' "
+            "ORDER BY created_at LIMIT 1",
+            [from_user_id, to_user_id],
+        ).fetchone()
+        return self._request_row(row) if row else None
+
+    def list_circle_requests_for_user(
+        self, to_user_id: str, *, status: str = "pending"
+    ) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            f"SELECT {', '.join(self._REQUEST_COLS)} FROM circle_requests "
+            "WHERE to_user_id = ? AND status = ? ORDER BY created_at DESC",
+            [to_user_id, status],
+        ).fetchall()
+        return [self._request_row(r) for r in rows]
+
+    def pending_outbound_member_ids(self, from_user_id: str) -> List[str]:
+        """Roster rows of MINE that are waiting on the other person — either a
+        pending circle_request, or an unclaimed invite token. One query per
+        request instead of a per-row lookup, so `GET /household/members` stays
+        one round trip.
+
+        This exists because the client would otherwise have to GUESS at pending
+        (the first iOS pass inferred it from `email != nil`, which marks every
+        hand-typed nanny as "waiting on them" forever, and the fallback was
+        parsing the `notes` prose)."""
+        rows = self._con.execute(
+            "SELECT DISTINCT from_member_id FROM circle_requests "
+            "WHERE from_user_id = ? AND status = 'pending' "
+            "  AND from_member_id IS NOT NULL "
+            "UNION "
+            "SELECT DISTINCT member_id FROM invite_tokens "
+            "WHERE user_id = ? AND claimed_by IS NULL AND member_id IS NOT NULL "
+            "  AND (expires_at IS NULL OR expires_at > now())",
+            [from_user_id, from_user_id],
+        ).fetchall()
+        return [r[0] for r in rows if r[0]]
+
+    def set_circle_request_status(self, request_id: str, status: str) -> None:
+        self._con.execute(
+            "UPDATE circle_requests SET status = ?, responded_at = now() WHERE id = ?",
+            [status, request_id],
         )
 
     # logistics_assignments -------------------------------------------------

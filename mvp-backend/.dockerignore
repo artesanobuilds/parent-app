@@ -10,6 +10,12 @@ parent-dashboard/dist
 .git
 data/*.duckdb
 data/*.duckdb.wal
+# Durable LangGraph agent checkpoints (app/checkpointing.py): every parent's and
+# kid's verbatim conversation. Prod keeps its own copy on the Railway volume —
+# baking a dev copy into the image would seed prod with local conversations.
+data/agent_checkpoints.sqlite
+data/agent_checkpoints.sqlite-wal
+data/agent_checkpoints.sqlite-shm
 
 # Runtime / user-state parquets: NEVER ship local dev DB state to prod.
 # These tables are created by DDL on bootstrap (duckdb_storage.py) and prod
@@ -67,3 +73,5 @@ data/circle_conversations.parquet
 data/circle_participants.parquet
 data/circle_messages.parquet
 data/invite_tokens.parquet
+# Circle requests (beta-v1 sprint 2) — pending consent state, user data.
+data/circle_requests.parquet

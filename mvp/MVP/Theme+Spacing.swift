@@ -33,11 +33,14 @@ enum Hearth {
         static let none:    CGFloat = 0
         static let sm:      CGFloat = 4     // chips, tags, small pills
         static let button:  CGFloat = 8     // beta-v1 CTAs — Greg's buttons are tight rects, not capsules
+        static let seeAll:  CGFloat = 10    // COMING UP "See all" affordance (Dashboard 1)
         static let control: CGFloat = 10    // segmented control + interest tiles (measured)
+        static let tile:    CGFloat = 12    // kid photo tile on Home (Dashboard 1/2 measured)
         static let md:      CGFloat = 12    // inputs, small cards
         static let card:    CGFloat = 18    // article + account cards (measured)
         static let lg:      CGFloat = 20    // primary cards
         static let sheet:   CGFloat = 24    // the account/profile sheet (measured)
+        static let section: CGFloat = 28    // Home section card ground (Dashboard 1/2 measured)
         static let xl:      CGFloat = 28    // hero tiles, modal sheets
         static let pill:    CGFloat = 999   // filter/selection chips, avatar rings
     }
@@ -72,14 +75,17 @@ extension CGFloat {
     static let hearth1100: CGFloat = Hearth.space.s1100
     static let hearth1200: CGFloat = Hearth.space.s1200
 
-    static let hearthRadiusNone:   CGFloat = Hearth.radius.none
-    static let hearthRadiusSm:     CGFloat = Hearth.radius.sm
-    static let hearthRadiusButton: CGFloat = Hearth.radius.button
+    static let hearthRadiusNone:    CGFloat = Hearth.radius.none
+    static let hearthRadiusSm:      CGFloat = Hearth.radius.sm
+    static let hearthRadiusButton:  CGFloat = Hearth.radius.button
+    static let hearthRadiusSeeAll:  CGFloat = Hearth.radius.seeAll
     static let hearthRadiusControl: CGFloat = Hearth.radius.control
-    static let hearthRadiusCard:   CGFloat = Hearth.radius.card
-    static let hearthRadiusSheet:  CGFloat = Hearth.radius.sheet
-    static let hearthRadiusMd:     CGFloat = Hearth.radius.md
-    static let hearthRadiusLg:   CGFloat = Hearth.radius.lg
-    static let hearthRadiusXl:   CGFloat = Hearth.radius.xl
-    static let hearthRadiusPill: CGFloat = Hearth.radius.pill
+    static let hearthRadiusTile:    CGFloat = Hearth.radius.tile
+    static let hearthRadiusMd:      CGFloat = Hearth.radius.md
+    static let hearthRadiusCard:    CGFloat = Hearth.radius.card
+    static let hearthRadiusLg:      CGFloat = Hearth.radius.lg
+    static let hearthRadiusSheet:   CGFloat = Hearth.radius.sheet
+    static let hearthRadiusSection: CGFloat = Hearth.radius.section
+    static let hearthRadiusXl:      CGFloat = Hearth.radius.xl
+    static let hearthRadiusPill:    CGFloat = Hearth.radius.pill
 }

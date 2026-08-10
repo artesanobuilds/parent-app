@@ -11,6 +11,11 @@ struct ParentProfileDTO: Codable {
     var postalCode: String? = nil
     var country: String? = nil
     var primaryLanguage: String? = nil
+    /// Backend field `secondary_language` (`profiling.py`) existed before this
+    /// DTO did but had no iOS surface — every bilingual household's second
+    /// language was silently dropped by GET /profile. Added for the
+    /// consolidated Settings "Language at home" card.
+    var secondaryLanguage: String? = nil
     var parentAgeRange: String? = nil
     var adultsInHousehold: Int? = nil
     var householdStructure: String? = nil
@@ -45,6 +50,7 @@ struct ParentProfileDTO: Codable {
         case familyActivities = "family_activities"
         case postalCode = "postal_code"
         case primaryLanguage = "primary_language"
+        case secondaryLanguage = "secondary_language"
         case parentAgeRange = "parent_age_range"
         case adultsInHousehold = "adults_in_household"
         case householdStructure = "household_structure"
@@ -83,6 +89,11 @@ struct ChildProfileDTO: Codable {
     var sleepRoutine: String? = nil
     var healthNotes: String? = nil
     var triggers: [String]? = nil
+    /// The design's kid editor rows. `dislikes` and a per-kid `goals` now exist
+    /// on the backend `ChildProfile`, so these rows store under their own names
+    /// instead of borrowing `triggers`/`motivators`.
+    var dislikes: [String]? = nil
+    var goals: [String]? = nil
     var escalationPattern: String? = nil
     var calmingStrategies: [String]? = nil
     var recentChanges: [String]? = nil
@@ -96,7 +107,7 @@ struct ChildProfileDTO: Codable {
 
     enum CodingKeys: String, CodingKey {
         case name, pronouns, age, temperament, interests, strengths, challenges
-        case triggers, motivators, neurodiversity
+        case triggers, motivators, neurodiversity, dislikes, goals
         case avatarUrl = "avatar_url"
         case gradeBand = "grade_band"
         case academicStrengths = "academic_strengths"

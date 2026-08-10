@@ -262,3 +262,134 @@ def test_delete_family_cascades_to_members_and_links():
             assert server.storage_backend.list_household_members("hh-gone") == []
     finally:
         _reconnect_shared_storage(server)
+
+
+def test_personality_is_a_role_scoped_choice_attribute():
+    """Greg's `circle member` frame asks for Spirited / Easy-going / Sensitive.
+
+    It is a real attribute key with `kind: "choice"`, NOT a marker line inside
+    `notes` — the first iOS pass stored it as `"Personality: Spirited"` prefixed
+    into the note, which collides with whatever the parent types there and makes
+    a structured value unqueryable. The client must be able to learn the field's
+    existence AND its options from the server, so it never re-lists the roles.
+    """
+    from fastapi.testclient import TestClient
+    import app.server as server
+
+    try:
+        with TestClient(server.app) as client:
+            _reconnect_shared_storage(server)
+            auth = _parent(client, "hh-person", "Personality Parent")
+
+            nanny = _add(client, auth, display_name="Ana", role="nanny",
+                         attributes={"personality": ["Easy-going"]})
+            assert nanny["attributes"]["personality"] == ["Easy-going"]
+            field = next(f for f in nanny["attribute_fields"]
+                         if f["key"] == "personality")
+            assert field["kind"] == "choice"
+            assert field["choices"] == ["Spirited", "Easy-going", "Sensitive"]
+            assert field["label"] == "Personality"
+
+            # Every field carries both keys, so strict iOS Codable never sees a
+            # missing one (a nil there empties the whole list).
+            for f in nanny["attribute_fields"]:
+                assert "kind" in f and "choices" in f, f
+            likes = next(f for f in nanny["attribute_fields"] if f["key"] == "likes")
+            assert likes["kind"] == "list" and likes["choices"] == []
+
+            # NOT on the family-side roles — the design drops it there.
+            me = _add(client, auth, display_name="Miguel", role="me")
+            assert "personality" not in {f["key"] for f in me["attribute_fields"]}
+            assert client.patch(f"/household/members/{me['id']}",
+                                json={"attributes": {"personality": ["Spirited"]}},
+                                headers=auth).status_code == 400
+
+            # Clearing it is an empty list, and it does not touch `notes`.
+            r = client.patch(f"/household/members/{nanny['id']}",
+                             json={"attributes": {"personality": []}}, headers=auth)
+            assert r.status_code == 200, r.text
+            assert r.json()["member"]["attributes"]["personality"] == []
+            assert not (r.json()["member"]["notes"] or "")
+    finally:
+        _reconnect_shared_storage(server)
+
+
+def test_pending_is_server_computed_for_both_waiting_paths():
+    """`pending` means "waiting on the other person" — a pending Circle request
+    OR an unclaimed invite. ONE flag for both on purpose: distinguishing them
+    would leak whether the typed email matched an existing account, which is the
+    property POST /circle/contacts exists to protect.
+
+    It has to be server-computed. The client's fallback was `email != nil`,
+    which marks a hand-typed nanny as "waiting on them" forever.
+    """
+    from fastapi.testclient import TestClient
+    import app.server as server
+
+    try:
+        with TestClient(server.app) as client:
+            _reconnect_shared_storage(server)
+            auth = _parent(client, "hh-pend", "Pending Parent")
+            other = _parent(client, "hh-pend-peer", "Peer Parent")
+
+            # A plain address-book entry WITH an email is not pending: nobody
+            # was asked. This is the case the client heuristic got wrong.
+            typed = _add(client, auth, display_name="Ana", role="nanny",
+                         email="ana@example.com")
+            assert typed["pending"] is False
+
+            # An unclaimed invite makes its roster row pending…
+            invited = _add(client, auth, display_name="Gran", role="grandparent")
+            r = client.post("/circle/invites",
+                            json={"member_id": invited["id"]}, headers=auth)
+            assert r.status_code == 200, r.text
+            token = r.json()["token"]
+            rows = {m["id"]: m for m in
+                    client.get("/household/members", headers=auth).json()["members"]}
+            assert rows[invited["id"]]["pending"] is True
+            assert rows[typed["id"]]["pending"] is False
+
+            # …and stops being pending once it is claimed.
+            assert client.post(f"/circle/invites/{token}/claim",
+                              headers=other).status_code == 200
+            rows = {m["id"]: m for m in
+                    client.get("/household/members", headers=auth).json()["members"]}
+            assert rows[invited["id"]]["pending"] is False
+            assert rows[invited["id"]]["in_circle"] is True
+
+            # The single-member route agrees with the list route.
+            one = client.get(f"/household/members/{typed['id']}",
+                             headers=auth).json()["member"]
+            assert one["pending"] is False
+    finally:
+        _reconnect_shared_storage(server)
+
+
+def test_caregiver_capable_roles_match_ios_settings_filter():
+    """The consolidated Settings screen's "Your circle" and "Care givers"
+    cards (round-2, 2026-08-09) filter the roster client-side to
+    {"nanny", "grandparent", "neighbour", "other"} — the non-parent roles —
+    since the member payload carries no explicit caregiver flag. That set was
+    copied from `household.py`'s `LOGISTICS_ROLES` / `_CAREGIVER_ROLE` at
+    write time. Pin it here so a future role added to either backend mapping
+    without a matching iOS update fails loudly instead of silently vanishing
+    from those two cards."""
+    from app.household import MEMBER_ROLES, LOGISTICS_ROLES, _CAREGIVER_ROLE
+
+    parent_roles = {"me", "spouse", "co_parent"}
+    ios_circle_and_caregiver_roles = {"nanny", "grandparent", "neighbour", "other"}
+
+    # Every selectable non-child role is either a parent role or one iOS
+    # treats as circle/caregiver — nothing silently falls through the cracks.
+    assert set(MEMBER_ROLES) - {"child"} == parent_roles | ios_circle_and_caregiver_roles
+
+    # LOGISTICS_ROLES (the backend's caregiver-mirroring gate) is a superset
+    # of iOS's non-parent set — every role iOS treats as a caregiver really
+    # does get mirrored into `caregivers` server-side.
+    assert ios_circle_and_caregiver_roles <= set(LOGISTICS_ROLES)
+
+    # Every non-parent logistics role has a caregiver-table mapping (the
+    # actual mirror target), so the roster-to-caregivers projection iOS
+    # assumes exists really does.
+    for role in ios_circle_and_caregiver_roles:
+        assert role in _CAREGIVER_ROLE, f"{role} has no _CAREGIVER_ROLE mapping"

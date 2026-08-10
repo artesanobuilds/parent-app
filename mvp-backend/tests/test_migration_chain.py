@@ -209,6 +209,72 @@ def test_v22_backfills_without_clobbering_existing_rows():
     assert row["decision_rationale"] == "We picked it for the location."
 
 
+def test_v23_applies_to_a_populated_db_and_is_idempotent():
+    """v23 does THREE things in one version: creates circle_requests (+ its two
+    indexes) and adds articles.kicker / articles.age_range.
+
+    Both hazards are here. The table already exists on a fresh DB (CIRCLE_DDL
+    creates it before migrations run), and the two columns already exist in
+    CONTENT_DDL — so an unguarded ALTER would raise "Column already exists" on
+    every new install. And the body must stay pure DDL: a CREATE INDEX cannot
+    share a transaction with an UPDATE on a table that has rows.
+    """
+    store = _fresh()
+    con = store._con
+
+    # Rows in both tables the migration touches.
+    store.create_article({
+        "id": "chain-article", "category": "sleep", "title": "Bedtime",
+        "subtitle": "", "summary": "", "content": "body", "tags": [],
+    })
+    store.create_circle_request(
+        from_user_id="v23-from", to_user_id="v23-to", from_member_id="v23-member",
+    )
+
+    con.execute("DELETE FROM schema_migrations WHERE version >= 23")
+    run_migrations(con)
+
+    article_cols = {
+        r[0] for r in con.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'articles'"
+        ).fetchall()
+    }
+    assert {"kicker", "age_range"} <= article_cols
+    assert con.execute("SELECT count(*) FROM articles").fetchone()[0] == 1, (
+        "v23 collateral-damaged an existing article row"
+    )
+    assert con.execute("SELECT count(*) FROM circle_requests").fetchone()[0] == 1, (
+        "v23 re-ran the CREATE TABLE destructively over existing requests"
+    )
+    assert 23 in _applied(con)
+
+    # Idempotent: a replay must not raise on the present table or columns.
+    con.execute("DELETE FROM schema_migrations WHERE version >= 23")
+    run_migrations(con)
+    assert con.execute("SELECT count(*) FROM circle_requests").fetchone()[0] == 1
+
+
+def test_v23_circle_requests_survives_a_reboot():
+    """The bootstrap/migration ordering trap in the other direction from v21:
+    CIRCLE_DDL and the migration must converge on the SAME shape, so a second
+    boot over the same file neither loses the table nor re-raises."""
+    path = str(Path(tempfile.mkdtemp()) / "v23-reboot.duckdb")
+    first = DuckDBStorage(db_path=path)
+    request_id = first.create_circle_request(
+        from_user_id="reboot-from", to_user_id="reboot-to",
+    )
+    assert 23 in _applied(first._con)
+    first.close()
+
+    second = DuckDBStorage(db_path=path)
+    assert "circle_requests" in _live_tables(second._con)
+    row = second.get_circle_request(request_id)
+    assert row is not None and row["status"] == "pending"
+    assert row["from_user_id"] == "reboot-from" and row["to_user_id"] == "reboot-to"
+    second.close()
+
+
 def test_a_partially_stamped_db_completes(monkeypatch):
     """A crash mid-chain leaves some versions stamped and some not.
 

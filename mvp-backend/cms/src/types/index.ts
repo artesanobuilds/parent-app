@@ -14,6 +14,10 @@ export interface Article {
   emoji: string;
   author: string;
   read_time: string;
+  /** Eyebrow label above the headline, e.g. "WE TRIED IT". */
+  kicker: string;
+  /** Eyebrow age band, e.g. "Ages 3–7". */
+  age_range: string;
   summary: string;
   tags: string[];
   content?: string;

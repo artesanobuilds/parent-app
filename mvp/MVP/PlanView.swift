@@ -92,7 +92,7 @@ struct PlanView: View {
                 Task { await viewModel.loadPlan() }
             }) {
                 NavigationStack {
-                    ProfileSettingsView(configuration: configuration, userID: userID)
+                    FamilySettingsView(configuration: configuration, userID: userID)
                 }
             }
             .sheet(isPresented: $showDoors) {
@@ -268,13 +268,61 @@ struct PlanView: View {
 
     // MARK: - Segments
 
+    /// Activities whose next step still needs the parent to do something. Drives
+    /// the count badge on the Plan segment.
+    private var needsActionCount: Int {
+        viewModel.board?.stages
+            .flatMap { $0.activities }
+            .filter { $0.nextStep.action != "none" }
+            .count ?? 0
+    }
+
+    /// One pill in the segment track. Extracted because inlining it made
+    /// `segmentPicker`'s body long enough that the type-checker gave up — which
+    /// SwiftUI reports as "unable to type-check in reasonable time", not as a
+    /// size problem.
+    @ViewBuilder
+    private func segmentButton(_ seg: PlanSegment) -> some View {
+        let selected = segment == seg
+        let badge = seg == .plan ? needsActionCount : 0
+        Button {
+            segment = seg
+        } label: {
+            HStack(spacing: .hearth300) {
+                Text(seg.label)
+                    .font(.hearthBodySMBold)
+                if badge > 0 {
+                    Text("\(badge)")
+                        .font(.hearthLabel)
+                        .foregroundColor(.inkOnCard)
+                        .padding(.horizontal, .hearth300)
+                        .padding(.vertical, 1)
+                        .background(Color.accentDeep, in: Capsule())
+                }
+            }
+            .foregroundColor(.accentOnCanvas)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, .hearth400)
+            .background(Capsule().fill(selected ? Color.bgElevated : Color.clear))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(badge > 0 ? "\(seg.label), \(badge) need action" : seg.label)
+        .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
+    }
+
+    /// Measured `planner 3` / `planner 5`: a pill TRACK (`bg/selected`, r=100,
+    /// 2pt inset) with a white selected pill, not a system segmented control.
+    /// It has to be custom because the design puts a count badge inside the
+    /// "Plan" label — a `.pickerStyle(.segmented)` renders only text and images,
+    /// so a badge placed there would silently never appear.
     private var segmentPicker: some View {
-        Picker("View", selection: $segment) {
+        HStack(spacing: .hearth300) {
             ForEach(PlanSegment.allCases) { seg in
-                Text(seg.label).tag(seg)
+                segmentButton(seg)
             }
         }
-        .pickerStyle(.segmented)
+        .padding(2)
+        .background(Capsule().fill(Color.bgSelected))
         .padding(.horizontal, .hearth700)
         .padding(.top, .hearth500)
         .padding(.bottom, .hearth400)
@@ -488,17 +536,24 @@ struct PlanView: View {
         Button(action: action) {
             HStack(spacing: 4) {
                 Text(label)
-                    .font(.hearthBodySM)
-                    .foregroundColor(selected ? .inkOnPhotoLight : .inkPrimary)
+                    .font(.hearthChipLabel)
+                    .foregroundColor(selected ? Color.inkOnCard : Color.accentDefault)
                 if let c = count {
                     Text("(\(c))")
-                        .font(.hearthBodySM)
-                        .foregroundColor(selected ? .inkOnPhotoLight : .inkSecondary)
+                        .font(.hearthChipLabel)
+                        .foregroundColor(selected ? Color.inkOnCard : Color.accentDefault)
                 }
             }
-            .padding(.horizontal, .hearth400)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(selected ? Color.accentDefault : Color.accentTint))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(selected ? Color.accentDefault : Color.bgCoachBanner)
+                    .overlay(
+                        Capsule()
+                            .stroke(selected ? Color.clear : Color.accentDefault, lineWidth: 0.82)
+                    )
+            )
         }
         .buttonStyle(.plain)
     }
@@ -509,13 +564,27 @@ struct PlanView: View {
         } label: {
             HStack(spacing: .hearth400) {
                 if searchCollapsed {
-                    let zip = viewModel.locationQuery.isEmpty ? "98332" : viewModel.locationQuery
-                    let radius = viewModel.radiusMiles
-                    Text("\(zip) · \(radius) mi · camps, classes & more")
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.accentDefault)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Find more activities")
+                            .font(.hearthBodyMD.weight(.semibold))
+                            .foregroundColor(.inkPrimary)
+                        // The design's subtitle reads "98332 · 25 mi · camps,
+                        // classes & more". 98332 is Greg's SAMPLE zip — never
+                        // fall back to it, or a parent who hasn't set a location
+                        // reads a stranger's postcode as their own.
+                        Text(
+                            viewModel.locationQuery.isEmpty
+                                ? "Set a location · camps, classes & more"
+                                : "\(viewModel.locationQuery) · \(viewModel.radiusMiles) mi · camps, classes & more"
+                        )
                         .font(.hearthBodyMD)
                         .foregroundColor(.inkSecondary)
+                    }
                     Spacer()
-                    Image(systemName: "chevron.down")
+                    Image(systemName: "arrow.right")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.inkMuted)
                 } else {
@@ -1443,7 +1512,10 @@ struct PlanView: View {
                 }
             }
         }
-        .padding(.hearth500)
+        // Measured (sprint-2 planner cards): pad 20 — `hearth600` is the exact
+        // token; the shipped card used `hearth500` (16), a tighter card than
+        // every other planner surface.
+        .padding(.hearth600)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(cardBackground)
     }

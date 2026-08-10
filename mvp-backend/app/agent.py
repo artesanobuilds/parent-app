@@ -37,7 +37,6 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from langchain_openai import ChatOpenAI
 from langchain_tavily import TavilySearch
-from langgraph.checkpoint.memory import MemorySaver
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
     ContextEditingMiddleware,
@@ -52,6 +51,7 @@ from pydantic import BaseModel
 
 from app.profiling import profiling_service
 from app.content import content_catalog_for_prompt
+from app.checkpointing import checkpointer
 from app.cos.prompt import COS_ROLE_SECTIONS
 
 logger = logging.getLogger(__name__)
@@ -68,8 +68,11 @@ llm = ChatOpenAI(model=model_name, stream_usage=True)
 search = TavilySearch(max_results=2)
 tools = [search]
 
-# Initialize Memory
-checkpointer = MemorySaver()
+# Memory. `checkpointer` is re-exported (imported above) rather than
+# constructed here: it is now the ONE durable SQLite saver shared by this agent,
+# the kid agent and the onboarding agent, so agent context survives a restart
+# (app/checkpointing.py). The symbol name is unchanged — every call site still
+# passes `checkpointer=checkpointer`.
 
 # Load soul file once at module level
 _soul_path = Path(__file__).resolve().parent.parent / "soul.md"
@@ -87,9 +90,19 @@ logger.info("Loaded soul.md (%d chars)", len(_soul_content))
 # spoken turn and a typed turn have different pacing, and unifying them is an
 # open product decision (memory `project_voice_v2_state`).
 #
-# Nothing durable is keyed on these: the checkpointer is an in-process
-# MemorySaver, and the transcripts the clients render live in `chat_threads` /
-# `cos_messages`, which are untouched by this change.
+# These ids ARE durable now (app/checkpointing.py) — the checkpointer is a
+# SQLite saver on the Railway volume, not an in-process MemorySaver. Renaming a
+# thread key therefore orphans real conversation history rather than costing
+# nothing, and `DELETE /family/{user_id}` has to sweep them (that sweep matches
+# on the `{user_id}:` / `onboarding:` / `kid:` segment, so keep user_id first).
+#
+# Coach is no longer ONE text thread: sprint-2 gives the parent a list of named
+# past conversations, so the merged text thread is now per-CONVERSATION
+# (`{user}:parent:{conversation_id}`) with the legacy un-suffixed
+# `{user}:parent` kept as the conversation every existing beta parent is
+# already mid-way through. Voice deliberately stays on `{user}:default`:
+# voice and text threads are separate (memory `project_voice_v2_state`) and
+# voice conversations must NOT appear in the coach history list.
 
 PARENT_TEXT_THREAD = "parent"
 PARENT_VOICE_THREAD = "voice"
@@ -97,14 +110,27 @@ PARENT_VOICE_THREAD = "voice"
 _TEXT_SURFACES = ("chat", "cos")
 
 
-def thread_key(user_id: str, surface: str, thread_id: str | None = None) -> str:
+def thread_key(
+    user_id: str,
+    surface: str,
+    thread_id: str | None = None,
+    conversation_id: str | None = None,
+) -> str:
     """The LangGraph thread id for one parent on one surface.
 
-    ``surface`` is "chat" or "cos" (both collapse to the ONE merged text
-    thread, ignoring the client's thread_id — see above), or "voice" which
-    keeps its own per-``thread_id`` namespace exactly as before.
+    ``surface`` is "chat" or "cos" (both collapse to the parent's ONE ACTIVE
+    text conversation, ignoring the client's per-install ``thread_id``), or
+    "voice", which keeps its own per-``thread_id`` namespace.
+
+    ``conversation_id`` names WHICH text conversation. Omitted means the
+    legacy/default one, so every pre-sprint-2 thread keeps resolving to the
+    same key. It is a stable minted id (`app/coach_threads.new_conversation_id`)
+    and never a display title — a rename must not move the thread (CLAUDE.md:
+    key by stable IDs, not editable display names).
     """
     if surface in _TEXT_SURFACES:
+        if conversation_id:
+            return f"{user_id}:{PARENT_TEXT_THREAD}:{conversation_id}"
         return f"{user_id}:{PARENT_TEXT_THREAD}"
     return f"{user_id}:{thread_id or 'default'}"
 

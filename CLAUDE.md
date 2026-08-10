@@ -70,6 +70,14 @@ bugs**. Each rule earns its place. Follow them.
 - Prod host: `https://mvp-backend-production-8678.up.railway.app`.
 
 ## Deploy (Railway)
+- **Follow `docs/history/deploy-runbook.md`** — the ordered steps, each of which exists because
+  skipping it broke something. Do not improvise a deploy.
+- **Back up prod state BEFORE any deploy carrying a migration**, and record it:
+  `BACKUP_REASON="..." ./tools/backup-prod.sh` → appends to `docs/history/prod-backups.md`
+  (tracked in git; the parquet files never are). For anything destructive that backup is the
+  ONLY rollback that exists — `railway up` on a reverted tree does not un-apply a migration.
+- **Ship iOS to TestFlight FIRST when a deploy removes a route, column or shape** — the shipped
+  app is still calling the old one.
 - `cd mvp-backend && railway up --detach`. **Prod deploys need explicit user authorization
   each time.**
 - `railway up` uploads the working tree — never let user-state `data/*.parquet` get baked
