@@ -34,6 +34,11 @@ mvp-backend/*.parquet
 # Generated eval report dumps
 mvp-backend/data/eval_reports/
 
+# Pre-deploy prod snapshots (tools/backup-prod.sh output) — real family PII in
+# parquet form. The LEDGER (docs/history/prod-backups.md) is the tracked
+# record; the snapshot files themselves never are.
+snapshots/
+
 # Editor / agent tooling
 .vscode/
 .vix/
