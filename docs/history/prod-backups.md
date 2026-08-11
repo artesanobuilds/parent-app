@@ -97,3 +97,15 @@ locks that.
     - `8ee35ebdcc23b41758cdc5c3542ee5f1 articles.parquet`
     - `99e73584ea36c5ecbba6ea4264fb8da3 categories.parquet`
 
+
+## 2026-08-11T00:32:42Z
+
+- **Reason:** pre-deploy: migration v24 UPDATE-backfills tracked_activities.details_json from activity_candidates (v24 is the only schema-adjacent change; user_data also snapshotted because the post-deploy step deletes two orphaned rows from it)
+- **Remote:** `https://mvp-backend-production-8678.up.railway.app`
+- **Location:** `/Users/miguelalvarado/Desktop/mvp-prod-snapshot-2026-08-11`
+- **Captured:** tracked_activities.parquet activity_candidates.parquet
+- **Not on the volume (expected for a new table):** user_data.parquet
+- **md5:**
+    - `1b07e44db46c63ef80f2124092fdc6ba tracked_activities.parquet`
+    - `5cce16087f16b579124fa2386fd541fa activity_candidates.parquet`
+
