@@ -109,3 +109,14 @@ locks that.
     - `1b07e44db46c63ef80f2124092fdc6ba tracked_activities.parquet`
     - `5cce16087f16b579124fa2386fd541fa activity_candidates.parquet`
 
+
+## 2026-08-22T05:19:20Z
+
+- **Reason:** pre-deploy: heisman sprint-01 (additive — anon extraction endpoints, seed keys, admin reset; no new migration beyond live v24)
+- **Remote:** `https://mvp-backend-production-8678.up.railway.app`
+- **Location:** `/Users/miguelalvarado/Desktop/mvp-prod-snapshot-2026-08-22`
+- **Captured:** articles.parquet categories.parquet
+- **md5:**
+    - `8ee35ebdcc23b41758cdc5c3542ee5f1 articles.parquet`
+    - `99e73584ea36c5ecbba6ea4264fb8da3 categories.parquet`
+
