@@ -65,6 +65,10 @@ struct CircleView: View {
                 }
             }
             .background(Color.bgCanvas.ignoresSafeArea())
+            // iOS 26.4 glass chrome: repaint the nav container too, or its
+            // system-light ground shows as white strips at the sides — see
+            // HearthNavGround.swift.
+            .hearthNavGround(.bgCanvas)
             .navigationTitle("Circle")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.bgCanvas, for: .navigationBar)

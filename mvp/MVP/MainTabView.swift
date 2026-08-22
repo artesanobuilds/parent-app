@@ -207,7 +207,12 @@ struct MainTabView: View {
                          onOpenPlan: { withAnimation(.hearthFast) { selectedTab = .planning } })
                 .navigationTitle("Settings")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbarBackground(Color.bgCanvas, for: .navigationBar)
+                // iOS 26.4 glass chrome: repaint the nav container too — see
+                // HearthNavGround.swift. Settings' body ground is bgSober
+                // (FamilySettingsView:116), so its chrome matches THAT token —
+                // bgCanvas here left a visible darker band across the top.
+                .hearthNavGround(.bgSober)
+                .toolbarBackground(Color.bgSober, for: .navigationBar)
                 .toolbarBackground(.visible, for: .navigationBar)
         }
     }

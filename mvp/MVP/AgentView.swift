@@ -166,6 +166,8 @@ struct AgentView: View {
                     }
                 }
             }
+            // iOS 26.4 glass chrome: repaint the nav container too — see HearthNavGround.swift.
+            .hearthNavGround(.bgCanvas)
             .toolbarBackground(Color.bgCanvas, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .fullScreenCover(isPresented: $isShowingVoice) {

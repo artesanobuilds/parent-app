@@ -595,6 +595,8 @@ struct CategoryDetailView: View {
         .trackScreen("category_detail")
         .navigationTitle(category.map { "\($0.emoji) \($0.name)" } ?? "Category")
         .navigationBarTitleDisplayMode(.large)
+        // iOS 26.4 glass chrome: repaint the nav container too — see HearthNavGround.swift.
+        .hearthNavGround(.bgCanvas)
         .toolbarBackground(Color.bgCanvas, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .withContentNavigationDestinations()

@@ -177,6 +177,8 @@ struct ForYouView: View {
         .background(Color.bgCanvas.ignoresSafeArea())
         .navigationTitle("For you")
         .navigationBarTitleDisplayMode(.inline)
+        // iOS 26.4 glass chrome: repaint the nav container too — see HearthNavGround.swift.
+        .hearthNavGround(.bgCanvas)
         .toolbarBackground(Color.bgCanvas, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .trackScreen("for_you")

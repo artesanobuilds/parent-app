@@ -42,6 +42,8 @@ struct LibraryView: View {
             .background(Color.bgCanvas.ignoresSafeArea())
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.inline)
+            // iOS 26.4 glass chrome: repaint the nav container too — see HearthNavGround.swift.
+            .hearthNavGround(.bgCanvas)
             .toolbarBackground(Color.bgCanvas, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .withContentNavigationDestinations()

@@ -28,6 +28,8 @@ struct ChatView: View {
                 inputArea
             }
             .navigationTitle(agentMode.navTitle)
+            // iOS 26.4 glass chrome: repaint the nav container too — see HearthNavGround.swift.
+            .hearthNavGround(.bgCanvas)
             .toolbarBackground(Color.bgCanvas, for: .navigationBar)
             .toolbarColorScheme(.light, for: .navigationBar)
             .toolbar {
