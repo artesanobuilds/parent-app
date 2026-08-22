@@ -143,6 +143,11 @@ struct OnboardingView: View {
     /// here (never written) so the post-auth tail can authenticate.
     @AppStorage("user_name") private var accountID = ""
 
+    /// Set when the account wall's sign-in lands on an account that ALREADY
+    /// has a family (returning parent). The funnel then merges the draft via
+    /// the seed and, after the plan screen, finishes to Home — no warmup.
+    @State private var returningParent = false
+
     // Ring state (the post-auth `.warmup` beat — unchanged machinery).
     @State private var ringSteps: [WarmupStep] = OnboardingWarmupService.placeholderSteps
     @State private var ringPercent: Int = 0
@@ -303,13 +308,11 @@ struct OnboardingView: View {
                                 // merge server-side, new names add, board rows
                                 // dedupe. onSeed stashes durably BEFORE the
                                 // POST, so a kill mid-flight retries on the
-                                // next launch. Then finish directly — a
-                                // returning parent skips paywall + warmup.
-                                Task {
-                                    _ = await onSeed(collectedData())
-                                    onFinish()
-                                }
-                                return
+                                // next launch. The plan screen still shows
+                                // (login → plan is the one place it appears);
+                                // its Buy finishes to Home instead of warmup.
+                                returningParent = true
+                                Task { _ = await onSeed(collectedData()) }
                             }
                             goToNext()
                         },
@@ -537,13 +540,16 @@ struct OnboardingView: View {
     // entry point, not this funnel step). Heisman moved it POST-auth (it
     // "secures" the account the parent just created).
     private var planScreen: some View {
-        PaywallView(
-            onContinue: { goToNext() },
-            showsCloseButton: false,
+        // Heisman "choose a plan" (frames 29:3563/29:3635) — the smoke-and-
+        // mirrors money screen. Shown ONLY here, right after account creation:
+        // a new parent continues into warmup; a returning parent (whose seed
+        // is already merging in the background) goes straight to Home.
+        HeismanPlanView(
+            onContinue: {
+                if returningParent { onFinish() } else { goToNext() }
+            },
             buyAccessibilityHint: "Continues to the next step"
         )
-            .screen
-            .trackScreen("onboarding_plan")
     }
 
     // MARK: - Screen: the progress ring (post-auth seed)
