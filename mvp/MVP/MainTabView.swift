@@ -138,8 +138,12 @@ struct MainTabView: View {
 
     private var tabContent: some View {
         ZStack(alignment: .bottom) {
-            // Full-bleed cream base so the bottom safe area (home-indicator strip)
-            // behind the tab bar is canvas-colored, not the default white.
+            // Page ground for every tab. Deliberately `bgCanvas`, NOT the tab
+            // bar's lighter `bgCard`: this sits behind the whole screen, so
+            // making it bgCard let the lighter tone show through as vertical
+            // strips down the left/right edges of any tab whose own
+            // background doesn't bleed to the safe-area edges (Circle did).
+            // The light band belongs to the BAR, and is painted there.
             Color.bgCanvas.ignoresSafeArea()
 
             // Tab content
@@ -210,17 +214,30 @@ struct MainTabView: View {
 
     // MARK: - Custom Tab Bar
     //
-    // Rebuilt 2026-08-08 to match the Figma component (`1014:7078`) exactly,
-    // measured off the node data and a 3x render rather than inferred:
+    // Rebuilt 2026-08-08 to match the Figma component (`1014:7078`), then
+    // re-verified 2026-08-09 (round 3) against the measured Tab Bar instance
+    // `890:2780` (also present, identically, in the Dashboard 1, coach-000,
+    // and planner 01/02 frames — this component is shared everywhere):
     //
     //   * container padding top 16 / bottom 25 / horizontal 20, itemSpacing 8,
     //     SPACE_BETWEEN
-    //   * the selected tab is a rounded-rect `bgSelected` (#DAE0DF) fill wrapping
-    //     the icon AND label together — not a small pill behind the icon alone
+    //   * the selected tab is a CAPSULE (67×52, r=100) `bgSelected` (#DAE0DF)
+    //     fill wrapping the icon AND label together — round 3 built this as a
+    //     r=26 rounded rect, which is visibly tighter/squarer than the frame's
+    //     fully-stadium pill
     //   * EVERY label and icon is the same teal. The design has no muted
     //     inactive state; selection is carried by the pill only
-    //   * NO top hairline. The old 0.5pt rule was a carry-over from the pre-beta
-    //     surface spec and the component has no stroke
+    //   * bar ground is `bgCard` (#F5F3EF), the same light surface every
+    //     measured frame's Tab Bar instance sits on — NOT each screen's own
+    //     canvas (round 3 used `bgCanvas`, which read as a mismatched darker
+    //     band depending which tab you were on)
+    //   * a 1pt top hairline (`borderHairline`) — round 3's "no top hairline"
+    //     note was wrong; every measured frame's bar instance carries
+    //     `stroke=#F5F3EF w=1.0` at its top edge (round 4, 2026-08-10)
+    //   * icons are the Figma-exported `TabIcon-*` vectors (round 3), not SF
+    //     Symbols — the shapes (house, coach mark, calendar, family group,
+    //     gear) are custom-drawn in the frame and don't match their SF
+    //     counterparts closely enough at this size
     //
     // The component ships six tabs with CIRCLE duplicated — a Figma artifact. The
     // render shows five, which is what this builds.
@@ -232,12 +249,12 @@ struct MainTabView: View {
 
     private var customTabBar: some View {
         HStack(spacing: .hearth300) {
-            tabBarItem(tab: .home, icon: "house", activeIcon: "house.fill", label: "HOME")
-            tabBarItem(tab: .agent, icon: "message", activeIcon: "message.fill", label: "COACH")
-            tabBarItem(tab: .planning, icon: "calendar", activeIcon: "calendar", label: "PLANNER")
-            tabBarItem(tab: .circle, icon: "person.2", activeIcon: "person.2.fill", label: "CIRCLE",
+            tabBarItem(tab: .home, icon: "TabIcon-home", label: "HOME", size: CGSize(width: 16, height: 18))
+            tabBarItem(tab: .agent, icon: "TabIcon-coach", label: "COACH", size: CGSize(width: 18, height: 18))
+            tabBarItem(tab: .planning, icon: "TabIcon-planner", label: "PLANNER", size: CGSize(width: 19, height: 21))
+            tabBarItem(tab: .circle, icon: "TabIcon-circle", label: "CIRCLE", size: CGSize(width: 25, height: 21),
                        badge: session.circleUnread)
-            tabBarItem(tab: .settings, icon: "gearshape", activeIcon: "gearshape.fill", label: "SETTINGS")
+            tabBarItem(tab: .settings, icon: "TabIcon-settings", label: "SETTINGS", size: CGSize(width: 20, height: 21))
         }
         .padding(.top, .hearth500)
         .padding(.horizontal, .hearth600)
@@ -245,10 +262,16 @@ struct MainTabView: View {
         // area on a notched phone. SwiftUI's safe-area inset already covers that,
         // so a literal 25 here would double it and float the bar.
         .padding(.bottom, .hearth200)
-        .background(Color.bgCanvas)
+        // The light band is the BAR's, not the page's — bleeding it into the
+        // bottom safe area covers the home-indicator strip without tinting
+        // the sides of every screen (see the ZStack base's note).
+        .background(Color.bgCard.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.borderHairline).frame(height: 1)
+        }
     }
 
-    private func tabBarItem(tab: Tab, icon: String, activeIcon: String, label: String,
+    private func tabBarItem(tab: Tab, icon: String, label: String, size: CGSize,
                             badge: Int = 0) -> some View {
         let isActive = selectedTab == tab
         return Button {
@@ -257,8 +280,11 @@ struct MainTabView: View {
             }
         } label: {
             VStack(spacing: .hearth200) {
-                Image(systemName: isActive ? activeIcon : icon)
-                    .font(.system(size: 20, weight: .medium))
+                Image(icon)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: size.width, height: size.height)
                     // Level-1 unread signal: visible from ANY tab. The louder
                     // level-2 signal is the envelope inside Circle itself. Not in
                     // the design — the component predates the unread feature —
@@ -291,12 +317,16 @@ struct MainTabView: View {
             // One colour for both states — see the note above `customTabBar`.
             .foregroundColor(.accentOnCanvas)
             .frame(maxWidth: .infinity, minHeight: 52)
+            // Measured pill pad (8, 8, 9, 8) — hearth300 (8) on every edge is
+            // within a point of the frame on all four sides.
             .padding(.vertical, .hearth300)
-            .padding(.horizontal, .hearth200)
-            // The selected pill wraps icon + label together. At 52pt tall a
-            // ~26pt radius is the stadium the render shows.
+            .padding(.horizontal, .hearth300)
+            // The selected pill wraps icon + label together as a full
+            // capsule (67×52, r=100 in the frame) — a stadium shape, not a
+            // fixed-radius rounded rect, so it stays fully rounded regardless
+            // of label width.
             .background(
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                Capsule(style: .continuous)
                     .fill(isActive ? Color.bgSelected : Color.clear)
             )
             .contentShape(Rectangle())

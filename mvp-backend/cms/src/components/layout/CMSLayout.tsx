@@ -8,6 +8,7 @@ import {
   Mailbox,
   CalendarSync as CalendarSyncIcon,
   Scale,
+  UserCog,
 } from "lucide-react";
 import { destroySession, exportParquet } from "../../api";
 import { toast } from "../shared/Toast";
@@ -19,6 +20,7 @@ const navItems = [
   { to: "/email-sync", label: "Email Sync", icon: Mailbox },
   { to: "/calendar-sync", label: "Calendar Sync", icon: CalendarSyncIcon },
   { to: "/legal", label: "Legal", icon: Scale },
+  { to: "/testers", label: "Testers", icon: UserCog },
 ];
 
 export default function CMSLayout() {

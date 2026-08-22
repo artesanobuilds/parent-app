@@ -30,6 +30,14 @@ class MemoryRepository:
         # Replace the user snapshot entirely with loaded data
         self._store[user_id] = deepcopy(data)
 
+    def remove_user(self, user_id: str) -> None:
+        """Forget a user entirely. Account deletion MUST call this: as long as
+        the id stays in the store, the next persist_state() writes the deleted
+        conversations straight back into user_data — which is exactly what
+        happened to two deleted accounts on 2026-08-10 (their coach chats
+        resurrected on every export until this eviction existed)."""
+        self._store.pop(user_id, None)
+
     def user_ids(self):
         return list(self._store.keys())
 

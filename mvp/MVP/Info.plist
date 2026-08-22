@@ -9,13 +9,13 @@
 	<key>POSTHOG_HOST</key>
 	<string>https://us.i.posthog.com</string>
 	<key>NSCameraUsageDescription</key>
-	<string>MVP never uses the camera. This permission key is required by the real-time voice framework, which also supports video calls; the app will never ask for camera access.</string>
+	<string>the camera lets you photograph a flyer or schedule so the coach can read it for you — nothing is saved unless you hand it over.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Used to set up the real-time voice connection for your kid's companion.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Used to talk to your kid's companion when they're in Kid Mode.</string>
+	<string>the mic turns what you say into text — dictation happens on your device. it also powers voice chats with the coach and your kid's companion.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Used to turn your kid's voice into text so the companion can respond.</string>
+	<string>speech recognition turns your words into text so you don't have to type — on your device whenever it can be.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>InterVariable.ttf</string>

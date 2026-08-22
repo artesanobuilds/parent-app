@@ -36,14 +36,16 @@ MODULE_DEPENDENCY_MAP: dict[str, list[str]] = {
     "mvp-backend/app/auth.py": ["parent-onboarding-happy-path", "auth-pairing-code",
                                 "cross-family-isolation", "session-logout-and-delete"],
     "mvp-backend/app/auth_router.py": ["parent-onboarding-happy-path",
-                                       "session-logout-and-delete"],
+                                       "session-logout-and-delete",
+                                       "tester-reset-loop"],
     "mvp-backend/app/auth_pairing.py": ["auth-pairing-code"],
     "mvp-backend/app/auth_providers.py": ["auth-pairing-code",
                                           "parent-onboarding-happy-path"],
     "mvp-backend/app/auth_login_google.py": ["auth-pairing-code"],
-    "mvp-backend/app/admin_auth.py": ["admin-token-gating"],
+    "mvp-backend/app/admin_auth.py": ["admin-token-gating", "tester-reset-loop"],
     "mvp-backend/app/rate_limit.py": ["auth-pairing-code",
-                                      "parent-onboarding-happy-path"],
+                                      "parent-onboarding-happy-path",
+                                      "heisman-preaccount-extraction"],
 
     # Profile + onboarding surface
     "mvp-backend/app/profiling.py": ["parent-onboarding-happy-path",
@@ -53,6 +55,10 @@ MODULE_DEPENDENCY_MAP: dict[str, list[str]] = {
     "mvp-backend/app/prompt_synthesis.py": ["parent-onboarding-happy-path", "kid-agent-lifecycle"],
     "mvp-backend/app/onboarding_agent.py": ["parent-onboarding-happy-path"],
     "mvp-backend/app/onboarding_warmup.py": ["onboarding-warmup-first-run"],
+    # Heisman sprint-01: the pre-account extraction service and the CMS
+    # reset-a-tester action. `admin_auth.py` + `auth_router.py` gate the reset;
+    # server.py/duckdb_storage.py are already "*".
+    "mvp-backend/app/onboarding_extract.py": ["heisman-preaccount-extraction"],
     "mvp-backend/app/blobs/": ["profile-avatar-upload"],
 
     # Content surface

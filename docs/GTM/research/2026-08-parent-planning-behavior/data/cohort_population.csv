@@ -1,0 +1,4 @@
+cohort,parent_households_millions,share_pct,child_age_skew,source,tier
+Millennial (30-45),18.2,54.5,"school-age core",“Census Table F1 2023 (A-derived)”,A
+Gen X (46-61),11.7,35.1,"teens; 45-49 band 73.5% have a 12-17yo",“Census Table F1 2023 (A-derived)”,A
+Gen Z (18-29),2.0,6.0,"infants/toddlers; 25-29 band 84.1% have a child <6",“Census Table F1 2023 (A-derived)”,A

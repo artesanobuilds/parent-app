@@ -491,3 +491,83 @@ def test_warmup_deletes_with_the_family():
             assert server.storage_backend.list_warmup_runs(user_id) == []
     finally:
         _reconnect_shared_storage(server)
+
+
+def test_step_plan_skips_starters_when_board_already_onboarding_seeded(store):
+    """Heisman sprint-01: /profile/seed writes REAL rows (the parent's own week
+    tasks, the step-04 extraction results) BEFORE this beat runs. The generic
+    starters exist to make an EMPTY board legible — next to real data they
+    dilute it. The beat must skip honestly (skipped=True, 0 seeded), and rows
+    from earlier WARMUP runs must NOT trigger the skip (re-run semantics)."""
+    from app.profiling import profiling_service
+
+    user_id = "warmup-heisman-seeded-user"
+    profiling_service.update_parent_profile(user_id, {"name": "Greg", "postal_code": "98333"})
+    profiling_service.update_child_profile(user_id, "Lily", {"name": "Lily", "age": 9.0})
+
+    # The seed already gave the board real content: one parent task, one
+    # extraction result — the exact details.source markers /profile/seed writes.
+    store.track_activity(
+        user_id, name="A gift to buy", kid_name=None, activity_type="outing",
+        status="exploring", details={"source": "onboarding_self", "self": True},
+    )
+    store.track_activity(
+        user_id, name="Swim lessons", kid_name="Lily", activity_type="extracurricular",
+        status="exploring", details={"source": "onboarding_extract", "schedule_text": "Tuesdays · 4:15 pm"},
+    )
+    before = store.list_tracked_activities(user_id)
+
+    result = step_plan(store, user_id, {})
+    assert result.get("skipped") is True, f"expected an honest skip, got {result!r}"
+    assert "seeded from onboarding" in (result.get("reason") or ""), result
+    after = store.list_tracked_activities(user_id)
+    assert len(after) == len(before), "starters piled in next to real seeded data"
+
+    profiling_service.remove_family(user_id)
+
+
+def test_step_plan_still_seeds_after_a_prior_warmup_run(store):
+    """The companion boundary: rows whose details.source is `onboarding_warmup`
+    (a previous warm-up's own starters) must NOT trip the seeded-board skip —
+    the idempotence path stays the (kid_name, name) dedup, not a blanket skip."""
+    from app.profiling import profiling_service
+
+    user_id = "warmup-heisman-rerun-user"
+    profiling_service.update_parent_profile(user_id, {"name": "Greg", "postal_code": "98333"})
+    profiling_service.update_child_profile(user_id, "Ben", {"name": "Ben", "age": 5.0})
+
+    store.track_activity(
+        user_id, name="A stray warmup row", kid_name="Ben", activity_type="outing",
+        status="exploring", details={"source": "onboarding_warmup", "postal_code": "98333"},
+    )
+
+    result = step_plan(store, user_id, {})
+    assert not result.get("skipped"), f"warmup-sourced rows must not trigger the skip: {result!r}"
+    assert result["considerations_seeded"] > 0, "starters should still seed after a prior warmup"
+
+    profiling_service.remove_family(user_id)
+
+
+def test_family_context_text_carries_topic_and_self_care():
+    """step_coach's context: the step-03 focus topic and the parent's own weekly
+    to-dos must reach the model as explicit labeled lines — and stay absent
+    when the parent never provided them (no empty-label noise)."""
+    from app.onboarding_warmup import _family_context_text
+
+    with_signals = _family_context_text({
+        "parent": {
+            "name": "Greg",
+            "focus_topic": "A practice or lesson schedule",
+            "self_care_tasks": ["A gift to buy", "Date night"],
+        },
+        "children": {"Lily": {"name": "Lily", "age": 9.0}},
+    })
+    assert "Parent wants help with: A practice or lesson schedule" in with_signals
+    assert "Parent's own to-dos this week: A gift to buy; Date night" in with_signals
+
+    without_signals = _family_context_text({
+        "parent": {"name": "Greg"},
+        "children": {"Lily": {"name": "Lily", "age": 9.0}},
+    })
+    assert "Parent wants help with" not in without_signals
+    assert "own to-dos" not in without_signals

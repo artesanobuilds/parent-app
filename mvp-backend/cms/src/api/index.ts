@@ -22,7 +22,8 @@ function redirectToLogin(): void {
 }
 
 async function fetchJSON<T>(url: string, init?: RequestInit, retries = 3): Promise<T> {
-  const isAdmin = url.startsWith('/cms/') || url.includes(`${API}/cms/`);
+  const isAdmin =
+    url.startsWith('/cms/') || url.includes(`${API}/cms/`) || url.startsWith('/admin/');
   const finalInit = isAdmin ? withAdminHeaders(init) : init;
   let lastError: Error = new Error('Request failed');
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -198,6 +199,40 @@ export const runCalendarSyncNow = () =>
 
 export const getCalendarSyncRuns = () =>
   fetchJSON<{ runs: CalendarSyncRun[] }>(`${API}/cms/calendar-sync/runs`).then((r) => r.runs);
+
+// ── Testers (admin reset / delete; see /admin/users endpoints) ─────────────
+
+export interface AdminAccount {
+  user_id: string;
+  primary_email: string | null;
+  created_at: string | null;
+  claimed: boolean;
+}
+
+// GET /admin/auth/migration-status doubles as the account directory: every
+// known account with its primary email — the email→user_id lookup.
+export const getAdminAccounts = () =>
+  fetchJSON<{ accounts: AdminAccount[] }>(`/admin/auth/migration-status`).then(
+    (r) => r.accounts,
+  );
+
+export interface TesterResetResult {
+  ok: boolean;
+  user_id: string;
+  identity_kept?: boolean;
+  counts?: Record<string, number>;
+  deleted?: Record<string, number>; // full-delete route returns "deleted"
+}
+
+export const resetTester = (userId: string) =>
+  fetchJSON<TesterResetResult>(`/admin/users/${encodeURIComponent(userId)}/reset`, {
+    method: 'POST',
+  });
+
+export const deleteTesterFamily = (userId: string) =>
+  fetchJSON<TesterResetResult>(`/admin/users/${encodeURIComponent(userId)}/delete`, {
+    method: 'POST',
+  });
 
 // ── Legal documents (versioned publish; see /cms/legal endpoints) ──────────
 

@@ -26,10 +26,6 @@ struct CosChatView: View {
         }
         .trackScreen("planning_chat")
         .onAppear { Analytics.capture("chat_opened", ["agent_kind": "planning"]) }
-        // Lift the pinned input bar clear of MainTabView's floating tab bar — as
-        // the Plan hub's Chat segment this view fills to the bottom of the tab
-        // content, so without this the field sits flush against the tab bar.
-        .padding(.bottom, .hearth700)
         .background(Color.bgCanvas.ignoresSafeArea())
         .alert(
             "Error",
@@ -82,28 +78,34 @@ struct CosChatView: View {
         }
     }
 
+    /// Measured `planner 02` (`1026:10520`): centered title + suggestion
+    /// buttons UNDER the same "MVP Planner" hero+title `PlanView.header`
+    /// already renders above the segmented control (the frame has ONE
+    /// calendar icon per screen, in the shared header — an earlier pass
+    /// duplicated it here, showing the calendar mark twice stacked). FOUR
+    /// full-width TEAL-filled suggestion buttons with white Inter 800
+    /// labels — the same button component `coach-000` uses, not the
+    /// white-outline starter chips this shipped with before round 3.
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: .hearth500) {
-            Circle()
-                .fill(Color.accentDefault.opacity(0.12))
-                .frame(width: 56, height: 56)
-                .overlay(
-                    Image(systemName: "calendar.badge.clock")
-                        .font(.system(size: 26, weight: .medium))
-                        .foregroundColor(.accentDefault)
-                )
-
-            VStack(alignment: .leading, spacing: .hearth300) {
+        VStack(spacing: .hearth500) {
+            VStack(spacing: .hearth300) {
+                // Measured `1026:10536` is a bold sans caption (like Plan's
+                // "Nothing planned yet?", NOT the giant Fraunces display
+                // headline an earlier pass rendered here — same class of
+                // mistake, same fix).
                 Text("Ask the coach")
-                    .font(.hearthDisplayMD)
+                    .font(.hearthTitleLG.weight(.bold))
                     .foregroundColor(.inkPrimary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, .hearth700)
                 Text("Find camps, sort out coverage gaps, or decide between options. I see the whole family plan.")
                     .font(.hearthBodyMD)
-                    .foregroundColor(.inkSecondary)
+                    .foregroundColor(.inkPrimary)
+                    .multilineTextAlignment(.center)
             }
 
             // Sprint-2: four hardcoded starter prompts from the spec
-            VStack(alignment: .leading, spacing: .hearth300) {
+            VStack(spacing: .hearth300) {
                 Button {
                     sendSuggestion("Camps & school breaks")
                 } label: {
@@ -137,6 +139,7 @@ struct CosChatView: View {
                 .disabled(viewModel.isSending || viewModel.isUserIDMissing)
             }
         }
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, .hearth700)
         .padding(.top, .hearth500)
     }
@@ -219,44 +222,60 @@ struct CosChatView: View {
     /// Measured `planner 5`: the composer sits on the deep-teal strip
     /// (`#0A5570`, 16pt top corners) with a white r=8 field inside — same
     /// component as the coach tab's.
+    /// Measured `planner 5` `chatinput` instance — same composer treatment
+    /// as `AgentView.inputArea` (round 3): deep-teal strip (`#0A5570`,
+    /// 16pt top corners) with a leading ⊕, a white r=8 field, and the send
+    /// glyph INSIDE the field's trailing edge in `statusSuccess` green
+    /// (`#3D6B3D`, no circle background). This view had none of that before
+    /// round 3 touched `AgentView` — the Planner composer was never brought
+    /// in sync with the Coach tab's, which is why the leading icon was
+    /// missing and the send button floated outside the field on `bgCanvas`.
     private var inputArea: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .bottom, spacing: .hearth400) {
-                TextField("Ask about your plan", text: $messageText, axis: .vertical)
-                    .font(.hearthBodySM)
-                    .foregroundColor(.inkPrimary)
-                    .padding(.horizontal, .hearth500)
-                    .padding(.vertical, .hearth400)
-                    .background(
-                        RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous)
-                            .fill(Color.bgElevated)
-                    )
-                    .lineLimit(1...4)
-                    .disabled(viewModel.isSending || viewModel.isUserIDMissing)
-                    .textInputAutocapitalization(.sentences)
-                    .onSubmit(sendMessage)
+            HStack(alignment: .center, spacing: .hearth400) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 24, weight: .regular))
+                    .foregroundColor(.inkOnPhotoLight)
 
-                Button {
-                    sendMessage()
-                } label: {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(canSend ? .inkOnPhotoLight : .inkMuted)
-                        .frame(width: 44, height: 44)
-                        .background(
-                            Circle()
-                                .fill(canSend ? Color.accentDefault : Color.bgElevated)
-                                .overlay(Circle().stroke(Color.borderHairline, lineWidth: canSend ? 0 : 1))
-                        )
+                HStack(spacing: .hearth300) {
+                    TextField("Ask about your plan", text: $messageText, axis: .vertical)
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkPrimary)
+                        .lineLimit(1...4)
+                        .disabled(viewModel.isSending || viewModel.isUserIDMissing)
+                        .textInputAutocapitalization(.sentences)
+                        .onSubmit(sendMessage)
+
+                    Button {
+                        sendMessage()
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(canSend ? .statusSuccess : .inkMuted)
+                    }
+                    .disabled(!canSend)
                 }
-                .disabled(!canSend)
+                .padding(.horizontal, .hearth500)
+                .padding(.vertical, .hearth400)
+                .background(
+                    RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous)
+                        .fill(Color.bgElevated)
+                )
             }
-            .padding(.horizontal, .hearth500)
-            // Symmetric breathing room above & below the field (divider→field
-            // equals field→bottom of the input band).
-            .padding(.vertical, .hearth500)
+            .padding(.horizontal, .hearth600)
+            .padding(.vertical, .hearth400)
+            .background(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: .hearthRadiusCard,
+                    bottomLeadingRadius: 0,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: .hearthRadiusCard,
+                    style: .continuous
+                )
+                .fill(Color.accentDeep)
+                .ignoresSafeArea(edges: .bottom)
+            )
         }
-        .background(Color.bgCanvas)
     }
 
     // MARK: - Starter prompts (empty state)
@@ -296,23 +315,21 @@ struct CosChatView: View {
         }
     }
 
+    /// Measured `1026:10538`–`1026:10541`: teal fill r=12, white Inter 800
+    /// 16/22, centered, full-width, 46pt tall — same button component
+    /// `coach-000`'s three suggestions and `planner 01`'s "Camps & school
+    /// breaks" etc. use. NOT the white-outline chip this used to be.
     private func starterButton(_ text: String) -> some View {
-        HStack {
-            Text(text)
-                .font(.hearthBodyMD)
-                .foregroundColor(.inkPrimary)
-                .multilineTextAlignment(.leading)
-            Spacer()
-        }
-        .padding(.horizontal, .hearth500)
-        .padding(.vertical, .hearth400)
-        .background(
-            RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                .fill(Color.bgElevated)
-                .overlay(
-                    RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                        .stroke(Color.borderHairline, lineWidth: 1)
-                )
-        )
+        Text(text)
+            .font(.hearthSectionHeader)
+            .foregroundColor(.inkOnPhotoLight)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, .hearth400)
+            .padding(.horizontal, .hearth500)
+            .background(
+                RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                    .fill(Color.accentDefault)
+            )
     }
 }

@@ -206,7 +206,20 @@ def _family_context_text(family: Dict[str, Any]) -> str:
             return [v for v in out_l if v not in (None, [], {}, "")]
         return value
 
-    return json.dumps(_prune(family or {}), ensure_ascii=False, indent=2)
+    parts = [json.dumps(_prune(family or {}), ensure_ascii=False, indent=2)]
+
+    # Heisman sprint-01: the funnel now captures the parent's own asks. Surface
+    # them as explicit labeled lines (not just keys buried in the JSON) so the
+    # first nudge can actually speak to what the parent said they wanted.
+    parent = (family or {}).get("parent") or {}
+    focus_topic = str(parent.get("focus_topic") or "").strip()
+    if focus_topic:
+        parts.append(f"Parent wants help with: {focus_topic}")
+    self_care = [str(t).strip() for t in (parent.get("self_care_tasks") or []) if str(t).strip()]
+    if self_care:
+        parts.append("Parent's own to-dos this week: " + "; ".join(self_care))
+
+    return "\n\n".join(parts)
 
 
 def step_coach(storage: Any, user_id: str, ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -335,10 +348,28 @@ def step_plan(storage: Any, user_id: str, ctx: Dict[str, Any]) -> Dict[str, Any]
     children = family.get("children") or {}
     postal_code = (parent.get("postal_code") or "").strip() or None
 
+    existing_rows = storage.list_tracked_activities(user_id) or []
     existing = {
         ((a.get("kid_name") or "").strip().lower(), (a.get("name") or "").strip().lower())
-        for a in (storage.list_tracked_activities(user_id) or [])
+        for a in existing_rows
     }
+
+    # Heisman sprint-01: /profile/seed now writes REAL rows before this beat
+    # runs — the parent's own week tasks ("onboarding_self") and the step-04
+    # extraction results ("onboarding_extract"). The starters below exist only
+    # to make an EMPTY board legible; when the seed already gave the board real
+    # content, piling generic suggestions next to it dilutes the parent's own
+    # data. Skip — honestly, as a SKIPPED beat, not a fake success.
+    seed_rows = sum(
+        1 for a in existing_rows
+        if ((a.get("details") or {}).get("source")) in ("onboarding_self", "onboarding_extract")
+    )
+    if seed_rows:
+        ctx.setdefault("result", {})["considerations_seeded"] = 0
+        return {
+            "skipped": True,
+            "reason": f"board already seeded from onboarding ({seed_rows} rows)",
+        }
 
     wanted: List[tuple] = []  # (kid_name, name, activity_type)
     for kid_name, prof in sorted(children.items()):

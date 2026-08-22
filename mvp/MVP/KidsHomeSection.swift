@@ -7,13 +7,14 @@ struct KidSettingsTarget: Identifiable, Hashable {
     let id: String
 }
 
-/// `YOUR KIDS` — one card per kid in the family profile, each in that kid's own
-/// accent. Tap the card to read what they've been up to; the CTA hands the
-/// phone over; `•••` opens the kid's settings sheet.
+/// `YOUR KIDS` — Heisman Onboarding-9 (Figma frame `42:8322`, nodes
+/// `29:2820`–`29:2832`): near-black tiles with the kid's name in the display
+/// serif and an ellipsis menu in the tile's top-right corner. Tap the tile to
+/// read what they've been up to; everything else lives behind the `•••`.
 ///
 /// The `locked` status is a SAFETY surface: a crisis lock paused that kid's
-/// companion, and the card must route to the parent review + reactivate dialog,
-/// never to the intro/setup screen. See `debugging_crisis_lock_companion`.
+/// companion, and the tile must route to the parent review + reactivate
+/// dialog, never anywhere else. See `debugging_crisis_lock_companion`.
 struct KidsHomeSection: View {
     let userID: String
     let baseURL: URL
@@ -22,8 +23,8 @@ struct KidsHomeSection: View {
     /// edits/adds/deletes show without an app relaunch.
     var refreshToken: Int = 0
     /// The family's children keyed by their PROFILE KEY. HomeView already
-    /// fetches the profile, so the cards don't each re-fetch it; the settings
-    /// sheet needs the whole DTO, the card only needs `avatar_url`.
+    /// fetches the profile, so the tiles don't each re-fetch it; the settings
+    /// sheet needs the whole DTO.
     var children: [String: ChildProfileDTO] = [:]
     /// Fired with the fresh family after any mutation inside the settings sheet.
     var onProfileChanged: (FamilyProfileDTO) -> Void = { _ in }
@@ -33,31 +34,16 @@ struct KidsHomeSection: View {
     /// Opens the coaching conversation. Nil hides the sheet's `View all`
     /// button rather than rendering a dead one.
     var onOpenCoach: (() -> Void)?
-    /// Optional prompt rendered under the "YOUR KIDS" header — HomeView's
-    /// first-run dashboard state ("Help us get to know your kids a little
-    /// more:"). Nil (the default) renders nothing, so every other caller is
-    /// unaffected.
-    var firstRunPrompt: String? = nil
     /// Fired whenever the count of kids with an ACTIVE-or-LOCKED companion
-    /// changes — i.e. "has anyone ever been introduced", as opposed to
-    /// `hasKidCompanions` below which is ACTIVE-only (the handoff picker
-    /// needs an active companion, not merely an introduced-then-paused one).
-    /// HomeView uses this to decide its first-run dashboard state; a locked
-    /// companion must count as "introduced" so a crisis pause never flips the
-    /// dashboard back into first-run copy.
+    /// changes — "has anyone ever been introduced". Kept for presenters that
+    /// branch on it; a locked companion counts as introduced so a crisis
+    /// pause never reads as first-run.
     var onCompanionPresenceChanged: (Bool) -> Void = { _ in }
-    /// True for first-run dashboard (Dashboard 1), passed from HomeView.
-    var isFirstRun: Bool = false
-    /// Enter the post-dashboard setup tail AT this kid (`SetupTailView`), keyed
-    /// by the kid's STABLE profile key. This is what the design's "Set up
-    /// {FirstName}" tile CTA does — the tile is the entry point into the
-    /// onboarding tail, and it is the SAME code path the automatic walk uses,
-    /// not a parallel one. Nil leaves the CTA on its pre-tail behaviour rather
-    /// than rendering a dead button.
+    /// Enter the post-dashboard setup tail AT this kid (`SetupTailView`),
+    /// keyed by the kid's STABLE profile key — reachable from the tile's
+    /// ellipsis menu. Same code path as the automatic walk, not a parallel
+    /// one. Nil hides the menu item rather than rendering a dead one.
     var onEnterSetup: ((String) -> Void)?
-    /// "+ Add another child" (Dashboard 1: full-width r=12, Inter w800 16, teal
-    /// on white, below the tiles). Nil hides it.
-    var onAddChild: (() -> Void)?
 
     @StateObject private var vm: KidsHomeViewModel
     @Environment(\.triggerKidHandoff) private var triggerKidHandoff
@@ -66,7 +52,7 @@ struct KidsHomeSection: View {
     @AppStorage("has_kid_companions") private var hasKidCompanions: Bool = false
     // A crisis-locked companion the parent tapped to review + reactivate.
     @State private var reactivateTarget: KidsHomeViewModel.KidEntry?
-    // Pushed from a card's ••• menu (a Menu can't host a NavigationLink value).
+    // Pushed from a tile's ••• menu (a Menu can't host a NavigationLink value).
     @State private var reviewTarget: String?
     // The kid whose settings sheet is open.
     @State private var settingsTarget: KidSettingsTarget?
@@ -76,13 +62,9 @@ struct KidsHomeSection: View {
          onProfileChanged: @escaping (FamilyProfileDTO) -> Void = { _ in },
          onNeedsRefresh: @escaping () -> Void = {},
          onOpenCoach: (() -> Void)? = nil,
-         firstRunPrompt: String? = nil,
          onCompanionPresenceChanged: @escaping (Bool) -> Void = { _ in },
-         isFirstRun: Bool = false,
-         onEnterSetup: ((String) -> Void)? = nil,
-         onAddChild: (() -> Void)? = nil) {
+         onEnterSetup: ((String) -> Void)? = nil) {
         self.onEnterSetup = onEnterSetup
-        self.onAddChild = onAddChild
         self.userID = userID
         self.baseURL = baseURL
         self.refreshToken = refreshToken
@@ -90,9 +72,7 @@ struct KidsHomeSection: View {
         self.onProfileChanged = onProfileChanged
         self.onNeedsRefresh = onNeedsRefresh
         self.onOpenCoach = onOpenCoach
-        self.firstRunPrompt = firstRunPrompt
         self.onCompanionPresenceChanged = onCompanionPresenceChanged
-        self.isFirstRun = isFirstRun
         _vm = StateObject(wrappedValue: KidsHomeViewModel(userID: userID, baseURL: baseURL))
     }
 
@@ -134,79 +114,45 @@ struct KidsHomeSection: View {
             }
     }
 
+    /// Measured `29:2820`: the section sits BARE on the canvas (no card
+    /// ground), py 20, header→tiles gap 16, tiles centered.
     private var sectionStack: some View {
-        VStack(alignment: .leading, spacing: .hearth400) {
+        VStack(alignment: .leading, spacing: .hearth500) {
             HStack {
-                HomeSectionHeader(title: "Your kids")
+                // "YOUR KIDS" — Inter 800 16/22 in ink/primary (`29:2821`).
+                Text("Your kids")
+                    .font(.hearthSectionHeader)
+                    .textCase(.uppercase)
+                    .foregroundColor(.inkPrimary)
                 if vm.isLoading {
                     ProgressView().tint(.inkMuted).scaleEffect(0.7)
                 }
-            }
-
-            // First-run dashboard state (HomeView decides when to pass this).
-            if let firstRunPrompt, !vm.kids.isEmpty {
-                Text(firstRunPrompt)
-                    .font(.hearthBodyMD)
-                    .foregroundColor(.inkSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
             }
 
             // Three states, not two. "No kids" is only true once a fetch has
-            // actually SUCCEEDED — otherwise an offline moment or a failed
-            // re-fetch on returning to the tab reads as a family with no
-            // children, which is the scariest possible way to fail.
+            // actually SUCCEEDED — otherwise an offline moment reads as a
+            // family with no children, the scariest possible way to fail.
             if vm.kids.isEmpty && !vm.isLoading && !vm.hasLoadedOnce {
                 loadFailedState
             } else if vm.kids.isEmpty && !vm.isLoading {
                 emptyState
             } else {
-                // Two-up photo tiles, per the design (168x153 in a 440pt frame).
-                // Full-width rows were our own invention.
+                // Two-up tiles, gap 12, 168×153 in the 440pt frame — the grid
+                // sets the width per device; the height is the frame's own.
                 LazyVGrid(
                     columns: [GridItem(.flexible(), spacing: .hearth400),
                               GridItem(.flexible(), spacing: .hearth400)],
                     spacing: .hearth400
                 ) {
                     ForEach(vm.kids) { kid in
-                        kidCard(for: kid)
+                        kidTile(for: kid)
                     }
                 }
             }
-
-            if let onAddChild {
-                addChildButton(onAddChild)
-            }
         }
-        // YOUR KIDS sits in a rounded container on the canvas. Dashboard 1:
-        // `#FFFFFF` r=28 pad 24. Dashboard 2: `#F5F3EF` r=28 pad 24/30.
-        // Using 24 uniformly.
-        .padding(.hearth700)
+        .padding(.vertical, .hearth600)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: .hearthRadiusSection, style: .continuous)
-                .fill(isFirstRun ? Color.bgElevated : Color.bgCard)
-        )
-    }
-
-    /// "+ Add another child" — Dashboard 1's full-width button under the tiles
-    /// (measured: r=12, pad 12, `Inter w800 16`, teal label on white).
-    ///
-    /// Home had no reachable add-kid action before this; the only entry was
-    /// Settings → Profile → "Add a kid". It presents that exact same
-    /// `AddKidSheet`, so there is one add-a-kid write path, not two.
-    private func addChildButton(_ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text("+ Add another child")
-                .font(.hearthSectionHeader)
-                .foregroundColor(.accentOnCanvas)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, .hearth400)
-                .background(
-                    RoundedRectangle(cornerRadius: .hearthRadiusTile, style: .continuous)
-                        .fill(Color.bgElevated)
-                )
-        }
-        .buttonStyle(.plain)
     }
 
     /// Shown when we have never successfully read the roster — offline, an
@@ -237,9 +183,7 @@ struct KidsHomeSection: View {
     }
 
     private var emptyState: some View {
-        Text(onAddChild == nil
-             ? "Add a kid in Settings to set up their companion."
-             : "Add your first child to set up their companion.")
+        Text("Add a kid in Settings to set up their companion.")
             .font(.hearthBodyMD)
             .foregroundColor(.inkMuted)
             .padding(.hearth500)
@@ -249,47 +193,51 @@ struct KidsHomeSection: View {
             .hearthCardElevation()
     }
 
-    // MARK: Card
+    // MARK: Tile
 
-    /// One kid's card, in that kid's accent (beta-v1 spec: Dashboard 1/2).
+    /// One kid's tile (measured `29:2823`): 168×153, r=12, 0.5px
+    /// `accent/default` stroke, near-black ground — the frame paints an
+    /// OPAQUE `ink/primary` `#151412` layer over the kid photo, so the tile
+    /// renders as a solid black block, name in Fraunces SemiBold 28/32
+    /// centered on the tile's floor in `#F5F3EF` (`inkOnCard`, exact), the
+    /// `•••` glyph top-right. The frame's `#151412` has no primitive of its
+    /// own; `inkPrimary` (#1A1A1A) is the closest existing token — gap noted.
     ///
-    /// The card's tap target is the safety-critical part of this file: a
-    /// crisis-LOCKED companion goes to the reactivate confirmation, NEVER to
-    /// the intro/setup screen. Any future restyle must keep that branch.
-    private func kidCard(for kid: KidsHomeViewModel.KidEntry) -> some View {
-        VStack(alignment: .leading, spacing: .hearth400) {
-            cardTapTarget(for: kid)
-            kidCTA(for: kid)
+    /// The tile's tap target is the safety-critical part of this file: a
+    /// crisis-LOCKED companion goes to the reactivate confirmation, NEVER
+    /// anywhere else. Any future restyle must keep that branch.
+    private func kidTile(for kid: KidsHomeViewModel.KidEntry) -> some View {
+        ZStack(alignment: .topTrailing) {
+            tileTapTarget(for: kid)
+            // ••• — the frame's own affordance (`29:2826`, 19×4), exported as
+            // a single template SVG. Hosts every per-kid action.
+            Menu {
+                kidMenuItems(for: kid)
+            } label: {
+                Image("HomeIcon-kidEllipsis")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 19, height: 4)
+                    .foregroundColor(.inkOnCard)
+                    // Grow the hit target well past the 19×4 glyph.
+                    .padding(.hearth400)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("\(kid.kidName)'s options")
         }
-        .padding(.hearth400)
-        .frame(maxWidth: .infinity, minHeight: 153, alignment: .topLeading)
-        .background(kidTileGround(for: kid))
+        .frame(maxWidth: .infinity, minHeight: 153)
+        .background(Color.inkPrimary)
+        .overlay(
+            RoundedRectangle(cornerRadius: .hearthRadiusTile, style: .continuous)
+                .strokeBorder(Color.accentDefault, lineWidth: 0.5)
+        )
         .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusTile, style: .continuous))
-        // The design's tile has no ••• affordance, but the kid-settings and
-        // "what they've been up to" entries live nowhere else on Home. A
-        // long-press keeps them reachable without adding chrome the design
-        // doesn't have.
-        .contextMenu { kidMenuItems(for: kid) }
-        .accessibilityHint("Press and hold for \(kid.kidName)'s settings")
-    }
-
-    /// The kid's photo fills the tile; with no photo, a flat teal (`#1B7498`)
-    /// does (beta-v1 spec: Dashboard 1 no-photo state is `#1B7498`, NOT the
-    /// per-kid accent — the teal is the designed first-run state, not a
-    /// placeholder). Either way the name and CTA sit ON the tile, so ink is
-    /// `inkOnPhotoLight`.
-    @ViewBuilder
-    private func kidTileGround(for kid: KidsHomeViewModel.KidEntry) -> some View {
-        if let url = children[kid.kidKey]?.avatarUrl, !url.isEmpty {
-            KidTilePhoto(urlString: url, accent: kid.accent)
-        } else {
-            Color.accentDefault
-        }
     }
 
     @ViewBuilder
-    private func cardTapTarget(for kid: KidsHomeViewModel.KidEntry) -> some View {
-        let body = KidCardBody(kid: kid, avatarURL: children[kid.kidKey]?.avatarUrl)
+    private func tileTapTarget(for kid: KidsHomeViewModel.KidEntry) -> some View {
+        let body = KidTileBody(kid: kid)
         if kid.status == .locked {
             Button { reactivateTarget = kid } label: { body }
                 .buttonStyle(.plain)
@@ -299,81 +247,9 @@ struct KidsHomeSection: View {
         }
     }
 
-    private func cardBorder(for kid: KidsHomeViewModel.KidEntry) -> some View {
-        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-            .stroke(kid.accent, lineWidth: 1.5)
-    }
-
-    /// Only an ACTIVE companion can actually receive a handoff (the picker has
-    /// no options otherwise), so every other status gets the CTA that matches
-    /// what the parent has to do next.
-    @ViewBuilder
-    private func kidCTA(for kid: KidsHomeViewModel.KidEntry) -> some View {
-        switch kid.status {
-        case .active:
-            Button { triggerKidHandoff() } label: {
-                tileCTALabel("Hand to \(kid.kidName)")
-            }
-        case .draft:
-            NavigationLink(value: KidNavigation.review(kidName: kid.kidName)) {
-                tileCTALabel("Introduce \(kid.kidName)")
-            }
-            .buttonStyle(.plain)
-        case .missing:
-            // The design's tile CTA. A kid with no companion config yet is
-            // exactly the kid the onboarding tail exists to walk, so this is the
-            // tail's re-entry point — same `SetupTailView` the automatic first
-            // pass uses, entered at THIS kid by profile key. When the presenter
-            // can't reach the tail we keep the shipped "introduce them"
-            // destination rather than rendering a dead button.
-            if let onEnterSetup {
-                Button { onEnterSetup(kid.kidKey) } label: {
-                    tileCTALabel("Set up \(kid.kidName)")
-                }
-                .buttonStyle(.plain)
-            } else {
-                NavigationLink(value: KidNavigation.review(kidName: kid.kidName)) {
-                    tileCTALabel("Set up \(kid.kidName)")
-                }
-                .buttonStyle(.plain)
-            }
-        case .locked:
-            Button { reactivateTarget = kid } label: { lockedCTALabel }
-        }
-    }
-
-    private var lockedCTALabel: some View {
-        Text("Review")
-            .font(.hearthButtonLabel)
-            .foregroundColor(.inkOnPhotoLight)
-            .padding(.horizontal, .hearth400)
-            .padding(.vertical, .hearth300)
-            .background(Color.statusError)
-            .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusControl, style: .continuous))
-    }
-
-    /// The tile's single button, per the design ("Set up Benjamin").
-    /// Dashboard 1 spec: Inter w800 13.35 (hearthButtonLabel rounds to 13pt).
-    /// Compact because it lives inside a ~168pt-wide tile.
-    private func tileCTALabel(_ title: String) -> some View {
-        Text(title)
-            .font(.hearthButtonLabel)
-            .foregroundColor(.accentOnCanvas)
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
-            .padding(.horizontal, .hearth400)
-            .padding(.vertical, .hearth300)
-            .frame(maxWidth: .infinity)
-            .background(Color.bgElevated)
-            .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusControl, style: .continuous))
-    }
-
-    /// The per-kid actions, as `contextMenu` items on the tile.
-    ///
-    /// These were a visible ••• button in the card's corner. The design's tile
-    /// has no such affordance, so they moved to a long-press — but they are NOT
-    /// dropped: kid settings and the review letter are reachable from nowhere
-    /// else on Home, and the crisis-lock reactivate path is safety-critical.
+    /// The per-kid actions behind the tile's `•••`. The crisis-lock
+    /// reactivate path is safety-critical; kid settings and the review letter
+    /// are reachable from nowhere else on Home.
     @ViewBuilder
     private func kidMenuItems(for kid: KidsHomeViewModel.KidEntry) -> some View {
         Button { settingsTarget = KidSettingsTarget(id: kid.kidKey) } label: {
@@ -382,12 +258,12 @@ struct KidsHomeSection: View {
         Button { reviewTarget = kid.kidName } label: {
             Label("See what they've been up to", systemImage: "text.book.closed")
         }
-        // Re-enter the onboarding tail at this kid, for a kid whose tile CTA is
-        // no longer "Set up …" (they already have a companion) but whose profile
-        // the parent skipped.
+        // Enter (or re-enter) the onboarding tail at this kid.
         if let onEnterSetup {
             Button { onEnterSetup(kid.kidKey) } label: {
-                Label("Finish setting up \(kid.kidName)", systemImage: "checklist")
+                Label(kid.status == .missing
+                      ? "Set up \(kid.kidName)"
+                      : "Finish setting up \(kid.kidName)", systemImage: "checklist")
             }
         }
         if kid.status == .active {
@@ -472,8 +348,7 @@ struct KidsHomeSection: View {
 
     /// Kids who have EVER been introduced — active or crisis-locked. Locked
     /// counts here (unlike `activeCompanionCount`): a paused companion was
-    /// introduced and then safety-paused, not "never set up", so it must not
-    /// make HomeView think this is a first-run family again.
+    /// introduced and then safety-paused, not "never set up".
     private var introducedCompanionCount: Int {
         vm.kids.filter { $0.status == .active || $0.status == .locked }.count
     }
@@ -488,86 +363,39 @@ struct KidsHomeSection: View {
     }
 }
 
-// MARK: - Card body
+// MARK: - Tile body
 
-/// The tappable part of a kid card: photo, name, `with {companion}, {when}`,
-/// and the status line.
-private struct KidCardBody: View {
+/// The tappable face of a kid tile: the frame draws ONLY the name, in the
+/// display serif, centered on the tile's floor (`29:2827`: Fraunces SemiBold
+/// 28/32 `#F5F3EF`, tile content justify-between with ~17.7pt padding).
+///
+/// EXCEPTION the frame doesn't draw: a crisis-LOCKED kid keeps a one-line
+/// "Paused for safety" caption. That state is a safety surface — hiding it
+/// entirely would leave the parent no visible signal that a review is
+/// waiting. Deliberate deviation, kept minimal.
+private struct KidTileBody: View {
     let kid: KidsHomeViewModel.KidEntry
-    var avatarURL: String?
 
     var body: some View {
-        // Tile layout (design): the name in the display serif sits ON the photo,
-        // with the companion status as a caption beneath it. Status is NOT in the
-        // design's tile, but it is how a parent knows a companion still needs
-        // introducing — dropping it would remove the section's whole purpose.
-        VStack(alignment: .leading, spacing: 2) {
-            nameRow
-            Text(kid.statusLine)
-                .font(.hearthBodySM)
-                .foregroundColor(.inkOnPhotoLight.opacity(0.9))
-                .multilineTextAlignment(.leading)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(spacing: 2) {
             Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private var avatar: some View {
-        Group {
-            if avatarURL != nil {
-                AvatarCircleView(urlString: avatarURL,
-                                 fallbackSystemImage: "figure.child", size: 48)
-            } else {
-                Circle()
-                    .fill(kid.accent)
-                    .frame(width: 48, height: 48)
-                    .overlay(monogram)
+            Text(kid.kidName)
+                .font(.custom(HearthFontFamily.displaySerif, fixedSize: 28).weight(.semibold))
+                .foregroundColor(.inkOnCard)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            if kid.status == .locked {
+                Text("Paused for safety — tap to review")
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkOnCard.opacity(0.9))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
             }
         }
-        .accessibilityHidden(true)
-    }
-
-    /// Decorative only — the kid's name is always rendered beside it, so white
-    /// on saffron carries no information on its own.
-    private var monogram: some View {
-        Text(String(kid.kidName.prefix(1)).uppercased())
-            .font(.hearthTitleLG)
-            .foregroundColor(.inkOnPhotoLight)
-    }
-
-    /// The kid's name on the tile (Dashboard 1 spec: Fraunces w600 28).
-    /// The design shows the name alone here — the companion label ("with Friend")
-    /// folds into the status caption below rather than sitting inline.
-    private var nameRow: some View {
-        Text(kid.kidName)
-            .font(.custom("Fraunces", size: 28, relativeTo: .title2).weight(.semibold))
-            .foregroundColor(.inkOnPhotoLight)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-    }
-}
-
-/// A kid's photo as a tile ground, with their accent behind it while it loads
-/// and a scrim so the name stays legible over any photo.
-private struct KidTilePhoto: View {
-    let urlString: String
-    let accent: Color
-
-    var body: some View {
-        ZStack {
-            accent
-            AvatarCircleView(urlString: urlString, fallbackSystemImage: "figure.child", size: 400)
-                .scaledToFill()
-                .clipped()
-            LinearGradient(
-                colors: [.black.opacity(0.45), .black.opacity(0.1)],
-                startPoint: .top, endPoint: .bottom
-            )
-        }
+        // The frame's 17.715pt content inset (`29:2824`), its own odd value.
+        .padding(17.7)
+        .frame(maxWidth: .infinity, minHeight: 153)
+        .contentShape(Rectangle())
     }
 }
 
@@ -598,11 +426,10 @@ final class KidsHomeViewModel: ObservableObject {
 
         var id: String { kidKey }
 
-        /// The kid's card border + monogram color. Seeded on the kid-agent
-        /// config id where one exists so a rename can't recolor the card; the
-        /// profile key is the fallback for kids with no config yet. Must stay
-        /// identical to `KidSettingsSheet`'s seed or a card and its sheet
-        /// disagree on color.
+        /// The kid's accent color. Seeded on the kid-agent config id where one
+        /// exists so a rename can't recolor surfaces; the profile key is the
+        /// fallback for kids with no config yet. Must stay identical to
+        /// `KidSettingsSheet`'s seed or a tile and its sheet disagree on color.
         var accent: Color { .kidAccent(seed: agentID ?? kidKey) }
 
         /// "with Nova, yesterday" — the companion, plus when they last talked.
@@ -683,7 +510,7 @@ final class KidsHomeViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            // Family profile is the source of truth for who gets a card.
+            // Family profile is the source of truth for who gets a tile.
             // Configs only fill in display name and status — they're absent
             // for fresh families and during pre-consent state.
             let svc = service
@@ -757,7 +584,7 @@ final class KidsHomeViewModel: ObservableObject {
     }
 
     /// Parent-reviewed reactivation of a crisis-locked companion: clears the lock,
-    /// re-enables, and refreshes so the card flips back to Active.
+    /// re-enables, and refreshes so the tile flips back to Active.
     func reactivate(agentID: String) async {
         do {
             try await service.revive(agentID: agentID)
@@ -775,8 +602,8 @@ final class KidsHomeViewModel: ObservableObject {
         catch { return [] }
     }
 
-    /// Recaps are decoration, never a gate: any failure just leaves the cards
-    /// on their "hasn't chatted yet" copy.
+    /// Recaps are decoration, never a gate: any failure just leaves the tiles
+    /// silent about chat history.
     private static func summariesOrEmpty(baseURL: URL, userID: String) async -> [KidDailySummary] {
         (try? await HomeDashboardService.dailySummaries(baseURL: baseURL, userID: userID)) ?? []
     }

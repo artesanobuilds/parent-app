@@ -107,6 +107,70 @@ from app.storage import StorageBackend
 
 logger = logging.getLogger(__name__)
 
+# ── Family cascade table partition ──────────────────────────────────────────
+# Every table swept by a plain `DELETE ... WHERE user_id = ?` in the family
+# cascade, in the order the original delete ran them. `delete_family` uses the
+# whole list; `reset_family` (wipe the data, KEEP the sign-in) skips the
+# identity subset and legal_acceptances. One shared list means the two
+# cascades cannot drift when a new user-keyed table is added — add it HERE.
+FAMILY_CASCADE_TABLES: List[str] = [
+    "kid_agent_crisis_locks",
+    "kid_agent_configs",
+    "kid_credentials",
+    "moderation_events",
+    "auth_tokens",
+    "refresh_tokens",
+    "auth_identities",
+    "user_accounts",
+    "push_device_tokens",
+    "share_tokens",
+    "daily_summaries",
+    "consent_records",
+    "user_data",
+    # Activity-planning / chief-of-staff tables — all keyed by user_id.
+    # Account deletion must wipe these too (privacy), and this lets a
+    # test-user purge fully clean up research runs etc.
+    "research_runs",
+    "activity_candidates",
+    "tracked_activities",
+    "calendar_entries",
+    "recurring_appointments",
+    "caregivers",
+    "logistics_assignments",
+    "todo_items",
+    "ingest_artifacts",
+    "cos_messages",
+    "integration_accounts",
+    "email_sync_runs",
+    "calendar_sync_runs",
+    "registration_windows",  # window_notifications cascade runs first
+    # Legal ACCEPTANCES are user audit state and go with the family on DELETE.
+    # legal_documents (the policies themselves) deliberately survive.
+    "legal_acceptances",
+    "saved_items",
+    # First-run warm-up job rows + the coach nudges they produced.
+    "onboarding_warmup_runs",
+    "coach_nudges",
+    # Household members / Circle. Deleting the family removes my roster; the
+    # reciprocal rows OTHER families hold that point at me are swept
+    # separately (they carry my user_id in member_user_id, not user_id).
+    "household_members",
+]
+
+# The sign-in identity: the rows that make "this Apple/Google account is this
+# user_id" true. `reset_family` keeps these so a tester can wipe their family
+# data and re-run onboarding on the SAME account.
+FAMILY_IDENTITY_TABLES: frozenset = frozenset({
+    "auth_tokens",
+    "refresh_tokens",
+    "auth_identities",
+    "user_accounts",
+})
+
+# Reset additionally keeps legal_acceptances — the testers already accepted
+# the terms; a data reset does not un-accept them.
+FAMILY_RESET_SKIP_TABLES: frozenset = FAMILY_IDENTITY_TABLES | {"legal_acceptances"}
+
 
 class DuckDBStorage(StorageBackend):
     """
@@ -2294,7 +2358,53 @@ class DuckDBStorage(StorageBackend):
 
         Tables left intact: content (categories/articles) and audit_events
         itself.
+
+        The plain per-table sweep is driven by the module-level
+        FAMILY_CASCADE_TABLES list, shared with `reset_family` so the two
+        cascades cannot drift.
         """
+        return self._cascade_family(
+            user_id=user_id, actor=actor,
+            tables=FAMILY_CASCADE_TABLES, action="family_deleted",
+        )
+
+    def reset_family(self, *, user_id: str, actor: str) -> Dict[str, Any]:
+        """
+        Tester reset: the `delete_family` cascade MINUS the sign-in identity
+        (auth_identities, user_accounts, refresh_tokens, auth_tokens) and
+        MINUS legal_acceptances (the testers already accepted the terms).
+        The account keeps its Apple/Google identity, so after the wipe the
+        tester signs back in on the SAME user_id, `hasProfile` comes back
+        false, and the redesigned onboarding runs again on their real account.
+
+        Same shape as delete_family: {"counts": {...}, "agent_ids": [...]},
+        one transaction, audit_events row ("family.reset") written last.
+        """
+        tables = [t for t in FAMILY_CASCADE_TABLES if t not in FAMILY_RESET_SKIP_TABLES]
+        return self._cascade_family(
+            user_id=user_id, actor=actor,
+            tables=tables, action="family.reset",
+        )
+
+    def user_exists(self, user_id: str) -> bool:
+        """True if the user has an account row, a sign-in identity, or any
+        user_data payload — used by the admin reset route's 404 check."""
+        for table in ("user_accounts", "auth_identities", "user_data"):
+            n = self._con.execute(
+                f"SELECT count(*) FROM {table} WHERE user_id = ?", [user_id],
+            ).fetchone()[0]
+            if n:
+                return True
+        return False
+
+    def _cascade_family(
+        self, *, user_id: str, actor: str, tables: List[str], action: str,
+    ) -> Dict[str, Any]:
+        """Shared body of delete_family / reset_family: the pre-passes that
+        join through other keys (kid_messages via agent_id, window_notifications
+        via window_id, the Circle tables via owner/conversation), the plain
+        per-table sweep over `tables`, the claimed_by / member_user_id
+        null-outs, and the audit row written LAST."""
         deleted: Dict[str, int] = {}
 
         # Wrap the whole cascade in one transaction (A5) so a kill mid-delete
@@ -2408,50 +2518,7 @@ class DuckDBStorage(StorageBackend):
                 [user_id, user_id],
             )
 
-            for table in [
-                "kid_agent_crisis_locks",
-                "kid_agent_configs",
-                "kid_credentials",
-                "moderation_events",
-                "auth_tokens",
-                "refresh_tokens",
-                "auth_identities",
-                "user_accounts",
-                "push_device_tokens",
-                "share_tokens",
-                "daily_summaries",
-                "consent_records",
-                "user_data",
-                # Activity-planning / chief-of-staff tables — all keyed by
-                # user_id. Account deletion must wipe these too (privacy), and
-                # this lets a test-user purge fully clean up research runs etc.
-                "research_runs",
-                "activity_candidates",
-                "tracked_activities",
-                "calendar_entries",
-                "recurring_appointments",
-                "caregivers",
-                "logistics_assignments",
-                "todo_items",
-                "ingest_artifacts",
-                "cos_messages",
-                "integration_accounts",
-                "email_sync_runs",
-                "calendar_sync_runs",
-                "registration_windows",  # window_notifications cascade above
-                # Legal ACCEPTANCES are user audit state and go with the family.
-                # legal_documents (the policies themselves) deliberately survive.
-                "legal_acceptances",
-                "saved_items",
-                # First-run warm-up job rows + the coach nudges they produced.
-                "onboarding_warmup_runs",
-                "coach_nudges",
-                # Household members / Circle. Deleting the family removes my
-                # roster; the reciprocal rows OTHER families hold that point
-                # at me are swept separately below (they carry my user_id in
-                # member_user_id, not user_id).
-                "household_members",
-            ]:
+            for table in tables:
                 pre = self._con.execute(
                     f"SELECT count(*) FROM {table} WHERE user_id = ?",
                     [user_id],
@@ -2477,7 +2544,7 @@ class DuckDBStorage(StorageBackend):
 
             self.write_audit_event(
                 user_id=user_id, actor=actor,
-                action="family_deleted", details={"counts": deleted},
+                action=action, details={"counts": deleted},
             )
         return {"counts": deleted, "agent_ids": agent_ids}
 
@@ -3921,6 +3988,35 @@ class DuckDBStorage(StorageBackend):
                     fit_score = row[0]
                 if fit_reason is None:
                     fit_reason = row[1]
+
+        # Copy forward the candidate's descriptive fields (ages, schedule,
+        # price text, location, category) so a saved activity's detail view
+        # doesn't go blank the moment it leaves the search results — those
+        # fields have no dedicated tracked_activities columns, so they ride
+        # in details_json (round 4: iOS detail view was dropping to just
+        # kid/cost because the client saves lost this data on the way in).
+        # start_date/end_date DO have columns; fill them only if the caller
+        # didn't already set them explicitly.
+        if candidate_id:
+            crow = self._con.execute(
+                """SELECT age_min, age_max, schedule_text, price_text, location_text,
+                          city, category, start_date, end_date
+                   FROM activity_candidates WHERE id = ?""",
+                [candidate_id]
+            ).fetchone()
+            if crow:
+                cand_details = {
+                    "age_min": crow[0], "age_max": crow[1],
+                    "schedule_text": crow[2], "price_text": crow[3],
+                    "location_text": crow[4], "city": crow[5], "category": crow[6],
+                }
+                cand_details = {k: v for k, v in cand_details.items() if v is not None}
+                if cand_details:
+                    details = {**cand_details, **(details or {})}
+                if start_date is None and crow[7] is not None:
+                    start_date = str(crow[7])
+                if end_date is None and crow[8] is not None:
+                    end_date = str(crow[8])
 
         activity_id = str(uuid.uuid4())
         self._con.execute(

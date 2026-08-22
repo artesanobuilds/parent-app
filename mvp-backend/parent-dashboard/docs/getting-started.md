@@ -50,20 +50,25 @@ pocket: the [parenting coach](coach) and your kids'
 
 ## Filling in your family
 
-Signing up asks the essentials. The details that make the coach's advice specific — each
-child's birthday, grade and personality, and who else helps with them — come right after,
-as a guided pass you'll see the first time you land on Home. It steps through one person
-per screen: your children, then the adults in your circle, then you.
+The app introduces itself before it asks you to sign up *(app update 1.90)*: tell the
+coach who's on your calendar, hand it one real thing — a team email, a group text, a
+photographed flyer, or just say it out loud — and watch it come back as a plan card
+(who, what, when, where). You check its work, the coach introduces itself using your
+family's actual details, and only then do you create the account. Everything you entered
+comes with you.
 
-Nothing about it is compulsory. Every step has **Skip for now**, and **Finish later** in
-the header closes it for good. Home works either way, and you can come back to any person
-later:
+The details that make the coach's advice specific — each child's grade, school style,
+what they're into and where they shine, plus your household and language — come right
+after, as one "Tell me about…" pass the first time you land on Home.
+
+Nothing about it is compulsory. **Set up later** skips it, Home works either way, and
+you can come back to any person later:
 
 - Tap **Set up {name}** on a child's tile on Home.
-- Press and hold a child's tile and choose **Finish setting up {name}**.
+- Tap the **⋯** on a child's tile and choose **Finish setting up {name}**.
 - Or go to **Settings**, and tap the child under "Your family" — same editors.
 
-Close the app mid-way and it resumes on the person you were on.
+Close the app mid-way and it resumes where you were.
 
 **Adding a child** is on Home too — **+ Add another child**, under the tiles (or
 **Settings → Your family → + Add a kid**; they're the same thing).

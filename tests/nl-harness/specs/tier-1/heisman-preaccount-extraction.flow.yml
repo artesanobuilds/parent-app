@@ -1,0 +1,53 @@
+spec:
+  name: heisman-preaccount-extraction
+  tier: 1
+  modules: [onboarding_extract, auth, profile, cos]
+  intent: >
+    Heisman sprint-01: the pre-account funnel lets an ANONYMOUS visitor hand the
+    coach a real-world scrap and get structured {who,what,when,where} activities
+    back, then carries that data (plus the step-03 topic and the parent's own
+    weekly to-dos) through the post-signup seed into real plan-board rows. The
+    anonymous token is scope-only — it must never work as a user credential,
+    and a user credential must never work for extraction. If this flow breaks,
+    either the app's first impression is dead or an auth boundary has opened.
+
+  personas:
+    parent:
+      preset: new-parent
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "ONBOARDING_EXTRACT_ENABLED is not disabled in the target env"
+
+  invariants:
+    - "POST /onboarding/anon-session mints {token, expires_in} with no auth"
+    - "POST /onboarding/extract without a token is 401"
+    - "POST /onboarding/extract with a REAL user bearer is 401 (scope check)"
+    - "The anon token is rejected by an authenticated endpoint (GET /profile) — it is not a user credential"
+    - "Extract with an empty body is 422; text over the cap is 413"
+    - "(requires_openai) Extract on a realistic scrap returns >=1 activity with who/what/when/where/notes keys"
+    - "Seeding with topic + parent_week_tasks + extracted_activities lands focus_topic and self_care_tasks on the parent profile"
+    - "Each parent_week_task becomes a plan-board card with NO kid attribution"
+    - "An extracted activity whose `who` matches a seeded kid becomes that kid's board card"
+    - "The board rows carry the extraction's schedule/location detail"
+
+  boundary_contracts:
+    - endpoint: POST /onboarding/anon-session
+      as: anonymous
+      status: 200
+      response_includes: [token, expires_in]
+
+    - endpoint: POST /onboarding/extract
+      as: anon-session-token
+      status: 200
+      response_includes: [activities]
+
+    - endpoint: POST /profile/seed
+      as: parent
+      status: 200
+      response_includes: [parent, children]
+
+    - endpoint: GET /cos/plan/board
+      as: parent
+      status: 200
+      response_includes: [stages]

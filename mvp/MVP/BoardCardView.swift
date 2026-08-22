@@ -91,6 +91,16 @@ struct BoardCardView: View {
                     .font(.hearthBodySM)
                     .foregroundColor(.inkSecondary)
             }
+            // Onboarding-seeded "Considering" suggestions carry no
+            // provider/dates/price yet (they're generic category starters,
+            // not a matched camp) — `notes` is the one piece of context the
+            // seed writes, and until now the model dropped it, leaving the
+            // card with nothing but a title and a button.
+            if let notes = activity.notes, activity.provider == nil, activity.when == nil {
+                Text(notes)
+                    .font(.hearthBodySM)
+                    .foregroundColor(.inkMuted)
+            }
             // Sprint-2: overlaps
             if let overlaps = activity.overlaps, !overlaps.isEmpty {
                 ForEach(overlaps) { overlap in

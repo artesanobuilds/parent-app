@@ -23,6 +23,25 @@ struct MVPApp: App {
     // Injected into the tab tree so a Settings screen can flip the gate.
     @StateObject private var session = AppSession()
 
+    init() {
+        // `UITEST_USER_ID=<id>` (DEBUG only): preset the launch gate so
+        // headless simulator driving can reach the TAB APP as a signed-in
+        // user. `UITEST_SKIP_SIGNIN` only crosses the sign-in WALL inside the
+        // funnel — it never sets `user_name`, so the
+        // `onboardingCompleted && !userName.isEmpty` gate below can't open
+        // and "Take me home" appears to do nothing (round-4 discovery, after
+        // a simctl erase wiped the previously signed-in test account). Same
+        // idiom as `TEST_SIGNIN`/`UITEST_SKIP_SIGNIN`: #if DEBUG + env var,
+        // nothing else. Token issuance rides the existing closed-beta
+        // `ensureAuthToken` claim on MainTabView's launch task.
+        #if DEBUG
+        if let uid = ProcessInfo.processInfo.environment["UITEST_USER_ID"], !uid.isEmpty {
+            UserDefaults.standard.set(uid, forKey: "user_name")
+            UserDefaults.standard.set(true, forKey: "onboarding_completed")
+        }
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             #if DEBUG
@@ -73,13 +92,12 @@ struct MVPApp: App {
                     PushRegistration.requestAndRegister()
                 }
         } else {
-            // 2026-08-09: the order INVERTED AGAIN, back toward auth-first —
-            // Miguel's 1:47pm Figma screenshot showed the canvas order as
-            // `choose a plan` → `create your account` → the branded splash,
-            // with the actual questionnaire only starting after both. The
-            // whole thing (paywall, sign-in, splash, AND the questionnaire)
-            // still lives inside one `OnboardingView` / one `flow` — only the
-            // ORDER of steps within it changed, not this launch-gate check.
+            // 2026-08-21 (Heisman sprint-01): the order inverted BACK —
+            // every question (and a real pre-account extraction) now comes
+            // FIRST, and the account wall sits at the tail, right before the
+            // paywall and the seed. The whole thing still lives inside one
+            // `OnboardingView` / one `flow` — only the ORDER of steps within
+            // it changed, not this launch-gate check.
             //
             // `onboarding_completed`, `user_name` and `parent_display_name`
             // keep exactly their old meanings regardless of internal step
@@ -200,7 +218,26 @@ struct MVPApp: App {
             "education_style": data.educationStyle,
             "family_activities": data.familyActivities,
             "coach_voice": data.coachVoice,
-            "coach_personality": data.coachPersonality
+            "coach_personality": data.coachPersonality,
+            // Heisman sprint-01 (2026-08-21) — new keys, additive. The
+            // backend tolerates unknown keys, so these can ship ahead of it.
+            //   topic                — a topic-card id or the free string
+            //   parent_week_tasks    — step-05 own-to-dos (+ free-text note)
+            //   extracted_activities — step-04's REAL extraction result,
+            //                          [{who,what,when,where,notes}]; empty
+            //                          when extraction was skipped/failed
+            //                          (the static sample never seeds)
+            "topic": data.topic,
+            "parent_week_tasks": data.parentWeekTasks,
+            "extracted_activities": data.extractedActivities.map {
+                [
+                    "who": $0.who,
+                    "what": $0.what,
+                    "when": $0.when,
+                    "where": $0.where,
+                    "notes": $0.notes
+                ]
+            }
         ]
         if let adults = data.adultsInHousehold {
             body["adults_in_household"] = adults

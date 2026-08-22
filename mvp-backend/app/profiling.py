@@ -58,6 +58,18 @@ class ParentProfile:
     support_boundaries: Optional[str] = None  # how/when helpers engage
     cultural_background: Optional[str] = None
     parenting_style: Optional[str] = None  # e.g., authoritative/connection-first tendencies
+    # 2026-08-21 (Heisman): four fields the iOS seed has ALWAYS posted but the
+    # dataclass never declared — `_apply_update`'s hasattr guard dropped them
+    # silently (same class of bug as secondary_language above). Plus the two
+    # new Heisman constructs: the step-03 focus topic and the parent's own
+    # weekly to-dos (self-care) — the latter also seeded as kid_name-NULL
+    # tracked_activities, this copy is the coach's context.
+    family_activities: List[str] = field(default_factory=list)
+    education_style: Optional[str] = None
+    coach_voice: Optional[str] = None
+    coach_personality: Optional[str] = None
+    focus_topic: Optional[str] = None  # "the one thing the coach should take on"
+    self_care_tasks: List[str] = field(default_factory=list)
     stressors: List[str] = field(default_factory=list)
     goals: List[str] = field(default_factory=list)
     coping_strategies: List[str] = field(default_factory=list)
@@ -91,6 +103,12 @@ class ChildProfile:
     pronouns: Optional[str] = None
     age: Optional[float] = None
     grade_band: Optional[str] = None  # e.g., preschool, elementary, middle, high
+    # Heisman "one last thing" per-kid school-style dropdown (2026-08-21). The
+    # parent-level `education_style` predates it and stays — a household-wide
+    # default — but the frame asks per kid, and the PATCH whitelist derives from
+    # THIS dataclass, so without the field a client sending it would get a
+    # silent 200 with the value dropped (same class of bug as secondary_language).
+    school_style: Optional[str] = None  # e.g., Public school, Montessori, Homeschool
     temperament: Optional[str] = None  # e.g., sensitive, high-energy, adaptable
     interests: List[str] = field(default_factory=list)
     strengths: List[str] = field(default_factory=list)

@@ -40,6 +40,13 @@ bugs**. Each rule earns its place. Follow them.
 - iOS Codable is strict: one type mismatch empties a whole list. DuckDB `DOUBLE` → Swift
   `Double?` (not `Int?`). See memory `debugging_ios_codable_backend_contract`.
 
+### Figma-sourced UI
+- Follow `docs/design/figma-fidelity-playbook.md`: walk every frame into a measured spec
+  before building (one batched `/nodes` call), translate EVERY measured property (not just
+  the gist), export every frame glyph as a template SVG vector (one batched `/images` call),
+  and verify per-section side-by-side at matched scale — iterate to zero visible difference,
+  not "close enough."
+
 ### Public docs stay current
 - The dashboard ships public product docs (`mvp-backend/parent-dashboard/docs/*.md`,
   served at `/dashboard/docs` outside the auth guard). **A phase/PR that adds or changes

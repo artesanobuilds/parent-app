@@ -361,6 +361,15 @@ def build_board(
         contact_email = ((a.get("contact") or {}).get("email") or "").strip()
         entry["watchable"] = bool(contact_email)
         entry["watching"] = bool(gmail_connected and contact_email and status in WATCHED)
+        # A saved candidate's ages/schedule/price-text/location/category ride
+        # in details_json (no dedicated columns) — lift them to top-level
+        # keys so clients don't need to know about the details envelope.
+        # Missing on onboarding-seeded "Considering" suggestions, which have
+        # no candidate to copy from — that's the honest, expected case.
+        details = a.get("details") or {}
+        for key in ("age_min", "age_max", "schedule_text", "price_text", "location_text", "city", "category"):
+            if details.get(key) is not None:
+                entry[key] = details[key]
         sections[step["stage"]].append(entry)
 
     return {

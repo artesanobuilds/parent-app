@@ -95,6 +95,106 @@ def test_seed_persists_parent_and_kids_ios_payload():
         _reconnect_shared_storage(server)
 
 
+def test_seed_heisman_keys_land_on_profile_and_plan_board():
+    """Heisman sprint-01: the funnel posts new keys and they must actually
+    LAND, not just 200 (the secondary_language lesson below: `_apply_update`
+    silently drops unknown keys, so a 200 proves nothing by itself).
+
+      • topic → parent.focus_topic; parent_week_tasks → parent.self_care_tasks
+      • family_activities / education_style / coach_voice / coach_personality /
+        secondary_language stored verbatim
+      • parent_week_tasks become kid_name-NULL tracked_activities rows
+        (activity_type "outing", details.source "onboarding_self", self=true)
+      • extracted_activities become "extracurricular" rows — `who` matched to
+        a kid by first name case-insensitively, unmatched `who` → kid_name
+        NULL; when/where ride as details.schedule_text / location_text; notes
+        persist
+    """
+    from fastapi.testclient import TestClient
+    import app.server as server
+
+    try:
+        with TestClient(server.app) as client:
+            user_id = "seed-contract-heisman-user"
+            tok = client.post("/auth/issue-token", json={"user_id": user_id}).json()["token"]
+            auth = {"Authorization": f"Bearer {tok}"}
+
+            payload = {
+                "user_id": user_id,
+                "parent_name": "Greg",
+                "kids": [
+                    {"name": "Lily", "age": "12", "temperament": "", "pronouns": "", "grade_band": ""},
+                ],
+                "household": "Single parent",
+                "postal_code": "98333",
+                "adults_in_household": 2,
+                # ── the Heisman additions ─────────────────────────────
+                "secondary_language": "es",
+                "family_activities": ["hiking", "board games"],
+                "education_style": "public school",
+                "coach_voice": "warm",
+                "coach_personality": "direct",
+                "topic": "After-school logistics",
+                "parent_week_tasks": ["Book dentist", "Buy a gift for Sam"],
+                "extracted_activities": [
+                    {
+                        "who": "lily",  # case-insensitive first-name match
+                        "what": "Swim lessons",
+                        "when": "Tuesdays · 4:15 pm",
+                        "where": "Northgate Aquatic Center",
+                        "notes": "Bring goggles",
+                    },
+                    {
+                        "who": "Coach Sam",  # matches nobody → family-wide row
+                        "what": "Fall soccer season",
+                        "when": "",
+                        "where": "",
+                    },
+                ],
+            }
+
+            r = client.post("/profile/seed", json=payload, headers=auth)
+            assert r.status_code == 200, r.text
+
+            # ── (b) parent profile carries the new fields ─────────────
+            parent = client.get("/profile", headers=auth).json()["parent"]
+            assert parent["focus_topic"] == "After-school logistics"
+            assert parent["self_care_tasks"] == ["Book dentist", "Buy a gift for Sam"]
+            assert parent["family_activities"] == ["hiking", "board games"]
+            assert parent["education_style"] == "public school"
+            assert parent["coach_voice"] == "warm"
+            assert parent["coach_personality"] == "direct"
+            assert parent["secondary_language"] == "es"
+
+            # ── (c) the plan board got the REAL rows ──────────────────
+            rows = {a["name"]: a for a in server.storage_backend.list_tracked_activities(user_id)}
+            assert set(rows) == {
+                "Book dentist", "Buy a gift for Sam", "Swim lessons", "Fall soccer season",
+            }
+
+            for task in ("Book dentist", "Buy a gift for Sam"):
+                row = rows[task]
+                assert row["kid_name"] is None, "a parent self-task must not attach to a kid"
+                assert row["activity_type"] == "outing"
+                assert row["details"] == {"source": "onboarding_self", "self": True}
+
+            swim = rows["Swim lessons"]
+            assert swim["kid_name"] == "Lily", "who='lily' must match the kid case-insensitively"
+            assert swim["activity_type"] == "extracurricular"
+            assert swim["details"]["source"] == "onboarding_extract"
+            assert swim["details"]["schedule_text"] == "Tuesdays · 4:15 pm"
+            assert swim["details"]["location_text"] == "Northgate Aquatic Center"
+            assert swim["notes"] == "Bring goggles"
+
+            soccer = rows["Fall soccer season"]
+            assert soccer["kid_name"] is None, "an unmatched `who` must land family-wide, never invent a kid"
+            assert soccer["details"] == {"source": "onboarding_extract"}, (
+                "empty when/where must not write empty schedule_text/location_text keys"
+            )
+    finally:
+        _reconnect_shared_storage(server)
+
+
 def test_saving_basics_does_not_wipe_learned_fields():
     from fastapi.testclient import TestClient
     import app.server as server

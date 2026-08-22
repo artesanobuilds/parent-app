@@ -76,6 +76,10 @@ struct ChildProfileDTO: Codable {
     var pronouns: String? = nil
     var age: Double? = nil
     var gradeBand: String? = nil
+    /// Heisman "one last thing" per-kid school-style dropdown. Backend field
+    /// `school_style` on ChildProfile (the parent-level `education_style` is a
+    /// household default; the frame asks per kid).
+    var schoolStyle: String? = nil
     var temperament: String? = nil
     var interests: [String]? = nil
     var strengths: [String]? = nil
@@ -110,6 +114,7 @@ struct ChildProfileDTO: Codable {
         case triggers, motivators, neurodiversity, dislikes, goals
         case avatarUrl = "avatar_url"
         case gradeBand = "grade_band"
+        case schoolStyle = "school_style"
         case academicStrengths = "academic_strengths"
         case emotionRegulation = "emotion_regulation"
         case socialProfile = "social_profile"

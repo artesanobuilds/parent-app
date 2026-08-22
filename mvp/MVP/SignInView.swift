@@ -48,28 +48,20 @@ struct SignInView: View {
         return AuthService.shared.legacyToken(for: uid)
     }
 
-    /// `754:4943` "Create account": Inter w400 **27.23/33**. No token at this
-    /// size — `hearthDisplayMD` (28pt) is the closest fixed step but it's
-    /// Fraunces, the wrong family entirely, so this composes the sans family
-    /// directly at the measured size rather than reach for a display token.
-    private static let cardTitleFont =
-        Font.custom(HearthFontFamily.sans, size: 27, relativeTo: .title2)
+    /// Roboto Bold 14 in the frame; Roboto doesn't ship in-bundle, so the
+    /// house sans carries the measured size/weight — see the hand-off report.
+    private static let authLabelFont =
+        Font.custom(HearthFontFamily.sans, size: 14, relativeTo: .subheadline).weight(.bold)
 
     var body: some View {
-        // `create your account` (`754:4943`): "Create account" title, then
-        // straight into the two auth pills — the frame has no subtitle at
-        // all. Sign-in is now the SECOND screen in the funnel (right after
-        // `.plan`, before `.splash`), so the old "Welcome back." splash-jumper
-        // case this once branched on no longer exists — the design shows one
-        // state for this card, and now the code does too.
+        // Heisman `Onboarding - 8` (`42:8321`), 2026-08-21: the wall now
+        // sits at the TAIL of the funnel, after the coach demonstration. The
+        // headline copy lives on the wrapper (`HeismanAccountWallView`);
+        // this view is the button stack — two dark pills — plus the legal
+        // consent and the frame's "Already have an account?" link. The
+        // frame's "Use email instead" link is deliberately omitted this
+        // sprint (Appendix A1: Apple/Google only).
         VStack(spacing: .hearth500) {
-            Text("Create account")
-                .font(Self.cardTitleFont)
-                .foregroundColor(.inkPrimary)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
-
             // Consent sits ABOVE the buttons it gates — a checkbox below two
             // greyed-out buttons reads as an afterthought and hides the reason
             // they're disabled. Not in the frame at all (see the file-level
@@ -77,7 +69,7 @@ struct SignInView: View {
             // not a visual one.
             legalConsentRow
 
-            VStack(spacing: .hearth400) {
+            VStack(spacing: .hearth500) {
                 googleButton
                 appleButton
             }
@@ -89,53 +81,57 @@ struct SignInView: View {
                     .multilineTextAlignment(.center)
             }
 
-            // Design's "Already have an account? Sign in" — there is no
-            // second auth flow to route to (sign-in and sign-up ARE the same
-            // flow here, per the two buttons above), so this is inert text
-            // rather than a button that would just repeat what's already
-            // on-screen. See the hand-off report.
-            Text("Already have an account? Sign in")
+            // Frame's "Already have an account?  Sign in" — underlined, in
+            // the accent. There is no second auth flow to route to (sign-in
+            // and sign-up ARE the same flow here, per the two buttons
+            // above), so this is inert styled text rather than a button that
+            // would just repeat what's already on-screen.
+            Text("Already have an account?  Sign in")
                 .font(.hearthBodySM)
-                .foregroundColor(.inkSecondary)
+                .underline()
+                .foregroundColor(.accentOnCanvas)
+                .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, .hearth800)
-        .padding(.top, .hearth1000)
-        .padding(.bottom, .hearth1000)
+        .padding(.top, .hearth500)
         .frame(maxWidth: .infinity)
         .overlay { if busy { ProgressView().tint(.accentOnCanvas) } }
         .trackScreen("sign_in")
     }
 
-    /// Measured `754:4943` "Continue with Google": `#2B2925` fill
-    /// (`inkHeader` — the same token as the design's own card-header ink,
-    /// exact hex match), r≈**100** (a 50pt-tall pill clips identically to a
-    /// `Capsule`), white label. Google's real multi-color "G" glyph needs
-    /// per-channel hex the token linter forbids outside `Theme.swift`; kept
-    /// as the existing SF Symbol, now tinted white to sit on the dark fill —
-    /// see the hand-off report.
+    /// Measured `42:8321` "Sign up with Google": `ink/secondary` fill
+    /// (`#2B2925` — the app's `inkHeader`, exact hex match), r100 pill,
+    /// py 16, the real multi-color Google "G" (Figma export
+    /// `AuthLogo-google` — a vector asset, so no inline per-channel hex),
+    /// white bold 14 label. The frame's faint `#D0D0D0` 0.85pt outline maps
+    /// to `borderInputPill` (nearest token).
     private var googleButton: some View {
         Button(action: signInWithGoogle) {
-            HStack(spacing: .hearth400) {
-                Image(systemName: "globe")
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundColor(.inkOnPhotoLight)
-                Text("Continue with Google")
-                    .font(.hearthTitleMD)
+            HStack(spacing: 6) {
+                Image("AuthLogo-google")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 18, height: 18)
+                Text("Sign up with Google")
+                    .font(Self.authLabelFont)
                     .foregroundColor(.inkOnPhotoLight)
             }
-            .frame(maxWidth: .infinity, minHeight: 50)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, .hearth500)
             .background(Color.inkHeader)
             .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.borderInputPill, lineWidth: 0.85))
         }
         .disabled(busy || !agreedToLegal)
         .opacity(agreedToLegal ? 1 : 0.4)
     }
 
-    /// Measured `754:4943` "Sign up with Apple" — the native button's OWN
+    /// Measured `42:8321` "Sign up with Apple" — the native button's OWN
     /// label text, not ours to override, so this uses the `.signUp` style
-    /// (not `.signIn`) specifically to match that copy. `.black` is already
-    /// the design's dark-pill fill; `Capsule` matches the ~r100 measured
-    /// radius on a 50pt-tall control.
+    /// (not `.signIn`) specifically to match that copy. `.black` is the
+    /// design's dark-pill family; `Capsule` matches the r100 measured
+    /// radius. (The frame's pill is `#2B2925` with the exported white apple
+    /// glyph — `AuthLogo-apple` ships for any future custom-drawn variant,
+    /// but the native control keeps Apple's HIG blessing.)
     private var appleButton: some View {
         SignInWithAppleButton(.signUp) { request in
             let nonce = Self.randomNonce()

@@ -6,6 +6,7 @@ import { ArticleEditor } from './pages/ArticleEditor'
 import { CategoryList } from './pages/CategoryList'
 import { CategoryEditor } from './pages/CategoryEditor'
 import { EmailSync } from './pages/EmailSync'
+import { Users } from './pages/Users'
 import { CalendarSync } from './pages/CalendarSync'
 import { LegalList } from './pages/LegalList'
 import { LegalEditor } from './pages/LegalEditor'
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="categories/:id" element={<CategoryEditor />} />
           <Route path="email-sync" element={<EmailSync />} />
           <Route path="calendar-sync" element={<CalendarSync />} />
+          <Route path="testers" element={<Users />} />
           <Route path="legal" element={<LegalList />} />
           <Route path="legal/:slug" element={<LegalEditor />} />
           <Route path="*" element={<Navigate to="" replace />} />

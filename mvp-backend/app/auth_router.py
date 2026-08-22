@@ -330,3 +330,79 @@ def admin_link_legacy(body: RelinkRequest, _: None = Depends(_require_admin)):
         provider=body.provider, provider_sub=body.provider_sub,
         target_user_id=body.target_user_id, actor="admin",
     )
+
+
+# ── Admin: tester reset / delete (CMS "Testers" page) ─────────────────────────
+
+
+@router.post("/admin/users/{user_id}/reset")
+def admin_reset_user(user_id: str, _: None = Depends(_require_admin)):
+    """Tester reset: wipe the family's data but KEEP the sign-in identity
+    (auth_identities / user_accounts / refresh_tokens / auth_tokens) and
+    legal_acceptances, so Miguel/Heather/Greg can re-run the redesigned
+    onboarding on their real account: reset here → sign out in the app →
+    relaunch → funnel → sign in at step 8 → hasProfile false → onboarding
+    continues on the SAME user_id.
+
+    Mirrors the post-cascade sequence of DELETE /family/{user_id} in
+    app/server.py — memory evictions, checkpoint sweep, blob sweep, parquet
+    re-export, stream kills — EXCEPT the PostHog person deletion: the person
+    keeps existing because the identity survives.
+    """
+    # Lazy imports: app.server imports this router at startup, so a top-level
+    # import here would be a cycle.
+    from app import server as _server
+
+    storage = _server.storage_backend
+    if not storage.user_exists(user_id):
+        raise HTTPException(status_code=404, detail="unknown user_id")
+
+    result = storage.reset_family(user_id=user_id, actor="admin")
+    counts = result.get("counts", {})
+    # Evict the in-memory family profile BEFORE the parquet re-export below —
+    # profiling_service / the thread stores are process-local singletons that
+    # persist_state()/export can flush back into user_data and resurrect the
+    # wiped family (same bug class as debugging_inmemory_singleton_delete).
+    _server.profiling_service.remove_family(user_id)
+    _server.chat_memory.remove_user(user_id)
+    _server.onboarding_memory.remove_user(user_id)
+    # Durable LangGraph checkpoints: sweep every thread this family owns.
+    _threads_purged = _server.checkpointing.delete_user_threads(user_id)
+    if _threads_purged:
+        counts["agent_threads"] = _threads_purged
+    # Photos live outside the DB entirely — sweep the family's blob prefix.
+    from app import blobs as _blobs
+    _blobs_deleted = _blobs.delete_all(f"u/{user_id}/")
+    if _blobs_deleted:
+        counts["blobs"] = _blobs_deleted
+    try:
+        storage.export_all_parquet()
+    except Exception:
+        # The DB rows are gone (the reset stands); a failed snapshot refresh
+        # must be visible, not silent — the stale snapshot still holds the data.
+        logger.exception("[admin-reset] parquet re-export failed after reset of %s", user_id)
+    # Abort any in-flight kid streams for the wiped agents, and drop the
+    # process-local kid-agent caches so the re-onboarded family starts clean.
+    for agent_id in result.get("agent_ids", []):
+        _server.moderation.kill_agent(agent_id)
+    try:
+        _server.kid_agent_service.invalidate_user(user_id)
+    except Exception:
+        pass
+    return {"ok": True, "user_id": user_id, "identity_kept": True, "counts": counts}
+
+
+@router.post("/admin/users/{user_id}/delete")
+def admin_delete_user(user_id: str, _: None = Depends(_require_admin)):
+    """Admin full delete: the existing DELETE /family/{user_id} cascade,
+    invoked on a tester's behalf. The CMS cannot call that route directly —
+    it requires the USER's bearer token, and /auth/issue-token refuses (403)
+    any account that has claimed a sign-in identity, which every tester has.
+    Calling the route function reuses its entire post-cascade sequence
+    (including the PostHog person deletion) with zero drift.
+    """
+    from app import server as _server
+
+    if not _server.storage_backend.user_exists(user_id):
+        raise HTTPException(status_code=404, detail="unknown user_id")
+    return _server.delete_family(user_id, authenticated_user=user_id)

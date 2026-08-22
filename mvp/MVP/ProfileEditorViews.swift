@@ -69,17 +69,19 @@ enum ProfileOptions {
         ("Gardens", "leaf"),
         ("Nature", "tree"),
         ("Parks", "sportscourt"),
-        ("Science", "atom")
+        ("Science", "atom"),
+        ("Sports", "figure.pool.swim")
     ]
 
     /// Figma-exported vector icons (`Onboarding - need help with acitivities`
-    /// [sic], node `1004:1746`), one imageset per option, template-rendering
-    /// so a single asset tints white-on-teal (selected) or teal-on-white
-    /// (unselected). Exported 2026-08-09 via one batched `/images` SVG call —
-    /// see `docs/design/beta-v1-sprint2.md` round-2 addendum for the node-id
-    /// table if these ever need re-export. Two tiles in that frame ("Nature"
-    /// swimmer, "Parks" rocket) are stray duplicates with no matching option
-    /// in this list — skipped, not mapped.
+    /// [sic], node `1004:1746`, plus the `account 03` grid's swimmer tile),
+    /// one imageset per option, template-rendering so a single asset tints
+    /// white-on-teal (selected) or teal-on-white (unselected). Exported
+    /// 2026-08-09 via one batched `/images` SVG call — see
+    /// `docs/design/beta-v1-sprint2.md` round-2/round-3 addenda for the
+    /// node-id tables if these ever need re-export. The "Sports" swimmer tile
+    /// (round 3) has a unique label, unlike the rocket tile also labeled
+    /// "Parks" in that frame — that one stays a stray duplicate, skipped.
     static func interestIconName(for option: String) -> String? {
         switch option {
         case "Arts & crafts": return "InterestIcon-artsCrafts"
@@ -89,6 +91,7 @@ enum ProfileOptions {
         case "Nature": return "InterestIcon-nature"
         case "Parks": return "InterestIcon-parks"
         case "Science": return "InterestIcon-science"
+        case "Sports": return "InterestIcon-sports"
         default: return nil
         }
     }
@@ -130,6 +133,11 @@ enum ProfileOptions {
     static let household = ["", "single", "co-parenting", "two-parent", "divorced", "widowed", "blended", "multigenerational"]
     static let language = ["", "en", "es", "zh", "other"]
     static let gradeBand = ["", "preschool", "elementary", "middle", "high"]
+    /// Heisman "one last thing" per-kid school-style dropdown. Stored verbatim
+    /// on `ChildProfile.school_style` (no pre-existing option list anywhere —
+    /// the parent-level `education_style` never grew one).
+    static let schoolStyle = ["", "Public school", "Private school", "Montessori",
+                              "Waldorf", "Charter", "Homeschool", "Religious", "Other"]
     static let guidanceStyle = ["", "concise scripts", "explanations"]
     static let stressResponse = ["", "raise voice", "withdraw", "stays regulated"]
 }

@@ -84,6 +84,11 @@ extension Color {
     static let borderStrong      = Color(hex: HearthPrimitives.ink300)
     static let borderInputPill   = Color(hex: HearthPrimitives.borderInput)
     static let borderChipOutline = Color(hex: HearthPrimitives.borderChip)
+    static let borderPlannerCard = Color(hex: HearthPrimitives.borderPlannerCard)
+
+    // Planner search accent (round 3) — see HearthPrimitives note.
+    static let plannerSearchIcon = Color(hex: HearthPrimitives.plannerSearchIcon)
+    static let plannerSearchText = Color(hex: HearthPrimitives.plannerSearchText)
 
     // Accent — teal (beta-v1)
     //
@@ -279,6 +284,17 @@ enum HearthPrimitives {
     // pairs.
     static let borderInput     = "#C9C5BE"   // pill input stroke
     static let borderChip      = "#E9E4DC"   // chip outline stroke
+    // Planner find-activities card (round 3, `1026:10493`). Not the app's
+    // usual `borderInput` — Greg's file draws this ONE card with a slightly
+    // darker neutral stroke.
+    static let borderPlannerCard = "#A4A4A4"
+
+    // Planner search accent (round 3, `1026:10495`/`1026:10496`) — a moss
+    // green distinct from the teal accent, used ONLY on the empty-plan
+    // find-activities card's search icon/labels/button. Deliberately not
+    // reconciled to teal: this is Greg's own file value, kept as drawn.
+    static let plannerSearchIcon = "#4F5D3A"
+    static let plannerSearchText = "#3A4A2A"
 
     // Kid accent (beta-v1)
     static let kidSaffron      = "#E89C2E"

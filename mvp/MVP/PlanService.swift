@@ -218,9 +218,32 @@ struct BoardActivity: Codable, Identifiable, Hashable {
     let fitReason: String?
     /// Sprint-2 overlaps — schedule conflicts with other activities.
     let overlaps: [ActivityOverlap]?
+    /// The one line of context onboarding's `step_plan` seed writes on a
+    /// generic "Considering" suggestion (e.g. "Suggested while setting up
+    /// your account — look for options near 95448"). `build_board` has
+    /// always included it (it's `dict(a)`-copied straight from the tracked
+    /// row) — this model just never declared the field, so it silently
+    /// dropped. A real discovery-search save has its own richer data
+    /// (provider/dates/price) and rarely sets this.
+    let notes: String?
+    /// Round 4: `track_activity` copies these forward from the candidate row
+    /// at save time (`app/duckdb_storage.py`), and `build_board` lifts them
+    /// out of `details_json` onto the wire — a saved item used to lose its
+    /// ages/schedule/price-text/location/category the moment it left the
+    /// search results, leaving the detail view with just kid + cost. Absent
+    /// on onboarding-seeded "Considering" suggestions (no candidate to copy
+    /// from) and on activities added by hand — that's the honest case, not
+    /// an error.
+    let ageMin: Double?
+    let ageMax: Double?
+    let scheduleText: String?
+    let priceText: String?
+    let locationText: String?
+    let city: String?
+    let category: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, provider, watchable, watching, when
+        case id, name, status, provider, watchable, watching, when, notes, city, category
         case kidName = "kid_name"
         case priceAmount = "price_amount"
         case signupURL = "signup_url"
@@ -232,6 +255,11 @@ struct BoardActivity: Codable, Identifiable, Hashable {
         case fitScore = "fit_score"
         case fitReason = "fit_reason"
         case overlaps
+        case ageMin = "age_min"
+        case ageMax = "age_max"
+        case scheduleText = "schedule_text"
+        case priceText = "price_text"
+        case locationText = "location_text"
     }
 }
 

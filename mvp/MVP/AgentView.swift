@@ -347,43 +347,55 @@ struct AgentView: View {
 
     // MARK: - Input Area
 
-    /// Measured `coach-001`/`coach-000`: the composer sits on the DEEP teal
-    /// strip (`#0A5570`) with 16pt top corners — not a hairline divider on
-    /// canvas — and the field inside is white at r=8, body 14. The disclaimer
-    /// stays below the strip on canvas (it isn't part of the frame's strip).
+    /// Measured `coach-001`/`coach-000` (round 2), re-verified round 3
+    /// against `754:5568`/`1026:10542` `chatinput` instances: the composer
+    /// sits on the DEEP teal strip (`#0A5570`) with 16pt top corners — not a
+    /// hairline divider on canvas. A leading `icon.attach` (⊕, white, ~26pt)
+    /// sits OUTSIDE the field; the field itself is white at r=8, body 14,
+    /// with the send affordance INSIDE its own trailing edge — not a
+    /// separate circle floating outside the field. The disclaimer stays
+    /// below the strip on canvas (it isn't part of the frame's strip).
     private var inputArea: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .bottom, spacing: .hearth400) {
-                // Text field
-                TextField("Type your question", text: $messageText, axis: .vertical)
-                    .font(.hearthBodySM)
-                    .foregroundColor(.inkPrimary)
-                    .padding(.horizontal, .hearth500)
-                    .padding(.vertical, .hearth400)
-                    .background(
-                        RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous)
-                            .fill(Color.bgElevated)
-                    )
-                    .lineLimit(1...4)
-                    .disabled(viewModel.isSending || configuration.baseURL == nil || viewModel.isUserIDMissing)
-                    .textInputAutocapitalization(.sentences)
-                    .onSubmit(sendMessage)
+            HStack(alignment: .center, spacing: .hearth400) {
+                // Leading ⊕ — the frame's `icon.attach`; no attach action
+                // exists in this build yet, so it's decorative chrome that
+                // matches the composer shared with Planner (round 3) rather
+                // than a live control.
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 24, weight: .regular))
+                    .foregroundColor(.inkOnPhotoLight)
 
-                // Send button
-                Button {
-                    sendMessage()
-                } label: {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(canSend ? .inkOnPhotoLight : .inkMuted)
-                        .frame(width: 44, height: 44)
-                        .background(
-                            Circle()
-                                .fill(canSend ? Color.accentDefault : Color.bgElevated)
-                                .overlay(Circle().stroke(Color.borderHairline, lineWidth: canSend ? 0 : 1))
-                        )
+                // Text field, with the send arrow inside its trailing edge.
+                HStack(spacing: .hearth300) {
+                    TextField("Ask the coach for help", text: $messageText, axis: .vertical)
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkPrimary)
+                        .lineLimit(1...4)
+                        .disabled(viewModel.isSending || configuration.baseURL == nil || viewModel.isUserIDMissing)
+                        .textInputAutocapitalization(.sentences)
+                        .onSubmit(sendMessage)
+
+                    // Measured `icon.microphone` instance (`754:5587`,
+                    // `1026:10542`) swaps to this arrow glyph once there's
+                    // text to send — plain green (`statusSuccess`, #3D6B3D),
+                    // NO circle background. An earlier pass added a filled
+                    // circle behind it that the frame doesn't draw.
+                    Button {
+                        sendMessage()
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(canSend ? .statusSuccess : .inkMuted)
+                    }
+                    .disabled(!canSend)
                 }
-                .disabled(!canSend)
+                .padding(.horizontal, .hearth500)
+                .padding(.vertical, .hearth400)
+                .background(
+                    RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous)
+                        .fill(Color.bgElevated)
+                )
             }
             // Measured strip padding: 12 top / 18 sides.
             .padding(.horizontal, .hearth600)

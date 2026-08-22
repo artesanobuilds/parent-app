@@ -10,6 +10,58 @@ Every update we ship, newest first — what changed and how to find it. Features
 *app update* arrive on your phone through TestFlight; everything else is live the moment
 it's listed here.
 
+## August 21, 2026 — a brand-new welcome, and a Home built around today
+
+**Getting started is completely redesigned** *(app update 1.90)* — the coach now shows you
+what it can do before you create an account. Tell it who's on your calendar, pick one thing
+to hand over, then paste a real message — a team email, a group text, a photographed flyer —
+or just dictate it, and watch the coach turn it into a structured plan card: who, what,
+when, where. You check its work, it introduces itself with your family's actual details,
+and only then does it ask you to sign in. Your account is created at the end, not the start.
+
+**Speak instead of type** *(app update 1.90)* — every text box in the new welcome flow has a
+microphone. Dictation happens on your device; audio never leaves your phone.
+
+**The coach asks about you, too** *(app update 1.90)* — one new step asks "What about you —
+what's your to-do this week?" Gifts to buy, errands, a workout, date night. Your own
+to-dos get a card on Home right next to the kids' plans, because taking care of the parent
+is the point.
+
+**Home now opens with today** *(app update 1.90)* — a rebuilt Home screen greets you with
+today's date and one card per person: each kid's upcoming activities, your own to-dos, a
+note from your coach, your kids, and fresh MVP Editorial reads — all in one scroll.
+
+**Finding activities is faster** — searching for camps and classes now typically takes under
+two minutes instead of three, with the same quality of matches.
+
+**Saving an activity no longer hides your search results** *(app update 1.88)* — tapping Save
+used to clear the whole results list off the screen and leave the search box broken. Now your
+results stay visible, the saved card shows a checkmark, and you can keep browsing or search
+again right where you are.
+
+**Activity results and saved plan items now show full details** *(app update 1.88)* — match
+percentage, price, schedule, and location are all visible on the card and in the detail view,
+and a saved activity keeps that information instead of showing just the basics.
+
+**One splash screen, not two** *(app update 1.88)* — opening the app used to flash the old "MVP"
+wordmark before showing a different illustration a moment later. Now it's the same artwork the
+whole way through, from the moment the app opens.
+
+**Circle's empty state is personalized** *(app update 1.88)* — before you've added anyone,
+Circle now greets you with your kids' names instead of generic text.
+
+**Polish across Home, Planner, and the tab bar** *(app update 1.88)* — the bottom navigation bar,
+Home's family and coach cards, and Planner's search and detail screens have all been tightened
+up to match the app's design more closely.
+
+**Deleting your account now removes everything, immediately and permanently** — we found and
+closed a gap where coach conversations could briefly outlive an account deletion in our backups.
+They no longer do.
+
+**Re-doing setup is smoother** *(app update 1.88)* — if you delete your account and start over,
+the questionnaire no longer loops you back to the plan screen after the interests step, and the
+splash artwork shows once at launch instead of popping up again mid-setup.
+
 ## August 9, 2026 — one smooth opening screen, and Settings all in one place
 
 **Opening the app is one continuous moment now** *(app update 1.87)* — the very first thing you

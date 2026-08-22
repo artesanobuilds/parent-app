@@ -321,7 +321,50 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
     # the whole body idempotent across a replay.
     (23, "circle_requests.create_and_article_eyebrow",
      lambda con: _add_circle_requests_and_article_eyebrow(con)),
+    # Round 4: `track_activity` now copies a candidate's descriptive fields
+    # (ages / schedule / price text / location / city / category) into
+    # details_json at save time, so a saved activity's detail screen keeps the
+    # information the search result showed. Rows saved BEFORE that change have
+    # a candidate_id but an empty details_json, and would stay thin forever —
+    # their candidate rows are still in activity_candidates, so backfill them.
+    #
+    # Pure UPDATE, no DDL in this body (a CREATE INDEX must never share a
+    # transaction with an UPDATE — memory debugging_duckdb_ddl_gotchas).
+    # Idempotent: only touches rows whose details_json has none of these keys.
+    (24, "tracked_activities.backfill_candidate_details",
+     lambda con: _backfill_tracked_activity_details(con)),
 ]
+
+
+def _backfill_tracked_activity_details(con) -> None:
+    """Migration v24: copy candidate detail fields onto already-saved rows.
+
+    Only fills rows that (a) came from a candidate and (b) don't already carry
+    the fields — an explicit later edit is never clobbered. `json_merge_patch`
+    keeps any unrelated keys the details blob already holds.
+    """
+    con.execute(
+        """
+        UPDATE tracked_activities AS t
+        SET details_json = json_merge_patch(
+                COALESCE(t.details_json, '{}'),
+                (SELECT json_object(
+                            'age_min', c.age_min,
+                            'age_max', c.age_max,
+                            'schedule_text', c.schedule_text,
+                            'price_text', c.price_text,
+                            'location_text', c.location_text,
+                            'city', c.city,
+                            'category', c.category)
+                   FROM activity_candidates c WHERE c.id = t.candidate_id)
+            )
+        WHERE t.candidate_id IS NOT NULL
+          AND EXISTS (SELECT 1 FROM activity_candidates c WHERE c.id = t.candidate_id)
+          AND COALESCE(json_extract_string(t.details_json, '$.schedule_text'), '') = ''
+          AND COALESCE(json_extract_string(t.details_json, '$.price_text'), '') = ''
+          AND COALESCE(json_extract_string(t.details_json, '$.location_text'), '') = ''
+        """
+    )
 
 
 def _add_circle_requests_and_article_eyebrow(con) -> None:

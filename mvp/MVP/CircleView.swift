@@ -32,6 +32,11 @@ struct CircleView: View {
     /// `.task(id:)` re-fetch. A one-shot `.task` goes stale — that's the bug
     /// that kept a deleted kid on Home until relaunch.
     @State private var refreshToken = 0
+    /// Personalizes Circle-000's subtitle ("…show up for {kids}…") — fetched
+    /// once, best-effort. `CircleView` otherwise has no reason to know about
+    /// kids at all, so this stays a one-shot local fetch rather than pulling
+    /// the family profile into a shared store for one string.
+    @State private var kidNames: [String] = []
 
     private var userID: String { contentVM.userId }
     private var baseURL: URL? { contentVM.baseURL }
@@ -135,6 +140,14 @@ struct CircleView: View {
             // Source-of-truth re-fetch on open AND on every token bump (a sheet
             // dismissing, a request answered). A one-shot `.task` goes stale.
             .task(id: refreshToken) { await load() }
+            // One-shot — kid names only personalize copy, not a source of
+            // truth this view otherwise needs to keep fresh.
+            .task {
+                guard let baseURL, kidNames.isEmpty else { return }
+                if let profile = try? await ProfileService.getProfile(baseURL: baseURL, userID: userID) {
+                    kidNames = (profile.children ?? [:]).values.compactMap { $0.name }.sorted()
+                }
+            }
             .onChange(of: session.pendingCircleConversationId) { _, pending in
                 guard let pending else { return }
                 session.pendingCircleConversationId = nil
@@ -214,34 +227,55 @@ struct CircleView: View {
 
     // MARK: - Empty states
 
-    /// Circle-000 — the roster itself is empty.
+    /// Circle-000 — the roster itself is empty. Measured `754:5810`: hero is
+    /// the SAME family-figures vector as the CIRCLE tab icon (component
+    /// `19:68`) scaled to 86×71 — not an SF Symbol; title is the Fraunces
+    /// display treatment (38/40, -1% tracking), not a body-tier title; body
+    /// copy is full ink `#1E1E1E`, not muted gray; button is a fixed 238×46
+    /// centered pill (r=12), not full-width.
     private var noCircleEmptyState: some View {
-        VStack(spacing: .hearth500) {
+        VStack(spacing: 15) {
             Spacer()
-            Image(systemName: "person.2.circle")
-                .font(.system(size: 48, weight: .light))
-                .foregroundColor(.inkMuted)
+            Image("TabIcon-circle")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 86, height: 71)
+                .foregroundColor(.accentDefault)
             Text("Gather your circle")
-                .font(.hearthTitleLG)
+                .font(.hearthDisplaySM)
+                .tracking(-0.38)
                 .foregroundColor(.inkPrimary)
-            Text("Your circle are the people who show up for your kids — grandparents, sitters, close friends. Bring them into one place.")
+                .multilineTextAlignment(.center)
+            Text(circleSubtitle)
                 .font(.hearthBodyMD)
-                .foregroundColor(.inkMuted)
+                .foregroundColor(.inkPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, .hearth800)
             Button { showingInvite = true } label: {
                 Text("Invite someone")
-                    .font(.hearthTitleMD)
+                    .font(.hearthSectionHeader)
                     .foregroundColor(.inkOnPhotoLight)
-                    .frame(maxWidth: .infinity)
+                    .frame(width: 238)
                     .padding(.vertical, .hearth500)
                     .background(Color.accentDefault)
-                    .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusButton, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusTile, style: .continuous))
             }
-            .padding(.horizontal, .hearth700)
             .padding(.top, .hearth300)
             Spacer()
             Spacer()
+        }
+    }
+
+    private var circleSubtitle: String {
+        switch kidNames.count {
+        case 0:
+            return "Your circle are the people who show up for your kids — grandparents, sitters, close friends. Bring them into one place."
+        case 1:
+            return "Your circle are the people who show up for \(kidNames[0]) — grandparents, sitters, close friends. Bring them into one place."
+        default:
+            let names = kidNames.dropLast().joined(separator: ", ") + " & " + kidNames.last!
+            return "Your circle are the people who show up for \(names) — grandparents, sitters, close friends. Bring them into one place."
         }
     }
 

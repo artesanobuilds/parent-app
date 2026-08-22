@@ -1,0 +1,49 @@
+spec:
+  name: tester-reset-loop
+  tier: 2
+  modules: [admin, profile, cos, auth]
+  intent: >
+    The CMS "reset a tester" action (Heisman sprint-01): an admin wipes a
+    tester's family data while KEEPING the auth identity, so Miguel/Heather/
+    Greg can re-run the redesigned onboarding on their real accounts. The loop
+    that must hold: seed -> reset -> everything family-shaped is gone, the
+    credential still works -> re-seed succeeds -> the account is a fresh family
+    on the same identity. A bystander family must be untouched, and the gate
+    must be admin-only.
+
+  personas:
+    tester:
+      preset: new-parent
+    bystander:
+      preset: new-parent
+    admin:
+      preset: admin
+
+  preconditions:
+    - "Backend is reachable at $BASE_URL/health"
+    - "ADMIN_TOKEN is set (flow skips otherwise)"
+
+  invariants:
+    - "POST /admin/users/{id}/reset without the admin token is 401"
+    - "Reset returns identity_kept=true and a per-table counts dict"
+    - "After reset the tester's profile has no children and the plan board has no cards"
+    - "The tester's bearer token STILL AUTHENTICATES after reset (identity kept)"
+    - "The bystander's profile and board are untouched by the tester's reset"
+    - "Re-seeding the same user_id after reset succeeds and the new family reads back"
+    - "Reset of an unknown user_id is 404"
+
+  boundary_contracts:
+    - endpoint: POST /admin/users/{user_id}/reset
+      as: admin
+      status: 200
+      response_includes: [ok, user_id, identity_kept, counts]
+
+    - endpoint: POST /profile/seed
+      as: tester
+      status: 200
+      response_includes: [parent, children]
+
+    - endpoint: GET /cos/plan/board
+      as: tester
+      status: 200
+      response_includes: [stages]

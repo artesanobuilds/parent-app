@@ -161,6 +161,10 @@ struct PlanView: View {
                     activity: route.activity,
                     onCompleteTodo: { todoId in
                         Task { await viewModel.completeTodo(todoId) }
+                    },
+                    onAskCoach: { a in
+                        withAnimation(.hearthFast) { segment = .coach }
+                        cosVM.send("Help me with \(a.name)")
                     }
                 )
             }
@@ -195,20 +199,53 @@ struct PlanView: View {
 
     // MARK: - Header
 
+    /// Measured `planner 01`/`02` (`1026:10488`/`1026:10533`): the hero icon
+    /// sits CENTERED ABOVE a centered "MVP Planner" title (48x48 icon) on
+    /// the two empty states. `planner 3` (content state, board non-empty)
+    /// has NO title row at all — it goes straight from the tab bar into the
+    /// segmented control. Compromise for the content states (not literally
+    /// in the frame): keep a compact leading-icon/title/share row rather
+    /// than deleting the share menu, a real shipped affordance.
+    @ViewBuilder
     private var header: some View {
-        HStack(spacing: .hearth400) {
-            Image(systemName: "calendar")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundColor(.accentDefault)
-            Text("MVP Planner")
-                .font(.hearthDisplayMD)
-                .foregroundColor(.inkPrimary)
-            Spacer()
-            planMenu
+        if boardIsEmpty {
+            VStack(spacing: .hearth300) {
+                HStack {
+                    Spacer()
+                    planMenu
+                }
+                Image("PlannerIcon-hero")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 48, height: 48)
+                    .foregroundColor(.accentDefault)
+                Text("MVP Planner")
+                    .font(.hearthDisplayMD)
+                    .foregroundColor(.inkPrimary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, .hearth700)
+            .padding(.top, .hearth700)
+        } else {
+            HStack(spacing: .hearth400) {
+                Image("PlannerIcon-hero")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 24, height: 24)
+                    .foregroundColor(.accentDefault)
+                Text("MVP Planner")
+                    .font(.hearthDisplayMD)
+                    .foregroundColor(.inkPrimary)
+                Spacer()
+                planMenu
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, .hearth700)
+            .padding(.top, .hearth700)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, .hearth700)
-        .padding(.top, .hearth700)
     }
 
     /// Export the plan as a spreadsheet or mint a scoped read-only share link
@@ -281,6 +318,28 @@ struct PlanView: View {
     /// `segmentPicker`'s body long enough that the type-checker gave up — which
     /// SwiftUI reports as "unable to type-check in reasonable time", not as a
     /// size problem.
+    /// Measured `1026:10490`/`1026:10535`: each segment carries its own
+    /// leading glyph — `PlannerIcon-planEdit` for Plan, `CoachMark` for Ask
+    /// the coach — not text alone.
+    private func segmentIcon(_ seg: PlanSegment) -> some View {
+        Group {
+            switch seg {
+            case .plan:
+                Image("PlannerIcon-planEdit")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+            case .coach:
+                Image("CoachMark")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 12, height: 15)
+            }
+        }
+    }
+
     @ViewBuilder
     private func segmentButton(_ seg: PlanSegment) -> some View {
         let selected = segment == seg
@@ -289,6 +348,7 @@ struct PlanView: View {
             segment = seg
         } label: {
             HStack(spacing: .hearth300) {
+                segmentIcon(seg)
                 Text(seg.label)
                     .font(.hearthBodySMBold)
                 if badge > 0 {
@@ -336,38 +396,81 @@ struct PlanView: View {
             CosChatView(viewModel: cosVM, doors: viewModel.doors)
 
         case .plan:
+            ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: .hearth700) {
-                    if let summary = viewModel.summary {
-                        summaryStrip(summary)
+                // Empty-plan state renders ONLY planner 01's chrome (hero +
+                // "Nothing planned yet?" + find-activities card + flyer card
+                // + footer) — the summary strip, List|Timeline toggle, status
+                // chips, and collapsed search row are content-state
+                // scaffolding the frame doesn't draw when there's nothing to
+                // show yet (round 3: this was leaking through before).
+                // `discoverySection` (loading spinner → candidate list) used
+                // to render ONLY in the empty-plan branch, so saving a first
+                // candidate — which flips `boardIsEmpty` false via
+                // `loadPlan()` — swapped the whole view to the content
+                // branch and the results (still sitting in
+                // `viewModel.candidates`) had no renderer left: search
+                // looked "dead" the moment the plan had anything in it.
+                // Both branches now render it under the same gate.
+                let showDiscovery = viewModel.isDiscovering || !viewModel.candidates.isEmpty
+                    || viewModel.errorMessage != nil || viewModel.completedEmpty
+                if boardIsEmpty {
+                    VStack(alignment: .leading, spacing: .hearth700) {
+                        planEmptyState
+                        if showDiscovery {
+                            discoverySection
+                                .id("discoverySection")
+                        }
                     }
-                    viewModeToggle
-                    statusFilterChips
-                    collapsedSearchRow
-                    if viewMode == .list {
-                        if boardIsEmpty {
-                            planEmptyState
-                        } else {
+                    .padding(.horizontal, .hearth700)
+                    .padding(.top, .hearth500)
+                    .padding(.bottom, .hearth900)
+                } else {
+                    VStack(alignment: .leading, spacing: .hearth700) {
+                        if let summary = viewModel.summary {
+                            summaryStrip(summary)
+                        }
+                        viewModeToggle
+                        statusFilterChips
+                        collapsedSearchRow
+                        if showDiscovery {
+                            discoverySection
+                                .id("discoverySection")
+                        }
+                        if viewMode == .list {
                             boardSection
                             planSomethingNewButton
-                        }
-                    } else {
-                        calendarSection
-                        if viewModel.calendarWeeks.isEmpty {
-                            emptyState(
-                                icon: "calendar",
-                                title: "Your calendar is empty",
-                                message: "Once you confirm camps and activities, your week-by-week plan appears here."
-                            )
+                        } else {
+                            calendarSection
+                            if viewModel.calendarWeeks.isEmpty {
+                                emptyState(
+                                    icon: "calendar",
+                                    title: "Your calendar is empty",
+                                    message: "Once you confirm camps and activities, your week-by-week plan appears here."
+                                )
+                            }
                         }
                     }
+                    .padding(.horizontal, .hearth700)
+                    .padding(.top, .hearth500)
+                    .padding(.bottom, .hearth900)
                 }
-                .padding(.horizontal, .hearth700)
-                .padding(.top, .hearth500)
-                .padding(.bottom, .hearth900)
             }
             .scrollDismissesKeyboard(.immediately)
             .refreshable { await viewModel.loadPlan() }
+            // The loading state (and its eventual result) can render below
+            // the fold on most devices — tapping "Find activities" and
+            // getting no visible reaction ("nothing happens") was a real bug
+            // report, not a search failure. Scroll it into view the moment a
+            // search starts, regardless of which branch is on screen.
+            .onChange(of: viewModel.isDiscovering) { _, isDiscovering in
+                if isDiscovering {
+                    withAnimation(.hearthBase) {
+                        proxy.scrollTo("discoverySection", anchor: .top)
+                    }
+                }
+            }
+            }
         }
     }
 
@@ -558,40 +661,49 @@ struct PlanView: View {
         .buttonStyle(.plain)
     }
 
+    /// The collapsed header is a plain `Button` (toggles `searchCollapsed`
+    /// only). When expanded, `findActivitiesCard` — itself full of interactive
+    /// controls (TextField, menus, a submit Button) — renders as a SIBLING
+    /// below, never nested inside another Button's label. Nesting was the
+    /// bug: an interactive form inside a Button's label makes every tap
+    /// inside it race the outer Button's tap recognizer, so the embedded
+    /// "Find activities" submit was effectively dead once the plan had any
+    /// content (see the fidelity playbook's Button-in-Button trap).
+    @ViewBuilder
     private var collapsedSearchRow: some View {
         Button {
             withAnimation(.hearthBase) { searchCollapsed.toggle() }
         } label: {
             HStack(spacing: .hearth400) {
-                if searchCollapsed {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(.accentDefault)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Find more activities")
-                            .font(.hearthBodyMD.weight(.semibold))
-                            .foregroundColor(.inkPrimary)
-                        // The design's subtitle reads "98332 · 25 mi · camps,
-                        // classes & more". 98332 is Greg's SAMPLE zip — never
-                        // fall back to it, or a parent who hasn't set a location
-                        // reads a stranger's postcode as their own.
-                        Text(
-                            viewModel.locationQuery.isEmpty
-                                ? "Set a location · camps, classes & more"
-                                : "\(viewModel.locationQuery) · \(viewModel.radiusMiles) mi · camps, classes & more"
-                        )
-                        .font(.hearthBodyMD)
-                        .foregroundColor(.inkSecondary)
-                    }
-                    Spacer()
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.inkMuted)
-                } else {
-                    VStack(alignment: .leading, spacing: .hearth400) {
-                        discoverPrompt
-                    }
+                // Measured `1026:10564` ('seach large'): the exported search
+                // vector at 20×20 in the card family's moss green — was an SF
+                // magnifier in teal.
+                Image("PlannerIcon-search")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
+                    .foregroundColor(Color.plannerSearchIcon)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Find more activities")
+                        .font(.hearthBodyMD.weight(.semibold))
+                        .foregroundColor(.inkPrimary)
+                    // The design's subtitle reads "98332 · 25 mi · camps,
+                    // classes & more". 98332 is Greg's SAMPLE zip — never
+                    // fall back to it, or a parent who hasn't set a location
+                    // reads a stranger's postcode as their own.
+                    Text(
+                        viewModel.locationQuery.isEmpty
+                            ? "Set a location · camps, classes & more"
+                            : "\(viewModel.locationQuery) · \(viewModel.radiusMiles) mi · camps, classes & more"
+                    )
+                    .font(.hearthBodyMD)
+                    .foregroundColor(.inkSecondary)
                 }
+                Spacer()
+                Image(systemName: searchCollapsed ? "chevron.down" : "chevron.up")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.inkMuted)
             }
             .padding(.hearth500)
             .background(
@@ -600,61 +712,63 @@ struct PlanView: View {
             )
         }
         .buttonStyle(.plain)
+
+        if !searchCollapsed {
+            findActivitiesCard
+        }
     }
 
+    /// Category chips for the empty-state find-activities card (measured
+    /// `1026:10507`–`1026:10510`: Camp / Activity / Trip / Classes, single
+    /// select, Camp pre-selected in the frame). Camp and Activity share the
+    /// same tent glyph in the source file — reusing `HomeIcon-camp` for both
+    /// is correct, not a mistake.
+    private static let planTypeFilters: [(key: String, label: String, icon: String)] = [
+        ("camp", "Camp", "HomeIcon-camp"),
+        ("activity", "Activity", "HomeIcon-camp"),
+        ("trip", "Trip", "PlannerIcon-trip"),
+        ("class", "Classes", "PlannerIcon-classes")
+    ]
+
+    /// Measured `planner 01` (`1026:10476`): hero + "Nothing planned yet?" +
+    /// find-activities card (zip/radius/category chips/Find button) + flyer
+    /// card + "Planning for {kids}" footer. This is the ONLY chrome the
+    /// frame draws for an empty plan — no summary strip, no List|Timeline
+    /// toggle, no status chips (those are `segmentBody`'s job to hide, see
+    /// its `boardIsEmpty` branch).
     private var planEmptyState: some View {
-        VStack(alignment: .leading, spacing: .hearth700) {
-            VStack(alignment: .leading, spacing: .hearth400) {
+        VStack(spacing: .hearth700) {
+            VStack(spacing: .hearth200) {
+                // Measured `1026:10492` is ONE rich-text node (bold lead-in,
+                // regular continuation) that the plain-text walker collapses
+                // to a single Inter 400/15 run — the earlier pass took that
+                // literally and rendered a 38pt Fraunces headline here, which
+                // both clipped against the segmented control above AND
+                // doesn't match the frame's actual small-bold-caption look.
                 Text("Nothing planned yet?")
-                    .font(.hearthDisplayMD)
+                    .font(.hearthBodyMD.weight(.bold))
                     .foregroundColor(.inkPrimary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, .hearth500)
                 Text("Find a few options — nothing is booked or shared until you say so.")
                     .font(.hearthBodyMD)
-                    .foregroundColor(.inkSecondary)
+                    .foregroundColor(.inkPrimary)
+                    .multilineTextAlignment(.center)
             }
+            .frame(maxWidth: .infinity)
 
-            if !searchCollapsed {
-                // Search card already shown above
-            } else {
-                Button {
-                    withAnimation(.hearthBase) { searchCollapsed = false }
-                } label: {
-                    HStack(spacing: .hearth400) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundColor(.accentDefault)
-                        Text("Find activities")
-                            .font(.hearthBodyMD.weight(.semibold))
-                            .foregroundColor(.inkPrimary)
-                        Spacer()
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.inkMuted)
-                    }
-                    .padding(.hearth500)
-                    .background(
-                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                            .fill(Color.bgElevated)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                                    .stroke(Color.borderHairline, lineWidth: 1)
-                            )
-                    )
-                }
-                .buttonStyle(.plain)
-            }
+            findActivitiesCard
+            flyerCard
 
-            ingestEntry
-
-            VStack(alignment: .leading, spacing: .hearth300) {
+            VStack(spacing: .hearth200) {
                 if let firstKid = viewModel.calendarKids.first {
                     let kids = viewModel.calendarKids.joined(separator: " & ")
                     Text("Planning for \(kids)")
-                        .font(.hearthBodyMD.weight(.semibold))
+                        .font(.hearthBodyMD)
                         .foregroundColor(.inkPrimary)
                 } else {
                     Text("Planning for your kids")
-                        .font(.hearthBodyMD.weight(.semibold))
+                        .font(.hearthBodyMD)
                         .foregroundColor(.inkPrimary)
                 }
                 // Opens the profile hub rather than a single kid's sheet:
@@ -668,8 +782,280 @@ struct PlanView: View {
                 }
                 .buttonStyle(.plain)
             }
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// The find-activities card itself (`1026:10493`: `#F5F3EF` fill,
+    /// `#A4A4A4` stroke w1, r12). Wires to the SAME `viewModel.locationQuery`
+    /// / `radiusMiles` / `startDiscovery()` the existing discovery flow
+    /// already uses — no new backend call, just the frame's compact shape
+    /// instead of the full radius/candidate-count/focus form.
+    private var findActivitiesCard: some View {
+        VStack(alignment: .leading, spacing: .hearth400) {
+            HStack(spacing: .hearth300) {
+                Image("PlannerIcon-search")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
+                    .foregroundColor(Color.plannerSearchIcon)
+                Text("Find activities")
+                    .font(.hearthBodySMBold)
+                    .foregroundColor(Color.plannerSearchText)
+            }
+
+            HStack(spacing: .hearth300) {
+                HStack(spacing: .hearth300) {
+                    Text("Where to:")
+                        .font(.hearthBodySMBold)
+                        .foregroundColor(Color.plannerSearchText)
+                    TextField("Zip code...", text: $viewModel.locationQuery)
+                        .font(.hearthBodySMBold)
+                        .foregroundColor(.inkPrimary)
+                        .keyboardType(.numbersAndPunctuation)
+                        .textInputAutocapitalization(.never)
+                        // Numeric keyboards have no return key — explicit
+                        // dismiss (moved here from the deleted discoverPrompt).
+                        .toolbar {
+                            ToolbarItemGroup(placement: .keyboard) {
+                                Spacer()
+                                Button("Done") { hideKeyboard() }
+                                    .font(.hearthBodyMD.weight(.semibold))
+                                    .foregroundColor(.accentDefault)
+                            }
+                        }
+                }
+                .padding(.horizontal, .hearth400)
+                .padding(.vertical, .hearth300)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                        .fill(Color.bgElevated)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                                .stroke(Color.bgSelected, lineWidth: 1)
+                        )
+                )
+
+                Menu {
+                    ForEach(viewModel.radiusOptions, id: \.self) { mi in
+                        Button("\(mi) mi") { viewModel.radiusMiles = mi }
+                    }
+                } label: {
+                    HStack(spacing: .hearth300) {
+                        Text("\(viewModel.radiusMiles) mi")
+                            .font(.hearthBodySMBold)
+                            .foregroundColor(Color.plannerSearchText)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.inkPrimary)
+                    }
+                    .padding(.horizontal, .hearth400)
+                    .padding(.vertical, .hearth300)
+                    .background(
+                        RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                            .fill(Color.bgElevated)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                                    .stroke(Color.bgSelected, lineWidth: 1)
+                            )
+                    )
+                }
+            }
+
+            // Four chips in a fixed-width card don't reliably fit at every
+            // Dynamic Type size or on every device width — "Activity" (the
+            // longest label) was wrapping to two lines inside its pill
+            // because a bare `HStack` compresses its widest `Text` instead
+            // of scrolling. Horizontal scroll matches the same pattern
+            // `statusFilterChips` already uses elsewhere in this file.
+            // Trailing inset on the SCROLL CONTENT (not just the card padding)
+            // — without it the last chip's edge sits flush against the
+            // ScrollView's own clip boundary and its trailing rounded stroke
+            // gets cropped, reading as a rendering bug rather than "more to
+            // scroll". `.hearth400` mirrors the card's own edge padding.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: .hearth200) {
+                    ForEach(Self.planTypeFilters, id: \.key) { entry in
+                    let selected = typeFilter == entry.key
+                    Button {
+                        typeFilter = selected ? nil : entry.key
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(entry.icon)
+                                .renderingMode(.template)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 14, height: 14)
+                            Text(entry.label)
+                                .font(.hearthBodySM)
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
+                        .foregroundColor(selected ? .inkOnCard : .accentOnCanvas)
+                        .padding(.horizontal, .hearth400)
+                        .padding(.vertical, .hearth300)
+                        .background(
+                            Capsule()
+                                .fill(selected ? Color.accentOnCanvas : Color.bgCoachBanner)
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(Color.accentOnCanvas,
+                                                      lineWidth: selected ? 0 : 0.92)
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    }
+                }
+                .padding(.trailing, .hearth400)
+            }
+
+            // Shipped affordances the frame doesn't draw (from the deleted
+            // discoverPrompt): result-count target + optional free-form focus.
+            // One quiet row, same field treatment as the radius menu above.
+            HStack(spacing: .hearth300) {
+                Menu {
+                    ForEach(viewModel.candidateCountOptions, id: \.self) { n in
+                        Button("Up to \(n)") { viewModel.maxCandidates = n }
+                    }
+                } label: {
+                    HStack(spacing: .hearth300) {
+                        Text("Up to \(viewModel.maxCandidates)")
+                            .font(.hearthBodySMBold)
+                            .foregroundColor(Color.plannerSearchText)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.inkPrimary)
+                    }
+                    .padding(.horizontal, .hearth400)
+                    .padding(.vertical, .hearth300)
+                    .background(
+                        RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                            .fill(Color.bgElevated)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                                    .stroke(Color.bgSelected, lineWidth: 1)
+                            )
+                    )
+                }
+
+                if !viewModel.showFocus {
+                    Button {
+                        withAnimation(.hearthFast) { viewModel.showFocus = true }
+                    } label: {
+                        Text("Add focus (optional)")
+                            .font(.hearthBodySM)
+                            .foregroundColor(.accentOnCanvas)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer(minLength: 0)
+            }
+
+            if viewModel.showFocus {
+                VStack(alignment: .leading, spacing: .hearth300) {
+                    HStack {
+                        Text("Focus (optional)")
+                            .font(.hearthBodySMBold)
+                            .foregroundColor(Color.plannerSearchText)
+                        Spacer()
+                        Button("Remove") {
+                            withAnimation(.hearthFast) {
+                                viewModel.showFocus = false
+                                viewModel.focusText = ""
+                            }
+                        }
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkMuted)
+                    }
+                    ZStack(alignment: .topLeading) {
+                        if viewModel.focusText.isEmpty {
+                            Text("e.g. art camps only · physical activity")
+                                .font(.hearthBodySM)
+                                .foregroundColor(.inkMuted)
+                                .padding(.horizontal, .hearth400 + 4)
+                                .padding(.vertical, .hearth300 + 8)
+                        }
+                        TextEditor(text: $viewModel.focusText)
+                            .font(.hearthBodySM)
+                            .foregroundColor(.inkPrimary)
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: 60)
+                            .padding(.horizontal, .hearth300)
+                            .padding(.vertical, .hearth200)
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                            .fill(Color.bgElevated)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
+                                    .stroke(Color.bgSelected, lineWidth: 1)
+                            )
+                    )
+                }
+            }
+
+            Button {
+                viewModel.startDiscovery()
+            } label: {
+                Text("Find activities")
+                    .font(.hearthBodySMBold)
+                    .foregroundColor(.inkOnCard)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, .hearth400)
+                    .background(Capsule().fill(Color.accentOnCanvas))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.hearth400)
+        .background(
+            RoundedRectangle(cornerRadius: .hearthRadiusTile, style: .continuous)
+                .fill(Color.bgCard)
+                .overlay(
+                    RoundedRectangle(cornerRadius: .hearthRadiusTile, style: .continuous)
+                        .stroke(Color.borderPlannerCard, lineWidth: 1)
+                )
+        )
+    }
+
+    /// Measured `1026:10513`/`1026:10515`/`1026:10516`: a plain teal camera
+    /// glyph (18x16, no circle badge) + ONE paragraph of teal 13pt text in a
+    /// bordered card — NOT `ingestEntry`'s circle-badge/black-title/chevron
+    /// row, which is a different, older component this screen was
+    /// mistakenly reusing (the reason `PlannerIcon-camera`, exported in
+    /// round 3 specifically for this card, was never actually used).
+    /// Same action as `ingestEntry` — one ingest entry point either way.
+    private var flyerCard: some View {
+        Button {
+            viewModel.resetIngest()
+            showIngest = true
+        } label: {
+            HStack(spacing: .hearth300) {
+                Image("PlannerIcon-camera")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 18, height: 16)
+                Text("Paste a camp email or snap a flyer — I'll pull out the details and track it.")
+                    .font(.hearthBodySM)
+                    .multilineTextAlignment(.leading)
+            }
+            .foregroundColor(.accentOnCanvas)
+            .padding(.hearth500)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: .hearthRadiusTile, style: .continuous)
+                    .fill(Color.bgCard)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: .hearthRadiusTile, style: .continuous)
+                            .stroke(Color.borderPlannerCard, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private var planSomethingNewButton: some View {
@@ -698,39 +1084,6 @@ struct PlanView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Ingest entry
-
-    private var ingestEntry: some View {
-        Button {
-            viewModel.resetIngest()
-            showIngest = true
-        } label: {
-            HStack(spacing: .hearth400) {
-                Image(systemName: "doc.text.viewfinder")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.inkOnPhotoLight)
-                    .frame(width: 40, height: 40)
-                    .background(Circle().fill(Color.accentDefault))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Add from a message or photo")
-                        .font(.hearthBodyMD.weight(.semibold))
-                        .foregroundColor(.inkPrimary)
-                    Text("Paste a camp email or snap a flyer — we'll pull out the details")
-                        .font(.hearthBodySM)
-                        .foregroundColor(.inkSecondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.inkMuted)
-            }
-            .padding(.hearth500)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(cardBackground)
-        }
-        .buttonStyle(.plain)
-    }
-
     // MARK: - Discovery
 
     @ViewBuilder
@@ -739,7 +1092,23 @@ struct PlanView: View {
             if viewModel.isDiscovering {
                 discoveringCard
             } else if viewModel.candidates.isEmpty {
-                discoverPrompt
+                // Message ONLY — the search form itself is `findActivitiesCard`,
+                // which both hosts already render (`planEmptyState` on the empty
+                // plan, `collapsedSearchRow`'s expansion on the content state).
+                // This used to be `discoverPrompt`, a second, differently-styled
+                // copy of the whole form (stacked segmented pickers, SF-symbol
+                // magnifier) that had drifted from the designed card — showing
+                // it here stacked two search forms on the empty screen.
+                if viewModel.completedEmpty {
+                    VStack(alignment: .leading, spacing: .hearth300) {
+                        Text("No activities found")
+                            .font(.hearthBodyLG.weight(.semibold))
+                            .foregroundColor(.inkPrimary)
+                        Text("Nothing came back for that area. Add or adjust your ZIP code and try again.")
+                            .font(.hearthBodyMD)
+                            .foregroundColor(.inkSecondary)
+                    }
+                }
             } else {
                 candidateList
             }
@@ -752,138 +1121,13 @@ struct PlanView: View {
         }
     }
 
-    private var discoverPrompt: some View {
-        VStack(alignment: .leading, spacing: .hearth500) {
-            Text(viewModel.completedEmpty ? "No activities found" : "Discover activities")
-                .font(.hearthBodyLG.weight(.semibold))
-                .foregroundColor(.inkPrimary)
-            Text(viewModel.completedEmpty
-                 ? "Nothing came back for that area. Add or adjust your ZIP code and try again."
-                 : "Find camps, classes, and weekend activities near you, matched to each kid. Enter a ZIP code to search around.")
-                .font(.hearthBodyMD)
-                .foregroundColor(.inkSecondary)
-
-            TextField("ZIP code (e.g. 95448)", text: $viewModel.locationQuery)
-                .font(.hearthBodyMD)
-                .foregroundColor(.inkPrimary)
-                .keyboardType(.numbersAndPunctuation)
-                .textInputAutocapitalization(.never)
-                // Numeric keyboards have no return key, so give an explicit
-                // dismiss affordance above the keyboard.
-                .toolbar {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("Done") { hideKeyboard() }
-                            .font(.hearthBodyMD.weight(.semibold))
-                            .foregroundColor(.accentDefault)
-                    }
-                }
-                .padding(.horizontal, .hearth500)
-                .padding(.vertical, .hearth400)
-                .background(
-                    RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
-                        .fill(Color.bgCanvas)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
-                                .stroke(Color.borderStrong, lineWidth: 1)
-                        )
-                )
-
-            // Search radius from the ZIP.
-            VStack(alignment: .leading, spacing: .hearth300) {
-                Text("Search radius")
-                    .font(.hearthBodySM.weight(.semibold))
-                    .foregroundColor(.inkSecondary)
-                Picker("Search radius", selection: $viewModel.radiusMiles) {
-                    ForEach(viewModel.radiusOptions, id: \.self) { mi in
-                        Text("\(mi) mi").tag(mi)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
-            // How many candidates to aim for ("top 5" … "top 50").
-            VStack(alignment: .leading, spacing: .hearth300) {
-                Text("How many to find")
-                    .font(.hearthBodySM.weight(.semibold))
-                    .foregroundColor(.inkSecondary)
-                Picker("How many to find", selection: $viewModel.maxCandidates) {
-                    ForEach(viewModel.candidateCountOptions, id: \.self) { n in
-                        Text("\(n)").tag(n)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
-            // Optional free-form focus — hidden until the parent asks for it, so the
-            // default form is just ZIP + radius.
-            if viewModel.showFocus {
-                VStack(alignment: .leading, spacing: .hearth300) {
-                    HStack {
-                        Text("Focus (optional)")
-                            .font(.hearthBodySM.weight(.semibold))
-                            .foregroundColor(.inkSecondary)
-                        Spacer()
-                        Button("Remove") {
-                            withAnimation(.hearthFast) {
-                                viewModel.showFocus = false
-                                viewModel.focusText = ""
-                            }
-                        }
-                        .font(.hearthBodySM)
-                        .foregroundColor(.inkMuted)
-                    }
-                    ZStack(alignment: .topLeading) {
-                        if viewModel.focusText.isEmpty {
-                            Text("e.g. art camps only · physical activity · just for Ceiba")
-                                .font(.hearthBodyMD)
-                                .foregroundColor(.inkMuted)
-                                .padding(.horizontal, .hearth500 + 4)
-                                .padding(.vertical, .hearth400 + 8)
-                        }
-                        TextEditor(text: $viewModel.focusText)
-                            .font(.hearthBodyMD)
-                            .foregroundColor(.inkPrimary)
-                            .scrollContentBackground(.hidden)
-                            .frame(minHeight: 72)
-                            .padding(.horizontal, .hearth400)
-                            .padding(.vertical, .hearth300)
-                    }
-                    .background(
-                        RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
-                            .fill(Color.bgCanvas)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
-                                    .stroke(Color.borderStrong, lineWidth: 1)
-                            )
-                    )
-                }
-            } else {
-                Button {
-                    withAnimation(.hearthFast) { viewModel.showFocus = true }
-                } label: {
-                    Label("Add focus (optional)", systemImage: "plus.circle")
-                        .font(.hearthBodySM.weight(.semibold))
-                        .foregroundColor(.accentDefault)
-                }
-            }
-
-            Button {
-                viewModel.startDiscovery()
-            } label: {
-                Label(viewModel.completedEmpty ? "Try again" : "Find activities", systemImage: "sparkle.magnifyingglass")
-                    .font(.hearthBodyMD.weight(.semibold))
-                    .foregroundColor(.inkOnPhotoLight)
-                    .padding(.horizontal, .hearth500)
-                    .padding(.vertical, .hearth400)
-                    .background(Color.accentDefault)
-                    .clipShape(Capsule())
-            }
-        }
-        .padding(.hearth600)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(cardBackground)
-    }
+    // `discoverPrompt` is GONE (round 4). It was a second, older search form —
+    // "Discover activities" headline, stacked segmented pickers for radius and
+    // count, an SF-symbol magnifier on the submit button — that predated the
+    // measured `findActivitiesCard` and kept rendering wherever the content
+    // state opened a search. One dialog now: `findActivitiesCard`, everywhere.
+    // Its two extra affordances (candidate count, free-form focus) moved into
+    // the card as a quiet row so no shipped functionality was dropped.
 
     private var discoveringCard: some View {
         VStack(alignment: .leading, spacing: .hearth400) {
@@ -1006,15 +1250,29 @@ struct PlanView: View {
                     .padding(.vertical, .hearth400)
             }
             ForEach(shown) { candidate in
-                HStack(alignment: .center, spacing: .hearth300) {
-                    NavigationLink(value: CandidateRoute(candidate: candidate)) {
-                        CandidateRow(candidate: candidate)
-                    }
-                    .buttonStyle(.plain)
-                    saveButton(for: candidate)
-                }
+                candidateRow(candidate)
             }
         }
+    }
+
+    /// The Save pill lives INSIDE the card now (measured planner-3 button row),
+    /// so the row can't simply be a `NavigationLink` label — a `Button` nested
+    /// in a `NavigationLink` label is the exact "taps conflict" trap the
+    /// fidelity playbook calls out (`collapsedSearchRow` had the same bug —
+    /// see Step 2). Instead the link is a hidden full-size background; the
+    /// Save button on top of it captures its own taps first, everywhere else
+    /// in the card falls through to the link.
+    private func candidateRow(_ candidate: ActivityCandidate) -> some View {
+        CandidateRow(
+            candidate: candidate,
+            isSaved: viewModel.isSaved(candidate),
+            isSaving: viewModel.isSaving(candidate),
+            onToggleSave: { Task { await viewModel.toggleSave(candidate) } }
+        )
+        .background(
+            NavigationLink(value: CandidateRoute(candidate: candidate)) { EmptyView() }
+                .opacity(0)
+        )
     }
 
     // MARK: - Result sort & filter
@@ -1031,9 +1289,11 @@ struct PlanView: View {
                 Button { showSortFilter = true } label: {
                     HStack(spacing: .hearth300) {
                         Image(systemName: "slider.horizontal.3")
+                            .foregroundColor(.plannerSearchIcon)
                         Text("Sort & Filter")
+                            .foregroundColor(.plannerSearchText)
                         Text("· \(viewModel.sortKey.label)")
-                            .foregroundColor(.inkMuted)
+                            .foregroundColor(.plannerSearchText.opacity(0.7))
                         Spacer()
                         if viewModel.hasActiveFilters {
                             Text("\(viewModel.activeFilterCount)")
@@ -1042,17 +1302,16 @@ struct PlanView: View {
                                 .padding(.horizontal, 8).padding(.vertical, 2)
                                 .background(Capsule().fill(Color.accentDefault))
                         }
-                        Image(systemName: "chevron.down").font(.caption).foregroundColor(.inkMuted)
+                        Image(systemName: "chevron.down").font(.caption).foregroundColor(.plannerSearchIcon)
                     }
-                    .font(.hearthBodySM.weight(.semibold))
-                    .foregroundColor(.inkPrimary)
+                    .font(.hearthChipLabel)
                     .padding(.horizontal, .hearth500)
                     .padding(.vertical, .hearth400)
                     .background(
                         RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
-                            .fill(Color.bgElevated)
+                            .fill(Color.bgCard)
                             .overlay(RoundedRectangle(cornerRadius: .hearthRadiusMd, style: .continuous)
-                                .stroke(Color.borderHairline, lineWidth: 1))
+                                .stroke(Color.borderPlannerCard, lineWidth: 1))
                     )
                 }
                 .buttonStyle(.plain)
@@ -1186,30 +1445,6 @@ struct PlanView: View {
                 }
             }
         }
-    }
-
-    /// Bookmark/pin a candidate onto the Exploring shortlist. A sibling of the
-    /// NavigationLink (not nested) so the two taps never conflict.
-    private func saveButton(for candidate: ActivityCandidate) -> some View {
-        let saved = viewModel.isSaved(candidate)
-        let saving = viewModel.isSaving(candidate)
-        return Button {
-            Task { await viewModel.toggleSave(candidate) }
-        } label: {
-            Group {
-                if saving {
-                    ProgressView()
-                } else {
-                    Image(systemName: saved ? "bookmark.fill" : "bookmark")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(saved ? .accentDefault : .inkMuted)
-                }
-            }
-            .frame(width: 44, height: 44)
-        }
-        .buttonStyle(.plain)
-        .disabled(saving)  // tappable when saved → un-saves
-        .accessibilityLabel(saved ? "Saved — tap to remove" : "Save to shortlist")
     }
 
     // MARK: - Lifecycle board (Considering → To register → Registered → All set)
@@ -1706,36 +1941,104 @@ struct BoardActivityRoute: Hashable {
 
 // MARK: - Candidate Row
 
+/// Measured `1026:10569` (planner 3): white r=12 card, kid chip row, underlined
+/// teal title + match pill, two muted meta lines, then a Save/Saved pill row —
+/// all inside the card (no sidecar bookmark; the frame's card owns its own
+/// action button). No status/price chip here — candidates carry neither a
+/// lifecycle status nor a reliable price at this stage; showing one would be
+/// fabricating what the frame doesn't draw.
 private struct CandidateRow: View {
     let candidate: ActivityCandidate
+    let isSaved: Bool
+    let isSaving: Bool
+    let onToggleSave: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: .hearth300) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(candidate.name)
-                    .font(.hearthBodyLG.weight(.semibold))
-                    .foregroundColor(.inkPrimary)
-                    .multilineTextAlignment(.leading)
-                Spacer()
-                if let fit = candidate.fitScore {
-                    Text("\(Int((fit * 100).rounded()))%")
-                        .font(.hearthCaptionMono)
+            if !candidate.displayKids.isEmpty {
+                HStack(spacing: .hearth300) {
+                    ForEach(candidate.displayKids, id: \.self) { kid in
+                        chip(kid)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top) {
+                    Text(candidate.name)
+                        .font(.hearthBodySMBold)
                         .foregroundColor(.accentDefault)
+                        .underline()
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: .hearth300)
+                    if let fit = candidate.fitScore {
+                        Text("\(Int((fit * 100).rounded()))%")
+                            .font(.hearthBodySMBold)
+                            .foregroundColor(.accentDefault)
+                            .padding(.horizontal, .hearth500)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(Color.bgSelected))
+                    }
+                }
+                .padding(.bottom, .hearth300)
+
+                Rectangle().fill(Color.borderHairline).frame(height: 1)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    if let line1 = metaLine1 {
+                        Text(line1)
+                            .font(.hearthBodySM)
+                            .foregroundColor(.inkSecondary)
+                    }
+                    if let line2 = metaLine2 {
+                        Text(line2)
+                            .font(.hearthBodySM)
+                            .foregroundColor(.inkSecondary)
+                    }
+                }
+                .padding(.top, .hearth300)
+
+                // Price/schedule text — real search results carry a full
+                // pricing paragraph (tiers, sibling discounts, scholarships)
+                // that's valuable to see before tapping into detail; the
+                // planner-3 mock's compact card just didn't have live search
+                // data to show. Shown verbatim, never re-summarized.
+                if let priceText = candidate.priceText, !priceText.isEmpty {
+                    Text(priceText)
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkSecondary)
+                        .padding(.top, .hearth300)
+                } else if let amount = candidate.priceAmount {
+                    Text("$\(Int(amount))")
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkSecondary)
+                        .padding(.top, .hearth300)
                 }
             }
-            if let meta = metaLine {
-                Text(meta)
-                    .font(.hearthBodySM)
-                    .foregroundColor(.inkSecondary)
-            }
+
             HStack(spacing: .hearth300) {
-                ForEach(candidate.displayKids, id: \.self) { kid in
-                    chip(kid, tone: .accentTint)
+                Button(action: onToggleSave) {
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().tint(isSaved ? Color.inkOnPhotoLight : Color.accentDefault)
+                        } else if isSaved {
+                            Image(systemName: "checkmark").font(.system(size: 12, weight: .bold))
+                        }
+                        Text(isSaved ? "Saved" : "Save")
+                    }
+                    .font(.hearthBodySM)
+                    .foregroundColor(isSaved ? .inkOnPhotoLight : .accentDefault)
+                    .padding(.horizontal, .hearth500)
+                    .padding(.vertical, .hearth400)
+                    .background(
+                        Capsule()
+                            .fill(isSaved ? Color.accentDefault : Color.clear)
+                            .overlay(Capsule().stroke(Color.accentDefault, lineWidth: isSaved ? 0 : 1))
+                    )
                 }
-                if let cat = candidate.category { chip(cat, tone: .bgElevated) }
-                if let price = candidate.priceText ?? candidate.priceAmount.map({ "$\(Int($0))" }) {
-                    chip(price, tone: .bgElevated)
-                }
+                .buttonStyle(.plain)
+                .disabled(isSaving)
+                .accessibilityLabel(isSaved ? "Saved — tap to remove" : "Save to shortlist")
             }
         }
         .padding(.hearth500)
@@ -1743,27 +2046,39 @@ private struct CandidateRow: View {
         .background(
             RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
                 .fill(Color.bgElevated)
-                .overlay(
-                    RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                        .stroke(Color.borderHairline, lineWidth: 1)
-                )
         )
     }
 
-    private var metaLine: String? {
+    private var metaLine1: String? {
         var parts: [String] = []
+        if let cat = candidate.category { parts.append(cat.capitalized) }
         if let p = candidate.provider { parts.append(p) }
-        if let l = candidate.locationText { parts.append(l) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    private func chip(_ text: String, tone: Color) -> some View {
+    private var metaLine2: String? {
+        var parts: [String] = []
+        if let city = candidate.city { parts.append(city) }
+        else if let l = candidate.locationText { parts.append(l) }
+        if let dates = dateRangeShort { parts.append(dates) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private var dateRangeShort: String? {
+        switch (candidate.startDate, candidate.endDate) {
+        case let (start?, end?): return "\(start) – \(end)"
+        case let (start?, nil): return start
+        default: return nil
+        }
+    }
+
+    private func chip(_ text: String) -> some View {
         Text(text)
-            .font(.hearthBodySM)
-            .foregroundColor(.inkSecondary)
-            .padding(.horizontal, .hearth400)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(tone))
+            .font(.hearthBodySMBold)
+            .foregroundColor(.accentDefault)
+            .padding(.horizontal, .hearth500)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.bgSelected))
     }
 }
 
@@ -1776,19 +2091,31 @@ struct CandidateDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: .hearth600) {
                 VStack(alignment: .leading, spacing: .hearth300) {
-                    if let cat = candidate.category {
-                        Text(cat.uppercased())
-                            .font(.hearthLabel)
-                            .tracking(0.66)
-                            .foregroundColor(.inkMuted)
+                    if let eyebrow = eyebrowText {
+                        Text(eyebrow)
+                            .font(.hearthBodySMBold)
+                            .foregroundColor(.accentDefault)
                     }
                     Text(candidate.name)
                         .font(.hearthDisplayMD)
                         .foregroundColor(.inkPrimary)
                     if let provider = candidate.provider {
                         Text(provider)
-                            .font(.hearthBodyMD)
-                            .foregroundColor(.inkSecondary)
+                            .font(.hearthChipLabel)
+                            .foregroundColor(.plannerSearchText)
+                    }
+                    // Measured `1026:10614`: kid + match-% chips directly
+                    // under the provider line — `fitScore` was collected by
+                    // discovery but never surfaced here before this pass.
+                    if !candidate.displayKids.isEmpty || candidate.fitScore != nil {
+                        HStack(spacing: .hearth300) {
+                            if !candidate.displayKids.isEmpty {
+                                detailChip(candidate.displayKids.joined(separator: " & "))
+                            }
+                            if let fit = candidate.fitScore {
+                                detailChip("\(Int((fit * 100).rounded()))% Match")
+                            }
+                        }
                     }
                 }
 
@@ -1797,10 +2124,10 @@ struct CandidateDetailView: View {
                 if let urlString = candidate.signupURL, let url = URL(string: urlString) {
                     Link(destination: url) {
                         Label("Open signup page", systemImage: "arrow.up.right.square")
-                            .font(.hearthBodyMD.weight(.semibold))
+                            .font(.hearthSectionHeader)
                             .foregroundColor(.inkOnPhotoLight)
                             .padding(.horizontal, .hearth500)
-                            .padding(.vertical, .hearth400)
+                            .padding(.vertical, .hearth500)
                             .frame(maxWidth: .infinity)
                             .background(Color.accentDefault)
                             .clipShape(Capsule())
@@ -1816,42 +2143,68 @@ struct CandidateDetailView: View {
         .trackScreen("candidate_detail")
     }
 
+    /// "{CATEGORY} FOR {DISPLAYKIDS}" per the planner-4 eyebrow, e.g. "CAMP
+    /// FOR LILY & BENJAMIN" — falls back to just the category when no kid
+    /// fits, never fabricates a kid name.
+    private var eyebrowText: String? {
+        guard let cat = candidate.category else { return nil }
+        let upper = cat.uppercased()
+        guard !candidate.displayKids.isEmpty else { return upper }
+        return "\(upper) FOR \(candidate.displayKids.joined(separator: " & ").uppercased())"
+    }
+
+    private func detailChip(_ text: String) -> some View {
+        Text(text)
+            .font(.hearthBodySMBold)
+            .foregroundColor(.accentDefault)
+            .padding(.horizontal, .hearth500)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.bgSelected))
+    }
+
     private var detailRows: some View {
-        VStack(alignment: .leading, spacing: .hearth400) {
+        VStack(alignment: .leading, spacing: 0) {
             detailRow("For", candidate.displayKids.isEmpty ? nil : candidate.displayKids.joined(separator: ", "))
             detailRow("Ages", ageRange)
             detailRow("Dates", dateRange)
             detailRow("Schedule", candidate.scheduleText)
             detailRow("Price", candidate.priceText ?? candidate.priceAmount.map { "$\(Int($0))" })
-            detailRow("Location", candidate.locationText)
+            detailRow("Location", locationWithDistance)
         }
         .padding(.hearth600)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
                 .fill(Color.bgElevated)
-                .overlay(
-                    RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                        .stroke(Color.borderHairline, lineWidth: 1)
-                )
         )
     }
 
     @ViewBuilder
     private func detailRow(_ label: String, _ value: String?) -> some View {
         if let value = value, !value.isEmpty {
-            HStack(alignment: .top, spacing: .hearth500) {
-                Text(label.uppercased())
-                    .font(.hearthLabel)
-                    .tracking(0.66)
-                    .foregroundColor(.inkMuted)
-                    .frame(width: 80, alignment: .leading)
-                Text(value)
-                    .font(.hearthBodyMD)
-                    .foregroundColor(.inkPrimary)
-                Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: .hearth500) {
+                    Text(label.uppercased())
+                        .font(.hearthLabel)
+                        .tracking(0.66)
+                        .foregroundColor(.inkMuted)
+                        .frame(width: 120, alignment: .leading)
+                    Text(value)
+                        .font(.hearthBodyMD)
+                        .foregroundColor(.inkSecondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.bottom, .hearth400)
+                Rectangle().fill(Color.borderHairline).frame(height: 1)
             }
+            .padding(.bottom, .hearth400)
         }
+    }
+
+    private var locationWithDistance: String? {
+        guard let loc = candidate.locationText else { return nil }
+        guard let mi = candidate.distanceMi else { return loc }
+        return "\(loc) · \(Int(mi.rounded())) mi"
     }
 
     private var ageRange: String? {
@@ -1881,6 +2234,13 @@ struct CandidateDetailView: View {
 struct BoardActivityDetailView: View {
     let activity: BoardActivity
     let onCompleteTodo: (String) -> Void
+    let onAskCoach: (BoardActivity) -> Void
+
+    /// "Ask the coach" switches the Plan hub to its chat segment — but this
+    /// view is PUSHED on top of that hub, so flipping the segment underneath
+    /// left the parent staring at the unchanged detail screen ("Ask the coach
+    /// is not doing anything"). Pop back to the hub first, THEN switch.
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ScrollView {
@@ -1889,64 +2249,129 @@ struct BoardActivityDetailView: View {
                 VStack(alignment: .leading, spacing: .hearth300) {
                     if let type = activity.activityType {
                         let label = BoardCardView.chipLabels[type] ?? type
-                        Text("\(label.uppercased()) FOR \(activity.kidName?.uppercased() ?? "KID")")
-                            .font(.hearthLabel)
-                            .tracking(0.66)
-                            .foregroundColor(.inkMuted)
+                        // "FOR {kid}" only when there IS a kid — a family-wide
+                        // suggestion (onboarding's own starters carry no
+                        // kid_name) was rendering the literal word "KID".
+                        let kid = activity.kidName?.uppercased()
+                        Text(kid.map { "\(label.uppercased()) FOR \($0)" } ?? label.uppercased())
+                            .font(.hearthBodySMBold)
+                            .foregroundColor(.accentDefault)
                     }
                     Text(activity.name)
                         .font(.hearthDisplayMD)
                         .foregroundColor(.inkPrimary)
                     if let provider = activity.provider {
                         Text(provider)
-                            .font(.hearthBodyMD)
-                            .foregroundColor(.inkSecondary)
+                            .font(.hearthChipLabel)
+                            .foregroundColor(.plannerSearchText)
                     }
                 }
 
-                // Chips row (kid, status, fit score)
+                // Chips row (kid, status, fit score) — measured `1026:10614`:
+                // kid + match pills teal-on-selected, status pill amber-on-warm.
                 HStack(spacing: .hearth300) {
                     if let kid = activity.kidName {
-                        Text(kid)
-                            .font(.hearthBodySM)
-                            .foregroundColor(.inkSecondary)
-                            .padding(.horizontal, .hearth400)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(Color.accentTint))
+                        detailChip(kid, tone: .bgSelected, foreground: .accentDefault)
                     }
-                    Text(activity.status.capitalized)
-                        .font(.hearthBodySM)
-                        .foregroundColor(.inkSecondary)
-                        .padding(.horizontal, .hearth400)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Color.bgCanvas))
+                    detailChip(activity.status.capitalized, tone: .statusWarningTint, foreground: .inkSecondary)
                     if let fit = activity.fitScore {
-                        Text("\(Int((fit * 100).rounded()))% Match")
-                            .font(.hearthCaptionMono)
-                            .foregroundColor(.accentDefault)
-                            .padding(.horizontal, .hearth400)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(Color.accentTint))
+                        detailChip("\(Int((fit * 100).rounded()))% Match", tone: .bgSelected, foreground: .accentDefault)
                     }
                 }
 
                 // Detail rows
                 detailRows
 
-                // Why it matched
-                if let reason = activity.fitReason {
-                    VStack(alignment: .leading, spacing: .hearth400) {
-                        Text("Why it matched")
-                            .font(.hearthBodyLG.weight(.semibold))
-                            .foregroundColor(.inkPrimary)
-                        Text(reason)
-                            .font(.hearthBodyMD)
-                            .foregroundColor(.inkSecondary)
+                // Not in the planner-4 frame, but real actionable data the
+                // candidate carried — dropping it after save would be a
+                // regression (round 4: signup_url already survives to the
+                // client; it just had no renderer here).
+                if let urlString = activity.signupURL, let url = URL(string: urlString) {
+                    Link(destination: url) {
+                        Label("Open signup page", systemImage: "arrow.up.right.square")
+                            .font(.hearthBodySMBold)
+                            .foregroundColor(.accentDefault)
+                    }
+                }
+
+                // "Planned"/"Ask the coach" pill row — measured `1026:10641`:
+                // sits directly under the detail table, INSIDE the white card
+                // implicitly (frame draws it as a sibling row, not nested).
+                HStack(spacing: .hearth300) {
+                    Text(activity.status.capitalized)
+                        .font(.hearthBodySM)
+                        .foregroundColor(.inkOnCard)
+                        .padding(.horizontal, .hearth500)
+                        .padding(.vertical, .hearth400)
+                        .background(Capsule().fill(Color.accentDefault))
+                    Button {
+                        dismiss()
+                        onAskCoach(activity)
+                    } label: {
+                        Text("Ask the coach")
+                            .font(.hearthBodySM)
+                            .foregroundColor(.accentDefault)
+                            .padding(.horizontal, .hearth500)
+                            .padding(.vertical, .hearth400)
+                            .background(
+                                Capsule()
+                                    .fill(Color.bgCard)
+                                    .overlay(Capsule().stroke(Color.accentDefault, lineWidth: 1))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                // Onboarding's seeded starter suggestions have no provider,
+                // dates, price or location — they were never a search result,
+                // just a category to explore — so `notes` ("Suggested while
+                // setting up your account — look for options near 95448") is
+                // the ONLY context they carry. Without it their detail screen
+                // is a title and a COST-TBD row.
+                if let notes = activity.notes, !notes.isEmpty, activity.fitReason == nil {
+                    VStack(alignment: .leading, spacing: .hearth300) {
+                        Text("Why it's here")
+                            .font(.hearthChipLabel)
+                            .foregroundColor(.plannerSearchText)
+                        Text(notes)
+                            .font(.hearthBodySM)
+                            .foregroundColor(.plannerSearchText)
+                        Text("Search for real options near you, or ask the coach to narrow it down.")
+                            .font(.hearthBodySM)
+                            .foregroundColor(.plannerSearchText)
                     }
                     .padding(.hearth500)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
-                            .fill(Color.bgElevated)
+                            .fill(Color.bgCard)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                                    .stroke(Color.borderPlannerCard, lineWidth: 1)
+                            )
+                    )
+                }
+
+                // Why it matched — measured `1026:10644`: quiet card, `#F5F3EF`
+                // fill + `#A4A4A4` stroke, not the bright white elevated card.
+                if let reason = activity.fitReason {
+                    VStack(alignment: .leading, spacing: .hearth300) {
+                        Text("Why it matched")
+                            .font(.hearthChipLabel)
+                            .foregroundColor(.plannerSearchText)
+                        Text(reason)
+                            .font(.hearthBodySM)
+                            .foregroundColor(.plannerSearchText)
+                    }
+                    .padding(.hearth500)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                            .fill(Color.bgCard)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
+                                    .stroke(Color.borderPlannerCard, lineWidth: 1)
+                            )
                     )
                 }
 
@@ -1955,13 +2380,16 @@ struct BoardActivityDetailView: View {
                     VStack(alignment: .leading, spacing: .hearth400) {
                         HStack(alignment: .firstTextBaseline) {
                             Text("Still to do")
-                                .font(.hearthBodyLG.weight(.semibold))
-                                .foregroundColor(.inkPrimary)
+                                .font(.hearthBodySMBold)
+                                .foregroundColor(.accentDefault)
                             Spacer()
                             if let fit = activity.fitScore {
                                 Text("\(Int((fit * 100).rounded()))%")
-                                    .font(.hearthCaptionMono)
+                                    .font(.hearthBodySMBold)
                                     .foregroundColor(.accentDefault)
+                                    .padding(.horizontal, .hearth500)
+                                    .padding(.vertical, 6)
+                                    .background(Capsule().fill(Color.bgSelected))
                             }
                         }
 
@@ -1974,27 +2402,27 @@ struct BoardActivityDetailView: View {
                                 onCompleteTodo(first.id)
                             }
                         } label: {
-                            Text("Mark next step done")
-                                .font(.hearthBodyMD.weight(.semibold))
+                            Label("Mark next step done", systemImage: "checkmark")
+                                .font(.hearthSectionHeader)
                                 .foregroundColor(.inkOnPhotoLight)
                                 .padding(.horizontal, .hearth500)
-                                .padding(.vertical, .hearth400)
+                                .padding(.vertical, .hearth500)
                                 .frame(maxWidth: .infinity)
                                 .background(Color.accentDefault)
                                 .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
                         .disabled(activity.openTodos.allSatisfy { $0.done == true })
-
-                        Text("Moves to All set once nothing is left.")
-                            .font(.hearthBodySM)
-                            .foregroundColor(.inkMuted)
                     }
                     .padding(.hearth500)
                     .background(
                         RoundedRectangle(cornerRadius: .hearthRadiusLg, style: .continuous)
                             .fill(Color.bgElevated)
                     )
+
+                    Text("Moves to All set once nothing is left.")
+                        .font(.hearthChipLabel)
+                        .foregroundColor(.plannerSearchText)
                 }
             }
             .padding(.horizontal, .hearth700)
@@ -2003,34 +2431,29 @@ struct BoardActivityDetailView: View {
         .background(Color.bgCanvas.ignoresSafeArea())
         .navigationTitle("Activity")
         .navigationBarTitleDisplayMode(.inline)
+        .trackScreen("board_activity_detail")
     }
 
+    private func detailChip(_ text: String, tone: Color, foreground: Color) -> some View {
+        Text(text)
+            .font(.hearthBodySMBold)
+            .foregroundColor(foreground)
+            .padding(.horizontal, .hearth500)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(tone))
+    }
+
+    /// FOR/AGES/DATES/SCHEDULE/COST/LOCATION — the ages/schedule/location
+    /// rows only appear when `track_activity` had a candidate to copy them
+    /// from (round 4: previously always absent post-save, leaving just FOR
+    /// + COST). `when`/COST stay server-rendered/verbatim as before; AGES
+    /// and LOCATION mirror `CandidateDetailView`'s formatting exactly so a
+    /// saved item reads identically to the result it came from.
     private var detailRows: some View {
-        VStack(alignment: .leading, spacing: .hearth400) {
-            if let kid = activity.kidName {
-                detailRow("FOR", kid)
-            }
-            if let when = activity.when {
-                VStack(alignment: .leading, spacing: .hearth300) {
-                    detailRow("DATES", when)
-                    if let overlaps = activity.overlaps, !overlaps.isEmpty {
-                        ForEach(overlaps) { overlap in
-                            HStack(spacing: .hearth300) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.statusWarning)
-                                Text("Overlaps \(overlap.name), \(overlap.range)")
-                                    .font(.hearthBodySM)
-                                    .foregroundColor(.statusWarning)
-                            }
-                        }
-                    }
-                }
-            }
-            if let price = activity.priceAmount {
-                detailRow("COST", "$\(Int(price))")
-            } else {
-                detailRow("COST", "TBD — I'll track it once you register")
+        let rows = buildDetailRows()
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                detailRow(row.0, row.1, warning: row.2, isLast: index == rows.count - 1)
             }
         }
         .padding(.hearth600)
@@ -2041,19 +2464,80 @@ struct BoardActivityDetailView: View {
         )
     }
 
-    @ViewBuilder
-    private func detailRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top, spacing: .hearth500) {
-            Text(label)
-                .font(.hearthLabel)
-                .tracking(0.66)
-                .foregroundColor(.inkMuted)
-                .frame(width: 80, alignment: .leading)
-            Text(value)
-                .font(.hearthBodyMD)
-                .foregroundColor(.inkPrimary)
-            Spacer(minLength: 0)
+    private var overlapWarning: String? {
+        guard let overlaps = activity.overlaps, !overlaps.isEmpty else { return nil }
+        return overlaps.map { "Overlaps \($0.name), \($0.range)" }.joined(separator: "\n")
+    }
+
+    private func buildDetailRows() -> [(String, String, String?)] {
+        var rows: [(String, String, String?)] = []
+        if let kid = activity.kidName { rows.append(("FOR", kid, nil)) }
+        if let ages = ageRange { rows.append(("AGES", ages, nil)) }
+        if let when = activity.when { rows.append(("DATES", when, overlapWarning)) }
+        if let schedule = activity.scheduleText, !schedule.isEmpty {
+            rows.append(("SCHEDULE", schedule, nil))
         }
+        if let price = activity.priceText, !price.isEmpty {
+            rows.append(("COST", price, nil))
+        } else if let amount = activity.priceAmount {
+            rows.append(("COST", "$\(Int(amount))", nil))
+        } else {
+            rows.append(("COST", "TBD — I'll track it once you register", nil))
+        }
+        if let location = locationWithCity { rows.append(("LOCATION", location, nil)) }
+        return rows
+    }
+
+    private var ageRange: String? {
+        switch (activity.ageMin, activity.ageMax) {
+        case let (min?, max?): return "\(fmtAge(min))–\(fmtAge(max))"
+        case let (min?, nil): return "\(fmtAge(min))+"
+        case let (nil, max?): return "up to \(fmtAge(max))"
+        default: return nil
+        }
+    }
+
+    private func fmtAge(_ v: Double) -> String {
+        v.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(v)) : String(v)
+    }
+
+    private var locationWithCity: String? {
+        if let loc = activity.locationText, !loc.isEmpty { return loc }
+        return activity.city
+    }
+
+    @ViewBuilder
+    private func detailRow(_ label: String, _ value: String, warning: String? = nil, isLast: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: .hearth500) {
+                Text(label)
+                    .font(.hearthLabel)
+                    .tracking(0.66)
+                    .foregroundColor(.inkMuted)
+                    .frame(width: 120, alignment: .leading)
+                VStack(alignment: .leading, spacing: .hearth300) {
+                    Text(value)
+                        .font(.hearthBodyMD)
+                        .foregroundColor(.inkSecondary)
+                    if let warning {
+                        HStack(alignment: .top, spacing: .hearth300) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(.statusWarning)
+                            Text(warning)
+                                .font(.hearthBodySM)
+                                .foregroundColor(.statusWarning)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.bottom, .hearth400)
+            if !isLast {
+                Rectangle().fill(Color.borderHairline).frame(height: 1)
+            }
+        }
+        .padding(.bottom, isLast ? 0 : .hearth400)
     }
 
     private func todoRow(_ todo: PlanTodo) -> some View {
@@ -2064,14 +2548,14 @@ struct BoardActivityDetailView: View {
             } label: {
                 Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 15))
-                    .foregroundColor(isDone ? .inkMuted : .accentDefault)
+                    .foregroundColor(.accentDefault)
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
             .disabled(isDone)
             Text(todo.title)
                 .font(.hearthBodySM)
-                .foregroundColor(isDone ? .inkMuted : .inkSecondary)
+                .foregroundColor(isDone ? .inkMuted : .accentDefault)
                 .strikethrough(isDone)
             Spacer(minLength: 0)
         }

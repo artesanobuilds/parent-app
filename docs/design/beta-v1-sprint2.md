@@ -2081,3 +2081,105 @@ SVG export; they were not hand-copied into this doc to keep it scannable.
 **Changelog**: round-2 frames (dashboard fidelity, consolidated settings, member sheets, account
 sheets, interest icons) extracted 2026-08-09 in one batched `/nodes` call, addendum appended same
 day. Source: Miguel's 4pm phone walk-through feedback.
+
+## Round 3 addendum — interests-always-on, exact tab bar, Home/Coach/Planner pixel pass
+
+Extracted 2026-08-09 evening from canvas `754:4310` (coach/planner-adjacent frames) and canvas
+`754:4311` (*Design sprint 2 - exprience (wip)*), via ONE batched `/nodes` call (18 frame ids) +
+ONE batched `/images` SVG export (17 glyphs). Triggered by Miguel's 7:23–7:25pm phone screenshots
+showing the account-sheet interests grid hidden, the tab bar never matching the frame, and Home/
+Coach/Planner detail drift — plus his instruction to compare pixel-by-pixel and iterate. Full
+walked text: `round3_spec.txt` (job tmp dir, this session — re-walk the ids below with
+`tools/figma-walk.py` if a future session needs it re-derived).
+
+| node id | frame | used for |
+|---|---|---|
+| `754:5568` | coach-000 | Coach home hero, suggestion pills, composer (Step 4) |
+| `1008:4717` | coach-001 | Coach chat bubbles + recipe card (Step 4) |
+| `754:5520` | coach-002 | Coach history cards (Step 4) |
+| `1026:10476` | planner 01 | Planner empty-Plan state (Step 5) |
+| `1026:10520` | planner 02 | Planner "Ask the coach" segment (Step 5) |
+| `1026:10543` | planner 3 | Planner content-state (list, filters, summary) (Step 5) |
+| `1026:10608` | planner 4 | Planner activity detail (Step 5, drift-only) |
+| `1026:10766` | planner 5 | Planner in-planner chat (Step 5, drift-only) |
+| `1026:10680` | planner 6 | Planner content-state (Deciding/Needs action) (Step 5) |
+| `754:5810` / `754:5882` / `754:5898` / `754:5827` / `754:5693` / `754:5947` | Circle-000…005 | Step-7 audit only |
+| `754:5987` / `754:6094` | invite preview (×2) | Step-7 audit only |
+| `754:6023` | contacts | Step-7 audit only |
+
+### FRAME coach-000 — `754:5568` — 440x813, ground #E9E4DC
+
+Hero: `coach` instance 80×80 (component `1029:11790`, same glyph family as `CoachMark` used
+elsewhere, just scaled up) — teal `#1B7498`, centered. Title "Meet your coach" Fraunces 700 38/40
+ls-0.38 `#1E1E1E`. Body Inter 400 15/22 `#1E1E1E`. Three full-width suggestion buttons: teal fill
+`#1B7498` r=12, white Inter 800 16/22 label, 46pt tall, 10pt gap. Composer (`chatinput` instance):
+deep teal `#0A5570` bar r=[16,16,0,0] (top corners only), leading `icon.attach` (⊕, white, 33×33
+frame / ~26×26 vector), white input field r=8 with placeholder "Ask the coach for help" Inter 400
+14/17 `#BCBCBC`, trailing `icon.microphone` INSIDE the field's trailing edge (not a separate
+button). Tab Bar instance present at the bottom — same component as Dashboard 1's, confirms Step
+2's tab bar work covers this screen too.
+
+### FRAME planner 01 — `1026:10476` — 440x792, ground #E9E4DC
+
+Hero: `planner-xl` instance 48×48 (vector `I1026:10488;86:294`, exported as `PlannerIcon-hero`),
+teal, centered above title. Title "MVP Planner" Fraunces 700 38/40 ls-0.38 `#1E1E1E`. Segmented
+control (`Segmented control` instance): pill `#DAE0DF` fill r=100 containing two 175×32 buttons;
+selected button white fill r=20 with icon (`planner edit`, exported `PlannerIcon-planEdit`) +
+"Plan" Inter 700 13/18 teal; unselected "Ask the coach" (coach glyph, same `CoachMark` family) +
+label, no fill. Subhead "Nothing planned yet? / Find a few options — nothing is booked or shared
+until you say so." Inter 400 15/22 `#1E1E1E`. **Find-activities card** (`#F5F3EF` fill, `#A4A4A4`
+stroke w1, r=12, pad 9): header row "🔍 Find activities" (`seach large` instance, exported
+`PlannerIcon-search`) Inter 600 14/14 ls-0.14 `#3A4A2A`; "Where to:" label + "Zip code..." field
+(white r=12, `#DAE0DF` stroke) + "25 mi" radius menu (white r=12, chevron — SF `chevron.down` is
+fine, generic glyph); category chip row **Camp / Activity / Trip / Classes** (`tag item`
+instances, r=22.016 ≈ pill, pad ~11/14.7): Camp = teal fill `#1B7498` selected-style (glyph =
+same tent as `HomeIcon-camp`), Activity = white/teal-stroke (SAME tent glyph reused — confirms
+Camp and Activity share one icon in the source), Trip = white/teal-stroke (`location` component,
+exported `PlannerIcon-trip`), Classes = white/teal-stroke (`schoolwork` component, exported
+`PlannerIcon-classes`). Full-width "Find activities" button below, teal fill r=22 (same pill
+radius as the chips, not the 12 used elsewhere — a pill button, not a rounded-rect button).
+**Flyer card** (`#F5F3EF` fill, `#A4A4A4` stroke, r=12): `camera` instance (exported
+`PlannerIcon-camera`) + "Paste a camp email or snap a flyer — I'll pull out the details and track
+it." Inter 400 13/18 teal. Footer: "Planning for Ben & Lily" Inter 400 15/22 `#1E1E1E` +
+"Edit kids and interests" Inter 400 13/18 teal link, centered.
+
+### FRAME planner 02 — `1026:10520` — 440x792, ground #E9E4DC
+
+Same hero/title/segmented-control chrome as planner 01 (segmented control now shows "Ask the
+coach" selected — white fill r=100 on the RIGHT button, "Plan" unselected on the left — confirms
+the control is a real toggle, not two static states). Subhead "Ask the coach / Find camps, sort
+out coverage gaps, or decide between options. I see the whole family plan." Four full-width
+suggestion buttons, teal fill r=12, white Inter 800 16/22 (identical treatment to coach-000's
+three buttons — same button component, reused). Composer identical to coach-000's `chatinput`
+(deep teal bar, ⊕, white field, in-field mic/arrow), placeholder "Just ask if you already have an
+idea".
+
+### Round-3 exported glyphs (17, one batched `/images` SVG call)
+
+All shipped as template-rendering imagesets (`preserves-vector-representation: true`,
+`template-rendering-intent: template`) under `Assets.xcassets/`, single-fill source SVGs (no
+normalization needed — verified via `grep fill=`).
+
+| Slug | Node id | Frame source | Used for |
+|---|---|---|---|
+| `TabIcon-home` | `I890:2780;19:61` | Dashboard 1 tab bar | Tab bar (Step 2) |
+| `TabIcon-coach` | `I890:2780;88:363` | Dashboard 1 tab bar | Tab bar (Step 2) |
+| `TabIcon-planner` | `I890:2780;19:97` | Dashboard 1 tab bar | Tab bar (Step 2) |
+| `TabIcon-circle` | `I890:2780;47:199` | Dashboard 1 tab bar | Tab bar (Step 2) |
+| `TabIcon-settings` | `I890:2780;38:37` | Dashboard 1 tab bar | Tab bar (Step 2) |
+| `InterestIcon-sports` | `I1008:5182;1008:4926` | account 03 interests grid | Account sheet + onboarding free-time (Step 1) |
+| `InterestIcon-plus` | `I1008:5182;1008:4896` | account 03 interests grid | Unselected-tile "+" badge (Step 1) |
+| `HomeIcon-camp` | `754:4622` | Dashboard 1 Coming Up | Home Coming-Up row + Planner Camp/Activity chips (Step 3, Step 5) |
+| `HomeIcon-forYou` | `754:4577` | Dashboard 1 For You | Home FOR YOU header (Step 3) |
+| `HomeIcon-comingUp` | `754:4615` | Dashboard 1 Coming Up | Home COMING UP header (Step 3) |
+| `CoachMark` | `842:2807` | Dashboard 1 coach banner | Coach hero (scaled up), Home coach banner, settings-link row (Step 3, Step 4) |
+| `PlannerIcon-trip` | `I1026:10509;13:57` | planner 01 chip row | Planner Trip chip (Step 5) |
+| `PlannerIcon-classes` | `I1026:10510;13:57` | planner 01 chip row | Planner Classes chip (Step 5) |
+| `PlannerIcon-camera` | `I1026:10515;25:49` | planner 01 flyer card | Planner flyer-ingest card (Step 5) |
+| `PlannerIcon-planEdit` | `I1026:10490;90:605` | planner 01 segmented control | Planner "Plan" segment icon (Step 5) |
+| `PlannerIcon-hero` | `I1026:10488;86:294` | planner 01/02 hero | Planner header calendar-pencil (Step 5) |
+| `PlannerIcon-search` | `I1026:10495;86:285` | planner 01 find-activities card | Planner search-card header icon (Step 5) |
+
+**Changelog**: round-3 frames (coach, planner, tab bar glyphs) extracted 2026-08-09 evening in one
+batched `/nodes` call + one batched `/images` SVG call, addendum appended same day. Source:
+Miguel's 7:23–7:25pm phone walk-through feedback ("why aren't we getting the results we need").

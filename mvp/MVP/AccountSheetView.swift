@@ -7,7 +7,7 @@ import SwiftUI
 ///
 ///   `account01` — nothing yet. "No recent activity. Your history and saved
 ///                 articles can be found here.", neither segment filled, then
-///                 the Account card + Cancel / Sign out.
+///                 Family interests, then the Account card + Cancel / Sign out.
 ///   `account 02` — **Saved** selected: the teal r18 article cards, each with an
 ///                 eyebrow (`Care · 2 min`), a Fraunces 38/40 headline and a
 ///                 working bookmark, then Family interests, then Account.
@@ -15,6 +15,12 @@ import SwiftUI
 ///                 started this — 4 replies", an avatar stack) with a
 ///                 **Go to Circle** link, then `Coach advice` rows with a
 ///                 **Chat with the coach** link, then Family interests, Account.
+///
+/// Family interests is ALWAYS shown (Miguel's 2026-08-09 rule) — a family with
+/// no preferences yet sees every tile unselected and tappable, not a hidden
+/// section. `account 03`'s measured grid (`round3_spec.txt`, node
+/// `I1008:5182;1008:4889`) is the fidelity target for `InterestTile` regardless
+/// of which account state is showing.
 ///
 /// History is REAL history now, not a re-ordering of Saved: the Circle rows are
 /// the parent's own conversations (`GET /circle/conversations`) and the coach
@@ -83,7 +89,7 @@ struct AccountSheetView: View {
                     header
                     tabToggle
                     activityContent
-                    if hasActivity { interestsSection }
+                    interestsSection
                     accountSection
                 }
                 // ~30pt on every edge, per the Figma sheet (`account 02`).
@@ -665,38 +671,74 @@ private struct InterestTile: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: .hearth300) {
+                // Unselected tiles carry a top-trailing "+" badge (measured
+                // `account 03` grid, node `I1008:5182;1008:4896`) — the
+                // visual cue that tapping ADDS this interest. Selected tiles
+                // have no badge, but this row ALWAYS renders (invisible, not
+                // removed) — a conditional row made selected/unselected
+                // tiles different heights within the same grid row, since
+                // `LazyVGrid` does not force its cells to a shared height.
+                HStack {
+                    Spacer()
+                    Image("InterestIcon-plus")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 20, height: 20)
+                        .opacity(selected ? 0 : 1)
+                        .accessibilityHidden(true)
+                }
                 // Same Figma-exported vector set as the onboarding free-time
                 // grid (`ProfileOptions.interestIconName`); SF Symbol
                 // fallback for any option without a matching icon export.
+                // Measured 35x33 (`account 03` grid) — was 20x20.
                 if let iconName = ProfileOptions.interestIconName(for: label) {
                     Image(iconName)
                         .renderingMode(.template)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 20, height: 20)
+                        .frame(width: 35, height: 33)
                 } else {
                     Image(systemName: symbol)
-                        .font(.system(size: 20, weight: .medium))
+                        .font(.system(size: 28, weight: .medium))
+                        .frame(width: 35, height: 33)
                 }
+                // Inter 400 ~14/22 in the frame — regular weight, NOT bold.
+                // The frame fits every label, including "Arts & crafts", on
+                // ONE line — a fixed 2-line reservation (tried earlier this
+                // round) made every tile noticeably taller than the frame's
+                // near-square 109x120 and stretched the whole grid. Force a
+                // single line and let it shrink rather than wrap, so every
+                // tile's label consumes the same one-line height regardless
+                // of word count.
                 Text(label)
-                    .font(.hearthBodySMBold)
+                    .font(.hearthBodyMD)
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
-            // Selected = teal fill + white icon/label; unselected = white
-            // card with teal icon/label. Same pass ratio as the onboarding
-            // free-time grid this reuses (`accentDefault` as ink on `bg/
-            // elevated` paper is a declared AA pass there).
+            // Selected = teal fill + white icon/label, no stroke, invisible
+            // badge. Unselected = white card, teal stroke ~0.9, teal
+            // icon/label, visible "+" badge. Same pass ratio as the
+            // onboarding free-time grid this reuses (`accentDefault` as ink
+            // on `bg/elevated` paper is a declared AA pass there).
             .foregroundColor(selected ? .inkOnCard : .accentDefault)
-            // The design's tiles HUG their content (~27pt above / 20pt below,
-            // vertical auto-layout, no fixed height) — the 119.8pt in the file is
-            // the result, not a constraint. Pinning `minHeight: 120` floated the
-            // icon and label to the top and left dead space beneath them.
+            // The design's tiles HUG their content (vertical auto-layout, no
+            // fixed height) — pinning `minHeight` floated content and left
+            // dead space in the ORIGINAL Figma-only measurement, but this
+            // grid needs every tile the SAME height regardless of selection
+            // state or label line count, so padding is now identical for
+            // both states (the badge-row + fixed-height label above absorb
+            // what used to be state-dependent padding).
             .frame(maxWidth: .infinity)
-            .padding(.top, .hearth700)
-            .padding(.bottom, .hearth600)
+            .padding(.top, .hearth300)
+            .padding(.bottom, .hearth500)
+            .padding(.horizontal, .hearth500)
             .background(selected ? Color.accentDefault : Color.bgElevated)
+            .overlay(
+                RoundedRectangle(cornerRadius: .hearthRadiusControl, style: .continuous)
+                    .strokeBorder(Color.accentDefault, lineWidth: selected ? 0 : 0.9)
+            )
             .clipShape(RoundedRectangle(cornerRadius: .hearthRadiusControl, style: .continuous))
         }
         .buttonStyle(.plain)

@@ -91,6 +91,8 @@ NEUTRAL_500 = "#858585"
 CREAM_WARM = "#FCFBF8"
 WARM_GRAY_500 = "#989591"
 CHARCOAL_BTN = "#4A4741"
+TEAL_DEEP = "#0A5570"
+BORDER_INPUT = "#C9C5BE"
 
 PAIRS: list[tuple[str, str, str, float, str | None]] = [
     # (label, foreground, background, floor, deliberate-exception note)
@@ -114,6 +116,10 @@ PAIRS: list[tuple[str, str, str, float, str | None]] = [
     ("accent/onCanvas on tab-selected",   TEAL_TEXT, TAB_SELECTED, AA_TEXT,
      "Matches Greg's Figma exactly (#1B7498 as drawn). Miguel's explicit call 2026-08-07, choosing design fidelity over the AA fix: #186A8B measured 4.78:1 and was visually indistinguishable. Revert by changing ONE primitive (HearthPrimitives.teal600) if this is revisited. Raised with Greg in the Figma eng-review comment."),
     ("ink/display on card",               INK_800,   CARD_CREAM,  AA_TEXT, None),
+    # Heisman "one last thing" (2026-08-21, frame 69:1313): the household /
+    # kid cards sit on cream-100 (bgSober) with Inter-13 helper copy + row
+    # labels in the frame's #1E1E1E (ink/display).
+    ("ink/display on sober (setup tail)", INK_800,   SOBER,       AA_TEXT, None),
     ("ink/header on card",                INK_HEADER, CARD_CREAM, AA_TEXT, None),
     ("paper on bg/neutral (sign out)",    PAPER,     NEUTRAL_500, AA_TEXT,
      "Grey sign-out fill is the design's own value (#858585). Flagged to Greg: "
@@ -158,6 +164,39 @@ PAIRS: list[tuple[str, str, str, float, str | None]] = [
     # Google button's `#2B2925` fill is `ink/header`, reused as a BACKGROUND
     # here rather than its usual text role.
     ("paper on ink/header (auth pill)",  PAPER,     INK_HEADER,   AA_TEXT, None),
+
+    # Heisman sprint-01 Home / day-zero summary (2026-08-21, Figma frame
+    # `42:8322`). The Heisman frames sit on cream-100 (`bgSober`) with
+    # `#FCFBF8` (`bgCoachBanner` / Heisman "bg/elevated") cards; several inks
+    # are the frame's own values mapped to their nearest existing primitives —
+    # see the token-gap notes in HomeView.swift / HomeTodayCards.swift.
+    ("ink/primary on sober (Heisman)",   INK_900,   SOBER,        AA_TEXT, None),
+    ("ink/primary on bg/coachBanner",    INK_900,   CREAM_WARM,   AA_TEXT, None),
+    ("charcoal as ink on bg/coachBanner", CHARCOAL_BTN, CREAM_WARM, AA_TEXT, None),
+    ("accent/deep link on bg/coachBanner", TEAL_DEEP, CREAM_WARM, AA_TEXT, None),
+    ("accent/onCanvas on bg/coachBanner", TEAL_TEXT, CREAM_WARM,  AA_TEXT,
+     "Heisman COACH masthead + See-all label on the #FCFBF8 card — #1B7498 "
+     "as drawn, same waiver as the on-canvas accent pairs above (Miguel's "
+     "2026-08-07 fidelity-over-AA call; one-primitive revert via teal600)."),
+    ("ink/eyebrow on bg/coachBanner",    WARM_GRAY_500, CREAM_WARM, AA_TEXT,
+     "Heisman person-name / category eyebrows on the #FCFBF8 card — same "
+     "eyebrow grey and same rationale as the two eyebrow waivers above: it "
+     "always duplicates information carried by the adjacent headline."),
+    ("provenance mono on bg/coachBanner", BORDER_INPUT, CREAM_WARM, AA_TEXT,
+     "Onboarding-9's provenance line ('added by your coach · repeats "
+     "Saturdays', node 29:2802) is drawn in the frame's #C8C3B8 — nearest "
+     "token borderInputPill — on the #FCFBF8 card: ~1.6:1, a deliberate "
+     "designer de-emphasis far below AA. Implemented as drawn; flag to Greg "
+     "with the eyebrow question. The line is supplementary metadata whose "
+     "facts (schedule, source) also appear in the planner detail view."),
+    ("ink/onCard on ink/primary (kid tile)", CARD_CREAM, INK_900, AA_TEXT, None),
+
+    # Heisman funnel selected cards (2026-08-21): topic/task card selected
+    # state — accent BOLD 13 label on the accent tint (`cerulean-100`
+    # #DCE9EF), exactly as the Onboarding-6 frame draws it. Same fidelity
+    # waiver family as the accent-on-tab-selected pair above.
+    ("accent as label on accent/tint (Heisman selected card)", TEAL_TEXT, "#DCE9EF", AA_TEXT,
+     "Matches the Heisman frames exactly (Inter Bold 13 #1B7498 on cerulean-100). Same one-primitive fix (HearthPrimitives.teal600) as the other accent waivers if revisited."),
 ]
 
 # The two funnel border colors (#C9C5BE and #E9E4DC) are NOT registered as

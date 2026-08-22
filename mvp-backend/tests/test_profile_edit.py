@@ -194,6 +194,44 @@ def test_patch_secondary_language_and_guidance_style_round_trip():
         _reconnect_shared_storage(server)
 
 
+def test_patch_kid_school_style_round_trip():
+    """Heisman "one last thing" (2026-08-21) added a per-kid school-style
+    dropdown. `school_style` is a new ChildProfile field; the PATCH whitelist is
+    auto-derived from the dataclass, so this pins that the key is accepted,
+    persisted, and served back — a client sending an unknown key would get a
+    silent 200 with the value dropped (the exact bug class the field exists to
+    avoid)."""
+    from fastapi.testclient import TestClient
+    import app.server as server
+
+    try:
+        with TestClient(server.app) as client:
+            user_id = "profile-edit-school-style-user"
+            tok = client.post("/auth/issue-token", json={"user_id": user_id}).json()["token"]
+            auth = {"Authorization": f"Bearer {tok}"}
+
+            r = client.patch(
+                "/profile/kids/Mika",
+                json={"age": "5", "grade_band": "preschool", "school_style": "Montessori"},
+                headers=auth,
+            )
+            assert r.status_code == 200, r.text
+            kid = r.json()["children"]["Mika"]
+            assert kid["school_style"] == "Montessori"
+
+            # GET reflects it, and a later PATCH that omits the key leaves it.
+            got = client.get("/profile", headers=auth).json()
+            assert got["children"]["Mika"]["school_style"] == "Montessori"
+            r = client.patch("/profile/kids/Mika", json={"grade_band": "elementary"}, headers=auth)
+            assert r.json()["children"]["Mika"]["school_style"] == "Montessori"
+
+            # An explicit "" clears it (the iOS "Not set" pick sends "").
+            r = client.patch("/profile/kids/Mika", json={"school_style": ""}, headers=auth)
+            assert r.json()["children"]["Mika"]["school_style"] == ""
+    finally:
+        _reconnect_shared_storage(server)
+
+
 def test_delete_family_evicts_in_memory_profile():
     """DELETE /family must forget the family from the in-memory profiling_service,
     not only the DB. Regression: GET /profile reads the process-local singleton,

@@ -28,6 +28,10 @@ MESSAGE_RATE_PER_MIN = int(os.getenv("RATE_LIMIT_MESSAGE_PER_MIN", "30"))
 # retries/reinstalls. Each run costs an LLM call, so it gets its own bucket
 # rather than sharing (and starving) the discovery one.
 WARMUP_RATE_PER_HOUR = int(os.getenv("RATE_LIMIT_WARMUP_PER_HOUR", "10"))
+# Pre-account onboarding extraction is UNAUTHENTICATED (anon session token) and
+# each call is a multimodal LLM invocation — the hardest bucket to leave open.
+# Enforced per anon-session AND per IP; a funnel run needs only a handful.
+EXTRACT_RATE_PER_HOUR = int(os.getenv("RATE_LIMIT_EXTRACT_PER_HOUR", "30"))
 
 
 @dataclass
@@ -65,6 +69,9 @@ class _RateLimiter:
                     refill_per_sec = cap / 60.0
                 elif klass == "warmup":
                     cap = WARMUP_RATE_PER_HOUR
+                    refill_per_sec = cap / 3600.0
+                elif klass == "extract":
+                    cap = EXTRACT_RATE_PER_HOUR
                     refill_per_sec = cap / 3600.0
                 else:
                     cap = 60

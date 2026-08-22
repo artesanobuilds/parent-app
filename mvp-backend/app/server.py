@@ -189,6 +189,10 @@ from app.onboarding_warmup import (
 )
 app.include_router(warmup_router)
 app.include_router(coach_nudge_router)
+# Pre-account extraction (Heisman sprint-01 step 04): stateless, anonymous,
+# scoped-token gated — the ONLY unauthenticated LLM surface. See module doc.
+from app.onboarding_extract import router as onboarding_extract_router
+app.include_router(onboarding_extract_router)
 # Household members / Circle (beta-v1 Phase 1) — the mutual-link roster that is
 # the authorization source for every Circle conversation.
 from app.household import router as household_router
@@ -331,6 +335,24 @@ class OnboardingSeedRequest(BaseModel):
     cultural_background: str = ""
     employment: str = ""
     pronouns: str = ""
+    # 2026-08-21: iOS has posted these four since the Phase-3 funnel, but they
+    # were never declared here — pydantic silently dropped them (the exact bug
+    # class that ate secondary_language until 2026-08-08). Declared + mapped now.
+    secondary_language: str = ""
+    family_activities: List[str] = []
+    education_style: str = ""
+    coach_voice: str = ""
+    coach_personality: str = ""
+    # Heisman sprint-01 additions:
+    # - topic: the one thing the parent wants handled (step 03; card enum value
+    #   or free text). Shapes the coach demo + warmup context.
+    # - parent_week_tasks: the parent's OWN to-dos for the week (step 05) — the
+    #   self-care construct. Also seeded as kid_name-NULL tracked_activities.
+    # - extracted_activities: step-04 extraction results carried through the
+    #   client draft; seeded as real tracked_activities matched to kids by name.
+    topic: str = ""
+    parent_week_tasks: List[str] = []
+    extracted_activities: List[Dict[str, str]] = []  # [{who, what, when, where, notes?}]
 
 
 # ── CMS Pydantic models ──────────────────────────────────────────────
@@ -1389,6 +1411,20 @@ def seed_profile(request: OnboardingSeedRequest, user_id: str = Depends(current_
         parent_updates["employment"] = request.employment
     if request.pronouns:
         parent_updates["pronouns"] = request.pronouns
+    if request.secondary_language:
+        parent_updates["secondary_language"] = request.secondary_language
+    if request.family_activities:
+        parent_updates["family_activities"] = request.family_activities
+    if request.education_style:
+        parent_updates["education_style"] = request.education_style
+    if request.coach_voice:
+        parent_updates["coach_voice"] = request.coach_voice
+    if request.coach_personality:
+        parent_updates["coach_personality"] = request.coach_personality
+    if request.topic:
+        parent_updates["focus_topic"] = request.topic
+    if request.parent_week_tasks:
+        parent_updates["self_care_tasks"] = request.parent_week_tasks
 
     profiling_service.update_parent_profile(request.user_id, parent_updates)
 
@@ -1414,6 +1450,47 @@ def seed_profile(request: OnboardingSeedRequest, user_id: str = Depends(current_
         if grade_band:
             child_updates["grade_band"] = grade_band
         profiling_service.update_child_profile(request.user_id, child_name, child_updates)
+
+    # Heisman sprint-01: turn onboarding scraps into REAL plan-board rows.
+    # Parent self-care to-dos ride as kid_name-NULL tracked_activities (the
+    # board + Home already tolerate NULL kid rows — step_plan writes them);
+    # extracted step-04 activities match a kid by first name, else family-wide.
+    kid_names = {k.get("name", "").strip() for k in request.kids if k.get("name", "").strip()}
+    kid_lookup = {n.lower(): n for n in kid_names}
+    for task in request.parent_week_tasks:
+        task = (task or "").strip()
+        if not task:
+            continue
+        storage_backend.track_activity(
+            request.user_id,
+            name=task,
+            kid_name=None,
+            activity_type="outing",
+            status="exploring",
+            details={"source": "onboarding_self", "self": True},
+        )
+    for extracted in request.extracted_activities:
+        what = (extracted.get("what") or "").strip()
+        if not what:
+            continue
+        who = (extracted.get("who") or "").strip()
+        matched_kid = kid_lookup.get(who.lower().split(" ")[0] if who else "")
+        details: Dict[str, Any] = {"source": "onboarding_extract"}
+        when = (extracted.get("when") or "").strip()
+        where = (extracted.get("where") or "").strip()
+        if when:
+            details["schedule_text"] = when
+        if where:
+            details["location_text"] = where
+        storage_backend.track_activity(
+            request.user_id,
+            name=what,
+            kid_name=matched_kid,
+            activity_type="extracurricular",
+            status="exploring",
+            notes=(extracted.get("notes") or "").strip() or None,
+            details=details,
+        )
 
     # Persist immediately so nothing is lost if server restarts
     persist_state(request.user_id)
@@ -2288,6 +2365,14 @@ def delete_family(user_id: str, authenticated_user: str = Depends(current_user))
     # `export_all_parquet` can flush it back into `user_data`. Popping it here
     # makes the delete visible immediately and stops a re-export resurrecting it.
     profiling_service.remove_family(user_id)
+    # Same for the legacy chat/onboarding thread stores — they are ALSO
+    # process-local singletons that persist_state() flushes back into
+    # user_data. Without this eviction a deleted family's coach conversations
+    # resurrected on the next persist (found live in prod 2026-08-10: two
+    # deleted accounts kept their chat_threads rows, rewritten on every
+    # export, until this line existed).
+    chat_memory.remove_user(user_id)
+    onboarding_memory.remove_user(user_id)
     # Agent conversation checkpoints are durable now — sweep every thread this
     # family owns (parent text + voice, onboarding, each kid). Never raises;
     # the DB cascade above already stands.

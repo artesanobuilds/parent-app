@@ -1,0 +1,12 @@
+task_family,Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec,source,tier,notes
+Summer camps,3,3,3,3,3,2,1,0,0,1,1,2,"Google Trends API pull 2026-08-21 (2021-08..2026-08)",B,"CV 0.633; trough index 11"
+School-break coverage,1,2,3,1,0,0,0,0,0,1,2,3,"Google Trends API pull 2026-08-21",B,"winter+spring break peaks"
+Fall activity registration,0,0,1,1,2,3,3,3,1,0,0,0,"Google Trends API pull 2026-08-21",B,
+Spring activity registration,3,3,3,2,1,1,0,0,0,1,2,1,"Google Trends API pull 2026-08-21",B,
+Youth sports in-season,2,2,3,3,3,2,2,2,3,3,3,2,"Analyst construction from registration-lead curves",D,"NOT SOURCED - Aspen State of Play 2025 verified to contain no season-timing data"
+School admin / back-to-school,1,2,2,1,2,1,3,3,2,3,2,1,"Google Trends API pull 2026-08-21",B,
+Family vacations,3,3,2,2,2,3,2,1,1,2,2,2,"Google Trends API pull 2026-08-21",B,
+Weekend outings,2,2,3,2,2,3,3,2,2,3,2,2,"Google Trends API pull 2026-08-21",B,"CV 0.142; trough 64"
+Medical / dental,2,2,2,2,2,2,3,3,3,3,2,2,"Google Trends API pull 2026-08-21",B,"CV 0.099 dentist / 0.124 pediatrician; FLATTEST"
+Birthday parties,3,2,2,2,2,2,2,3,3,2,2,2,"Google Trends API pull 2026-08-21",B,"CV 0.124; trough 65"
+Holiday planning,0,1,1,1,0,0,0,0,2,3,3,3,"Google Trends API pull 2026-08-21",B,

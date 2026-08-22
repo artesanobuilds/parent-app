@@ -45,7 +45,16 @@ struct CoachFirstRunView: View {
 
     var body: some View {
         VStack(spacing: .hearth500) {
-            HearthMark(size: 80, tint: .accentOnCanvas)
+            // The frame's hero (`754:5579` → `coach` instance `1029:11790`,
+            // 80x80) is the coach person+sparkles glyph, NOT the "M" wordmark
+            // `HearthMark` renders — that mark belongs to the app/paywall
+            // surfaces, the Coach surface's own mark is this one (round 3).
+            Image("CoachMark")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 54, height: 66)
+                .foregroundColor(.accentOnCanvas)
 
             Text("Meet your coach")
                 .font(.hearthDisplaySM)          // Fraunces w700 38/40

@@ -38,6 +38,9 @@ The raw palette. Code should rarely reference these directly — use the semanti
 | `funnel/button-charcoal` | `#4A4741` | **funnel primary-button fill** (sprint-1, 2026-08-08) — white on it = 9.26:1. Deliberately NOT the teal accent: the funnel reads sober and minimal; teal is the in-app accent |
 | `funnel/border-input` | `#C9C5BE` | funnel pill input 1px stroke (1.51:1 on cream-50 — decorative, not a boundary indicator) |
 | `funnel/border-chip` | `#E9E4DC` | funnel chip outline 1px stroke (1.22:1 on cream-50 — decorative, not a boundary indicator) |
+| `planner/border-card` | `#A4A4A4` | **round 3** — the empty-plan find-activities card's 1px stroke (`1026:10493`), a darker neutral than the funnel border above |
+| `planner/search-icon` | `#4F5D3A` | **round 3** — the find-activities card's search-icon moss green (`1026:10495`); NOT reconciled to the teal accent, kept as Greg's own file value |
+| `planner/search-text` | `#3A4A2A` | **round 3** — the same card's "Find activities" / field label ink (`1026:10496`) |
 | `brand/teal-deep` | `#0A5570` | deepest accent, **fill only** — the chat-input strip and the count badge on the Plan segment (sprint-2 measured). Cream on it = 7.44:1, paper = 8.25:1 |
 | `brand/teal-700` | `#12556F` | accent press / dense use |
 | `brand/teal-600` | `#1B7498` | accent as **text or icon on cream**. **Was `#186A8B` (4.78:1)**; set equal to teal-500 on 2026-08-07 for exact Figma fidelity — see the deviation note below |
