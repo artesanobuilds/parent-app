@@ -31,6 +31,11 @@ is the point.
 today's date and one card per person: each kid's upcoming activities, your own to-dos, a
 note from your coach, your kids, and fresh MVP Editorial reads — all in one scroll.
 
+**Already have an account? The new welcome now merges** *(app update 1.91)* — if you walk
+the new welcome flow and sign in to an existing account at the end, everything you just
+entered joins your family instead of disappearing: kids with the same name merge, new
+names are added, and nothing gets duplicated.
+
 **Finding activities is faster** — searching for camps and classes now typically takes under
 two minutes instead of three, with the same quality of matches.
 
