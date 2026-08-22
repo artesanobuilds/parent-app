@@ -136,9 +136,12 @@ struct MVPApp: App {
                     // print (beta-v1 deleted the screen that held the
                     // agree-checkbox). AppSession.refreshLegal flushes this.
                     UserDefaults.standard.set(true, forKey: LegalService.acceptPendingKey)
-                    if outcome.hasProfile {
-                        onboardingCompleted = true
-                    }
+                    // NOTE: a returning parent (outcome.hasProfile) is no
+                    // longer completed HERE — flipping `onboardingCompleted`
+                    // tore the funnel down before the seed ever fired, so a
+                    // returning parent's fresh onboarding data (kids, topic,
+                    // extracted events) was silently discarded. The account
+                    // wall now seeds-to-merge first and calls onFinish itself.
                 },
                 onSeed: { data in
                     // Remember the parent's display name for the greeting

@@ -113,3 +113,82 @@ Shipped today, verified by code audit:
 Do not fabricate. If the data does not exist, say "no data found" — that is a finding, and for Gen Z
 parents especially it is the expected answer in several areas. Never extrapolate a number and present it
 as sourced. Mark your own confidence.
+
+---
+
+## VERIFIED CORRECTIONS — 2026-08-21, Phase 3. These OVERRIDE any collector report.
+
+Synthesis and chart-building agents MUST use these values, not the originals.
+
+**Cohort sizing (V1).** The Gen Z / Millennial / Gen X parent-household split of 2.0M / 18.2M / 11.7M
+is a **2023 householder-age snapshot**. Recomputed on this study's 2026 age bands from the same
+Census Table F1, Gen Z parent households are **~3.6M (~10.9%)** — nearly double. Any statement that
+Gen Z is ~6% of parent households is wrong. The cohort is larger than the collectors assumed, though
+the child-age argument (their kids are infants/toddlers, so the camp/activity job has not started)
+is unaffected and still stands.
+
+**The planning gap, by employment (V1).** The headline "household management gap is 2.0x, and 3.0x
+when the youngest child is 6-17" is ALL parents. For **employed** parents — the actual buyer — ATUS
+Table 8B gives **8.4 vs 4.8 min/day = 1.75x**, and 1.33x overall for employed vs 3.1x for
+not-employed. The 2.0x/3.0x headline is levered by non-employed mothers. Use the employed figures
+when reasoning about the customer.
+
+**Daminger (V1).** Only **decision-making** is exempted as roughly equal. "Identifying options is
+also equal" is NOT established — Daminger finds women do more cognitive labor overall. Do not argue
+that the Planner sits entirely in a gender-neutral middle.
+
+**Gallup (V1).** Women lead **6 of 12** tasks in dual-full-time households, not 8 of 12. ("Family
+activity planning is one of the shared tasks" is confirmed and may stand.)
+
+**Trends volume (V3).** The seasonality CV method is sound, but flatness must never be presented as
+demand size. On a shared scale: summer camp 36.6, kids-activities 3.5, dentist 1.5 — summer camp's
+WORST month exceeds dentist's BEST by ~4.5x. Any chart must carry a volume axis. **Do not publish**
+the "aggregate load varies only 1.47x across the year" figure — it is an artifact of row
+normalization plus ordinal truncation. The fine CV ranking (dentist flatter than pediatrician) is
+not robust to quantization; only the flat-vs-spiky separation is. The forward-year experiment
+(Nov/Dec doubling, Jan tripling, Aug-Oct dead window) reproduced exactly and IS publishable.
+Trends is Tier C/D (raw feed, no disclosed n), not Tier B, and is not parent-scoped.
+
+**Obligations per year (V2).** Use **~23/yr, honest band 20-26** for a 2-kid family. The
+sourced-only floor is **~15.06**, dropping to **~9** if two siblings share a school — not 15.96.
+ED and urgent-care visits are unscheduled and must be excluded from any count labelled "scheduled."
+NCES publishes the mean as a rounded integer 6, so decimals are false precision. Corrected inputs:
+ED **0.48**, orthodontia **0.22**, dental band 0.9-1.8 (1.8 is a ceiling, not a midpoint).
+
+**Complexity language (V4).** **"SEVERE OUTLIER" is banned from the report** — no screens-to-
+completion distribution exists, so "outlier" is unavailable. Rename the column `Analyst call` and
+add `Evidence strength: direct / adjacent / none`, under a heading stating it is analyst judgement,
+not measurement. The 1-2 min Planner wait may be stated as "6-12x Nielsen's verified 10-second
+limit" verbatim. Note that checkout fields are largely autofillable while ours are generative, so
+the field-count comparison understates our burden — publish as comparison, never as a score.
+
+**Retention modelling (V4).** RevenueCat's 21.1%-at-12-months AI figure is **monthly-plan** scoped.
+For an annual product model from **44.1% yearly vs 17.0% monthly** (a 2.6x plan-type effect that
+dwarfs the ~1.4x AI effect), applying an explicit, sensitivity-tested AI haircut.
+
+**Platform absorption dates (V4).** Apple's personal-context Siri is **beta later in 2026** — there
+is no September 2026 date and no pricing statement. Gemini's "free-tier rollout March 17 2026" is
+unverifiable. Absorption is real; the specific dates are not. Also: "55% of trial cancellations on
+Day 0" is **55.4% of 3-day-trial cancellations**.
+
+**Attribution fixes.** The public-voice-shame study (n=860) is **Kowalczuk & Musial**, NOT "Distel
+et al." — that author does not exist. The "71% prefer voice" figure does not appear in the PwC
+report at all (misattribution, not a stripped qualifier). Juniper's device forecast target year is
+**2024**, not 2026. The AP-NORC youth-sports survey is **Ipsos KnowledgePanel**, not NORC, and its
+"logistics above cost" gap is directional only — at ±4.9 on n=510, 76 vs 74 round identically.
+
+**Trips (V3).** P6's "73% affordability vs 43% planning" compared two different survey batteries.
+The correct within-battery figure: **"planning the trip" ranks 27%, 6th of 17** obstacles, and 6%
+among parents unlikely to travel. The rejection of the trips vertical gets stronger, not weaker.
+
+**Weak-source qualifiers that must travel with the number.** The "88% of mothers own scheduling"
+figure must carry "in a sample of 393 mostly graduate-degreed mothers, fielded 2005-2010." The
+"affluent families miss more appointments" finding is **RR 1.02, cold months only, one PA/NJ
+network**, from a paper titled *Extreme Temperatures and Missed Pediatric Preventive Care Visits* —
+it cannot carry a strategic argument. "62% went into debt for summer care" has an undefined
+instrument, a base of 383 who *require* care, and a debt-consolidation lender as publisher.
+
+**Data-access note (V1).** bls.gov 403s every direct method in this environment, but **Wayback
+Machine `id_` snapshots work** and are the standard BLS route for this project. Also: CPS October
+2025 was not collected, so 2025 annual averages are 11-month and BLS states they are "not strictly
+comparable with annual averages for other years."

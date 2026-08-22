@@ -291,11 +291,26 @@ struct OnboardingView: View {
                         onBack: goBack,
                         onSignedIn: { outcome in
                             onSignedIn(outcome)
-                            // A profile already on the account means this is
-                            // a returning parent — SwayApp flips
-                            // `onboarding_completed` and tears this whole
-                            // view down, so there is nothing to route.
-                            guard !outcome.hasProfile else { return }
+                            if outcome.hasProfile {
+                                // Returning parent: the account already has a
+                                // family. MERGE the funnel's fresh answers into
+                                // it instead of discarding the draft —
+                                // 2026-08-22: Miguel walked the new funnel with
+                                // real data (kids, topic, an image-extracted
+                                // event), signed in with his existing Google
+                                // account, and it all silently vanished; Home
+                                // showed only the old family. Same-name kids
+                                // merge server-side, new names add, board rows
+                                // dedupe. onSeed stashes durably BEFORE the
+                                // POST, so a kill mid-flight retries on the
+                                // next launch. Then finish directly — a
+                                // returning parent skips paywall + warmup.
+                                Task {
+                                    _ = await onSeed(collectedData())
+                                    onFinish()
+                                }
+                                return
+                            }
                             goToNext()
                         },
                         onAdvance: {

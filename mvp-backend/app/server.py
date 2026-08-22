@@ -1455,16 +1455,30 @@ def seed_profile(request: OnboardingSeedRequest, user_id: str = Depends(current_
     # Parent self-care to-dos ride as kid_name-NULL tracked_activities (the
     # board + Home already tolerate NULL kid rows — step_plan writes them);
     # extracted step-04 activities match a kid by first name, else family-wide.
+    # Dedup by (kid_name, name), case-insensitive, against rows ALREADY on the
+    # board — a returning parent re-running onboarding (or a retried seed)
+    # merges into the existing family rather than duplicating cards
+    # (2026-08-22: the returning-parent path now seeds-to-merge by design).
     kid_names = {k.get("name", "").strip() for k in request.kids if k.get("name", "").strip()}
     kid_lookup = {n.lower(): n for n in kid_names}
+    existing_board_keys = {
+        ((a.get("kid_name") or "").strip().lower(), (a.get("name") or "").strip().lower())
+        for a in (storage_backend.list_tracked_activities(request.user_id) or [])
+    }
+
+    def _track_once(name: str, kid_name: Optional[str], **kwargs: Any) -> None:
+        key = ((kid_name or "").strip().lower(), name.strip().lower())
+        if key in existing_board_keys:
+            return
+        storage_backend.track_activity(request.user_id, name=name, kid_name=kid_name, **kwargs)
+        existing_board_keys.add(key)
+
     for task in request.parent_week_tasks:
         task = (task or "").strip()
         if not task:
             continue
-        storage_backend.track_activity(
-            request.user_id,
-            name=task,
-            kid_name=None,
+        _track_once(
+            task, None,
             activity_type="outing",
             status="exploring",
             details={"source": "onboarding_self", "self": True},
@@ -1482,10 +1496,8 @@ def seed_profile(request: OnboardingSeedRequest, user_id: str = Depends(current_
             details["schedule_text"] = when
         if where:
             details["location_text"] = where
-        storage_backend.track_activity(
-            request.user_id,
-            name=what,
-            kid_name=matched_kid,
+        _track_once(
+            what, matched_kid,
             activity_type="extracurricular",
             status="exploring",
             notes=(extracted.get("notes") or "").strip() or None,

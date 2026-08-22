@@ -310,3 +310,70 @@ def test_the_kid_editor_rows_store_under_their_own_names():
     # `triggers` / `motivators` keep their own meaning and must NOT be collateral.
     assert stored["triggers"] == []
     assert stored["motivators"] == []
+
+
+def test_reseed_merges_family_and_never_duplicates_board_rows():
+    """The returning-parent path (2026-08-22): Miguel walked the new funnel on
+    his EXISTING account — same-name kids must MERGE, new names must ADD, and
+    re-sent tasks/extractions must not duplicate board cards. The account wall
+    now seeds-to-merge on sign-in with hasProfile, so a second seed against a
+    populated family is a first-class flow, not an edge case."""
+    from fastapi.testclient import TestClient
+    import app.server as server
+
+    try:
+        with TestClient(server.app) as client:
+            user_id = "seed-contract-reseed-user"
+            tok = client.post("/auth/issue-token", json={"user_id": user_id}).json()["token"]
+            auth = {"Authorization": f"Bearer {tok}"}
+
+            first = {
+                "user_id": user_id,
+                "parent_name": "Miguel",
+                "kids": [{"name": "Lily", "age": "9", "temperament": "",
+                          "pronouns": "", "grade_band": ""}],
+                "parent_week_tasks": ["A gift to buy"],
+                "extracted_activities": [
+                    {"who": "Lily", "what": "Swim lessons",
+                     "when": "Tuesdays · 4:15 pm", "where": "Northgate", "notes": ""},
+                ],
+            }
+            assert client.post("/profile/seed", json=first, headers=auth).status_code == 200
+
+            # The re-onboard: same kid (new detail), one NEW kid, the same
+            # task + a new one, the same extraction + a new one.
+            second = {
+                "user_id": user_id,
+                "parent_name": "Miguel",
+                "kids": [
+                    {"name": "Lily", "age": "9", "temperament": "sensitive",
+                     "pronouns": "", "grade_band": ""},
+                    {"name": "Ben", "age": "5", "temperament": "",
+                     "pronouns": "", "grade_band": ""},
+                ],
+                "parent_week_tasks": ["A gift to buy", "Date night"],
+                "extracted_activities": [
+                    {"who": "Lily", "what": "Swim lessons",
+                     "when": "Tuesdays · 4:15 pm", "where": "Northgate", "notes": ""},
+                    {"who": "Ben", "what": "Peewee soccer",
+                     "when": "Saturdays · 9:00 am", "where": "Cedar Field", "notes": ""},
+                ],
+            }
+            assert client.post("/profile/seed", json=second, headers=auth).status_code == 200
+
+            family = client.get("/profile", headers=auth).json()
+            children = family["children"]
+            # Same-name kid MERGED (one Lily, new detail landed), new kid ADDED.
+            assert set(children) == {"Lily", "Ben"}, f"kid merge broken: {sorted(children)}"
+            assert children["Lily"]["temperament"] == "sensitive", \
+                "re-seed did not merge new detail into the same-name kid"
+            assert children["Lily"]["age"] == 9.0
+
+            rows = server.storage_backend.list_tracked_activities(user_id)
+            names = sorted(((r.get("kid_name") or "", r["name"]) for r in rows))
+            assert names == sorted([
+                ("", "A gift to buy"), ("", "Date night"),
+                ("Lily", "Swim lessons"), ("Ben", "Peewee soccer"),
+            ]), f"board rows duplicated or lost: {names}"
+    finally:
+        _reconnect_shared_storage(server)
