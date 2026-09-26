@@ -70,152 +70,132 @@ End with a section listing every gap you could NOT close, marked either
 
 # THE GAPS, IN PRIORITY ORDER
 
-## PRIORITY 1 — access-blocked authoritative sources (type A)
+**Status note, 2026-08-22.** The 41-agent program has now finished, and several gaps in the first
+version of this prompt were closed by the verification pass. They are removed below. What remains is
+re-prioritised by how much a decision currently rests on it.
 
-**G1. BLS American Time Use Survey 2025 — household management detail.**
-Fetch the actual ATUS 2025 tables from bls.gov (Tables 8A/8B/8C and the "household
-management" activity code). We need minutes per day for parents of children under 18, by
-SEX × EMPLOYMENT STATUS × AGE OF YOUNGEST CHILD. Also pull the 2015 and 2019 equivalents for
-a trend line. Our current figures (mothers 12.0 vs fathers 6.0 min/day overall; 16.2 vs 5.4
-when youngest is 6–17; parity when youngest is under 6) came from secondary routes and need
-verification at source. NOTE: BLS suspended ATUS collection Oct 1 – Nov 12 2025 (government
-shutdown) and reweighted Q4 — find and quote BLS's own statement on the effect.
+## PRIORITY 1 - one unsourceable verdict is holding up an architecture decision
 
-**G2. Census family structure detail tables, 2024 and 2025.**
-The cps-2024 and cps-2025 detail-table pages 404'd. Find whether Census published FG10 /
-F1 / FM-1 / CH-1 detail tables for 2024 or 2025, or confirm 2023 is genuinely the newest.
-We need families with own children under 18 by householder age (to size the Gen Z /
-Millennial / Gen X parent split, currently 2.0M / 18.2M / 11.7M, derived from 2023 Table F1).
-Also flag the universe problem: FM-1 says 33.56M families, FINC-03 36.82M, F1 36.44M —
-document precisely what each universe counts.
+**G1. Can a parent add a secondary or arbitrary notification email in ParentSquare?**
+This is the single most valuable question in the list. ParentSquare's BLOCKED verdict is load-bearing:
+it is one of two findings that killed a whole product strategy (registering our own address with
+schools), and it rests on a citation no reader can check, because ParentSquare's help centre is
+login-gated and renders a sign-in page in real Chrome. Determine from first-party sources, ideally by
+seeing an actual account: (a) can a parent add or change a notification email themselves, or is the
+field synced nightly from the student information system and overwritten? (b) does ParentSquare's
+notification email carry the message CONTENT in the body, or only a "sign in to read" link? (c) what
+is the default digest behaviour, and can a parent switch to instant per-message email? Their 6pm
+digest default may mean a forwarding architecture captures envelopes rather than content across 22M
+students. Same three questions, lower priority, for Brightwheel and Infinite Campus.
 
-**G3. NCES school-calendar structure.**
-nces.ed.gov and ecs.org were unreachable. We need: average number of days US public schools
-are closed per year BEYOND summer; distribution of teacher professional-development days,
-early-release days, and conference days across the calendar; typical back-to-school start
-dates by region. This is the single biggest hole in our seasonality analysis.
+**G2. Google CASA and restricted-scope verification, 2026, confirmed at source.**
+Confirm from Google's own current documentation: that the unverified-app cap is 100 users over the
+GCP project's ENTIRE LIFETIME and is not resettable; that exhausting it disables Google sign-in; that
+verification lifts it; that the security assessment is mandatory, annual, and a full re-test
+regardless of whether anything changed; the current tier pricing and whether a self-start application
+lands at the higher tier by default; and the current elapsed time from submission to grant. Also:
+does an LLM pipeline processing Gmail message bodies satisfy Google's Limited Use policy at all? That
+last one is unresolved and a product depends on it.
 
-**G4. American Camp Association primary data.**
-americancamp.org is Cloudflare-blocked. The widely-repeated "26M campers / 14,000 camps"
-figures are untraceable to a fielding year. Find ACA's actual published research with a
-year and method, or confirm it is not publicly documented.
+## PRIORITY 2 - blocked authoritative sources
 
-**G5. CDC/NCHS pediatric utilization.**
-cdc.gov 403'd; we sourced via the NIH/NCBI mirror. Verify at source: NAMCS physician office
-visits per child per year by age; NHAMCS emergency department visits; NHIS dental visit
-rates for children 5–17; and well-child visit adherence to the AAP/Bright Futures
-periodicity schedule.
+**G3. NCES school-calendar structure.** nces.ed.gov and ecs.org were unreachable. Needed: the
+distribution of teacher professional-development days, early-release days and conference days across
+the calendar, and typical back-to-school start dates by region. A measured figure of 30 to 38
+non-summer closure days (median ~34) was assembled from individual district calendars; confirm or
+replace it with a published national figure.
 
-## PRIORITY 2 — the qualitative corpus we could not crawl (type A)
+**G4. American Camp Association primary data.** americancamp.org is Cloudflare-blocked. ACA's widely
+repeated "26 million campers" was traced to ACA's own unsourced boilerplate and its 2024 economic
+study supplies no camper count. Find ACA research with a stated year and method, or confirm none is
+public. Gallup/NSLA's 30M (55% of K-12) is currently used instead.
 
-**G6. Reddit and Trustpilot.**
-Both blocked our crawler entirely, so our 4,073-review corpus is App Store only. Harvest
-verbatim parent language from r/Parenting, r/Mommit, r/daddit, r/workingmoms, r/coparenting,
-r/breakingmom, r/SingleParents on these themes, with URLs and dates. **Quote exactly; never
-paraphrase as if verbatim.** This is qualitative and non-representative — do not compute
-percentages from it.
-  - "we tried [family calendar app] and it didn't stick" — and specifically WHY
-  - the homemade system: spreadsheets, paper planners, Apple Notes, the fridge, group texts
-  - the capture moment: "I texted myself", "screenshot it", "the flyer in the backpack"
-  - handing planning to a partner, and what happens
-  - the January camp-registration scramble
-  - "I wish there was an app that…"
-  - parents using ChatGPT for family logistics — and parents refusing to
-  - talking to Siri/Alexa/ChatGPT voice for family logistics, and why they don't
-  Also: Trustpilot ratings and review themes for Cozi, Skylight, OurFamilyWizard,
-  TalkingParents, ParentSquare.
+**G5. Reddit and Trustpilot at scale.** A qualitative corpus of ~2,300 comments was built by
+browser-driven comment search, but it skews heavily to r/adhdwomen and r/ADHD, has no full threads,
+and contains nothing from BabyCenter or What to Expect. A broader harvest would firm up the
+messaging work. Themes that produced the least material and would most repay effort: "we tried
+[family calendar app] and it did not stick" and why; and "I wish there was an app that". Also:
+Trustpilot ratings and complaint themes for Cozi, Skylight, OurFamilyWizard, TalkingParents and
+ParentSquare.
 
-## PRIORITY 3 — paywalled benchmarks (type B)
+## PRIORITY 3 - paywalled benchmarks
 
-**G7. Mobile app retention and engagement benchmarks.**
-Behind Statista / AppsFlyer / Adjust / Sensor Tower seats. We need US D1 / D7 / D30 retention
-benchmarks for the Lifestyle, Parenting, and Productivity categories; average number of apps
-a person actively uses per month; and median mobile session length. If only a summary or
-press release is public, take that and label it as such.
+**G6. Mobile app retention and engagement benchmarks.** Behind Statista, AppsFlyer, Adjust and Sensor
+Tower seats. Needed: US D1/D7/D30 retention for the Lifestyle, Parenting and Productivity categories;
+average number of apps a person actively uses per month; median mobile session length.
 
-**G8. School-communication platform reach.**
-District counts and student reach for ParentSquare, ClassDojo, Remind, Seesaw, Brightwheel,
-PowerSchool, Infinite Campus. Verify the ParentSquare–Remind acquisition (reported 2023) and
-whether districts are consolidating onto single platforms — i.e. whether communication
-fragmentation is shrinking on its own over time.
+## PRIORITY 4 - probable confirmed negatives
 
-## PRIORITY 4 — probable confirmed negatives (type C)
+For each of these the fleet searched hard and found nothing at any tier. A CONFIRMED NEGATIVE is a
+useful result. Do not fill the hole with a plausible number.
 
-For each of these the local fleet searched hard and found nothing. **A confirmed negative is
-a useful result — say so plainly rather than filling the gap.**
+**G7.** What share of US households sustain a shared digital family calendar over time, and why
+family-organizer apps fail to stick. Repeatedly flagged as the single most decision-relevant unknown
+in the whole study.
+**G8.** Willingness to pay for AI household or family assistance specifically. No data at any tier.
+This makes every price hypothesis currently untested.
+**G9.** Parent trust in AI advice about their children RANKED against a pediatrician, a teacher, a
+friend and a parenting influencer. No 2025-26 study makes the comparison. The only hard datum is a
+2024 University of Kansas study (n=116, blinded) finding parents rated AI health advice MORE
+trustworthy than expert-written content, unreplicated.
+**G10.** Any US study separating three distinct voice behaviours: dictation, assistant commands, and
+conversational LLM voice. Every Tier A/B source merges them. Also: a US survey measuring DICTATION
+usage rate specifically, and any published LLM-voice session-length data.
+**G11.** A probability-sampled count of how many apps or portals a family juggles per child. Only a
+vendor study exists (n=125, non-probability, North American not US).
+**G12.** Hours US parents spend researching and booking summer care, and hours per activity
+enrolment episode. No US survey found for either.
+**G13.** Weekend-outing frequency and decision time for US families. No publisher measures it.
+**G14.** School form and permission-slip volume per child per year. Searched twice, at higher
+confidence the second time. NCES NHES measures participation and channels, never action-required
+document counts.
+**G15.** Frequency of birthday parties ATTENDED per child per year. The circulating 8 to 12 is on the
+kill list.
+**G16.** Any quantitative US source on same-sex-couple parents and the division of planning labour.
+Pew could not analyse them in either 2025 or 2026 for sample-size reasons. This is a useful natural
+experiment for planning labour without gender defaults.
+**G17.** Any method-disclosed research on dark-mode preference or expectation by age cohort.
+**G18.** Sports physicals: seasonal clustering, and how often parents miss the deadline and a child
+is held out of play. The requirement side is well sourced (98% of states, most annually); the failure
+rate is a hypothesis.
+**G19.** Whether Pew released supplementary tables allowing a parent-age breakdown of its flagship
+2026 parenting study (n=3,757), which publishes no parent-age crosstabs. Common Sense's Generation AI
+report states generational differences exist but does not publish the crosstab; it may be obtainable
+on request.
 
-**G9.** What share of US households sustain a shared digital family calendar over time, and
-why family-organizer apps fail to stick. *(Flagged by our fleet as the single most
-decision-relevant unknown in the whole study.)*
+## PRIORITY 5 - re-runs that would firm up published findings
 
-**G10.** Hours US parents spend researching and booking summer care. No US survey found.
+**G20. A third pass over the kill list.** Two independent verifiers re-traced 22 previously-killed
+statistics and overturned 6 (27%). A third pass would likely still find one or two. The un-re-traced
+remainder has no measured error rate in either direction. Highest-value single item: the
+"24% cooking / 26% chores / 38% relaxing" voice context triple, killed on all reachable evidence but
+exactly the data the study most wants, so a false kill there is costly. Note a separate, independently
+sourced PwC 2018 context set (65% cooking, 40% driving on a smartphone vs 0% on a smart speaker) was
+restored and stands regardless.
 
-**G11.** Hours spent on activity/camp ENROLLMENT episodes. No published measurement found.
+**G21. Re-run the ActivityHero live-supply audit in February.** The published measurement was taken
+on 21 August, a seasonal trough. Year-round classes stay live through August while summer-only supply
+expires, so the sparse-market coverage gradient is inflated at that timepoint. A February re-run
+would establish whether the gradient is structural or seasonal. The August numbers: 94,848 session
+records nationally, 9,008 live (9.5%), California 48% of live, and live counts of SF 969, LA 329,
+NYC 112, Minneapolis 35, Wichita 8. Note LA has MORE providers than SF (5,686 vs 4,299) and a third
+the live sessions, so provider rank and live rank already disagree.
 
-**G12.** Weekend-outing frequency and decision time for US families. No publisher measures it.
-
-**G13.** A probability-sampled count of how many apps/portals a family juggles per child.
-Only a vendor study exists (n=125, non-probability, Cornerstone/Edsby "App Overload":
-44% manage 7–9 apps per child). Find a real one or confirm none exists.
-
-**G14.** Parent trust in AI advice about their children RANKED against a pediatrician, a
-teacher, a friend, and a parenting influencer. No 2025–26 study makes this comparison. The
-only hard datum is a 2024 University of Kansas study (n=116, blinded) finding parents rated
-AI health advice MORE trustworthy than expert-written content — unreplicated. Confirm.
-
-**G15.** Willingness to pay for AI household/family assistance specifically. No data at any tier.
-
-**G16.** Any US study separating three distinct voice behaviors: (a) dictation/speech-to-text,
-(b) voice-assistant commands, (c) conversational LLM voice. All Tier A/B sources merge them.
-Also: US survey data on DICTATION usage rate specifically, and any published LLM-voice
-session-length data (OpenAI, Google, Anthropic). The only datapoint we have is Google's
-"63% of Gemini users use voice" — a vendor blog post with no n, no window, no definition.
-
-**G17.** A US equivalent of Distel et al. (CHBR 2024, n=860, German) on social discomfort
-using voice assistants in public. Does US research on this exist?
-
-**G18.** Pew's flagship 2026 parenting study (n=3,757) publishes ZERO parent-age crosstabs.
-Check whether Pew released a dataset or supplementary tables allowing a parent-generation
-breakdown. Same question for Gallup's dual-full-time-couples work.
-
-**G19.** Any method-disclosed research on dark-mode preference or expectation by age cohort.
-We found none at any tier.
-
-**G20.** Same-sex-couple parents and the division of planning labor — Pew could not analyze
-them quantitatively (samples too small) in either 2025 or 2026. Is there any quantitative US
-source? This is a useful natural experiment for planning labor without gender defaults.
-
-## PRIORITY 5 — the feasibility question (mixed)
-
-**G21. Can a third-party email address be registered as a parent contact?**
-For ParentSquare, Brightwheel, ClassDojo, Seesaw, PowerSchool, Infinite Campus, TeamSnap,
-SportsEngine, Sawyer and Jumbula, determine from actual product documentation or help pages:
-(a) can a parent add a SECONDARY or arbitrary email address, or does it require district/admin
-action? (b) do their notification emails contain the CONTENT in the body, or only a
-"sign in to read this" LINK? (c) which are SMS/push-only with no email at all? (d) do any
-Terms of Service prohibit registering a third-party service's address as a parent contact?
-Cite the specific help page for each. **(b) is the crux** — a link-only platform makes
-email aggregation useless.
-
-**G22. Google CASA / restricted-scope verification, 2026.**
-What does clearing the Gmail `readonly` restricted scope actually require in 2026 — cost,
-elapsed time, annual re-assessment, and whether a solo or very small developer can realistically
-clear it. Cite Google's own current documentation. Also the Apple/iCloud and Microsoft/Outlook
-equivalents.
-
-## PRIORITY 6 — anything we would have missed
+**G22. Camperoni's current inventory and product.** Their live index was measured at ~4,324 records by
+one checker and could not be independently reproduced. It matters because it moves them from roughly
+one-eighteenth of ActivityHero's live inventory to roughly one-half. Also confirm whether their
+registration-watch offering is still a $295/year human concierge across 5 metros, or has been
+automated since.
 
 **G23.** Any US survey fielded in 2026 on parental logistics load, family scheduling, school
-communication overload, or the mental load, that the above does not name. Recency matters —
-our most valuable single finding is five weeks old (AP-NORC/Ipsos, fielded Jul 21–26 2026:
-~8 in 10 youth-sports parents rank scheduling/logistics/time as a challenge, ABOVE every cost
-item at ~7 in 10). Look for anything comparably recent.
+communication overload or the mental load that this list does not name. Recency matters: the study's
+newest load-bearing finding was five weeks old at the time of writing.
 
 ---
 
 ## Final instruction
 
 Return the findings table, the per-gap interpretation, and the closing list splitting
-**CONFIRMED NEGATIVE** from **STILL BLOCKED**. Where you find a laundered statistic, name it
-and name the aggregators repeating it — we maintain a kill list. Where sources contradict
-each other, present both and say which has the better method rather than averaging them.
+**CONFIRMED NEGATIVE** from **STILL BLOCKED**. Where you find a laundered statistic, name it and name
+the aggregators repeating it. Where sources contradict each other, present both and say which has the
+better method rather than averaging them.

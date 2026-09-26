@@ -282,9 +282,9 @@ spreadsheet.
 
 Public search-only credentials, extracted from ActivityHero's own front-end bundle
 (`https://static.activityhero.com/packs/search-bundle-*.js` → `window._algoliaConfig`):
-app id `4MCE5KNBEO`, search key `c4d6012cd973f1d0e3cf0d1a5f59b147`; indexes `prod_providers`,
+app id `[REDACTED]`, search key `[REDACTED]` (vendor credential; withheld per ActivityHero ToS); indexes `prod_providers`,
 `prod_sessions`, `prod_activityhero`. Read-only queries against
-`https://4MCE5KNBEO-dsn.algolia.net/1/indexes/{index}` with `hitsPerPage=0` for counts,
+`https://[REDACTED-APPID]-dsn.algolia.net/1/indexes/{index}` with `hitsPerPage=0` for counts,
 `aroundLatLng`/`aroundRadius` for geography, `facets=["provider_location.state"]` for the state
 distribution, and `numericFilters=activity_schedule.end_date>{epoch}` for liveness. All figures in
 findings 1–6 and 25 are from queries run on 2026-08-21.

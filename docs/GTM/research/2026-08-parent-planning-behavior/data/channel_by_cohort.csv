@@ -1,0 +1,6 @@
+channel,gen_z_18_29,millennial_30_45,gen_x_46_61,spread_note,source,tier,method,verification,notes
+YouTube,95,92,85,"near-parity - the only single-asset channel","Pew Research Center social media use by age, 2026",B,"n=5,119 US adults, fielded Feb 17-23 2026; age bands are Pew's (18-29 / 30-49 / 50-64), mapped to cohorts",CONFIRMED,"V4 verified all 20 Pew figures exact across two instruments. Age bands are approximate to cohort bands."
+Facebook,68,80,74,"INVERTS - under-reaches the youngest parents","Pew Research Center social media use by age, 2026",B,"n=5,119 US adults, fielded Feb 17-23 2026",CONFIRMED,"The inversion is the non-obvious finding: Facebook parent groups skew Millennial/Gen X."
+Instagram,80,62,40,"steep young skew","Pew Research Center social media use by age, 2026",B,"n=5,119 US adults, fielded Feb 17-23 2026",CONFIRMED,
+TikTok,63,44,30,"steep young skew","Pew Research Center social media use by age, 2026",B,"n=5,119 US adults, fielded Feb 17-23 2026",CONFIRMED,
+Reddit,48,35,16,"steepest young skew; also the source of this study's verbatim corpus","Pew Research Center social media use by age, 2026",B,"n=5,119 US adults, fielded Feb 17-23 2026",CONFIRMED,"The M5 corpus drawn from Reddit skewed heavily to r/adhdwomen and r/ADHD - an unprompted self-identifying segment no competitor names in its positioning."

@@ -309,6 +309,9 @@ explicit: "Never mix these into Section 1."
 # Ready to lift into the final report as an appendix
 # ═══════════════════════════════════════════
 
+> **AMENDED after the second pass (2026-08-22).** Rows **K13, K15, K20, K22, K24 and K44 are superseded**
+> by the SECOND PASS section at the end of this document. Read that section before lifting this appendix.
+
 *Every number below circulates widely in this topic space. Each was traced to origin. None survived.
 We publish this list because a research report's credibility rests as much on what it declined to
 print as on what it did — and because several of these will appear in competitors' decks.*
@@ -335,18 +338,18 @@ bolted onto a number it never published.
 | K10 | **"24% / 26% / 38% use voice while cooking / doing chores / relaxing"** | — | No origin. **These are the context-of-use numbers this study most wanted, and they are entirely unsourced.** | serpwatch.io, bigsur.ai |
 | K11 | **"Districts use 3–7 apps parents must download"** and **"parents get updates through 5–6 different apps"** | "studies" | No linked study; appears fabricated around Cornerstone's response buckets. | solvedconsulting and others |
 | K12 | **"60% of parents miss important events"** | Cornerstone/Edsby | **Not in the Cornerstone PDF.** | secondary re-reports |
-| K13 | **"70% of kids drop out of sports by 13"** | various | Traced to no defensible origin (documented by a Tucson.com column). | ubiquitous |
+| K13 | **"70% of kids drop out of sports by 13"** | National Alliance for Youth Sports | **SUPERSEDED — see SP-4.** The number is dead, but a real origin study exists and says **35%, ages 11–18** (Ewing & Seefeldt, Michigan State, n≈26,000). The Washington Post (2016-06-01) hyperlinked the claim to nays.org's **bare homepage** — the laundering event is on the record. | Washington Post 2016, then ubiquitous |
 | K14 | **"14,000+ AI startups launched 2024, 3,800 shut down 2025 = 40% failure rate"** | — | A Medium post with no methodology. | medium.com/@aiempiremedia |
-| K15 | **"Only 19.2% of users complete onboarding; global average 8.4% after 30 days"** | — | No origin, no n, no fielding window. | setgreet.com, digia.tech |
+| K15 | **"Only 19.2% of users complete onboarding; global average 8.4% after 30 days"** | — | **SUPERSEDED — see SP-8.** Both halves have origins and both are corrupted: 19.2% is Userpilot's **mean** (median 10.1%, n=547 **B2B SaaS** companies), and 8.4% is **Airship's 30-day RETENTION relabelled as onboarding completion**, over ~2.6bn **devices**, fielded Jan–Jun 2023. Only "top performers 40–50%" is genuinely originless. | setgreet.com, digia.tech, Business of Apps |
 | K16 | **"Recommendations from friends and family is the #1 way parents find a camp"** | American Camp Association | No n, no fielding window, no origin document. ACA's own site does not carry it. | Jumbula blog, AdWave, TeenLife, RevenueBoomers |
 | K17 | **ActivityHero "over 4 million families" / "400k subscribers"** | ActivityHero | Company rate card only. No press release, no date, no audit, and **no definition of the counting unit**. Cumulative-registrations-as-audience + list-size-as-subscribers. | vendor marketing |
 | K18 | **Anything sourced to usecarly.com** | usecarly | SEO site for a competing commercial AI assistant. ~200 listicles, **no survey, no n, no method page anywhere.** "(2026)" title stamps are not evidence of currency. | self-propagating |
 | K19 | **"Voice-AI startups raised $7B+ in Q1 2026"** | — | No dataset named — no PitchBook, Crunchbase or CB Insights cite. | metaintro.com |
-| K20 | **"153.5 million US voice assistant users in 2025"** | eMarketer | eMarketer publishes 139.8M (2022) and 168.2M (2029) and **no 2025 point**. A plausible interpolation passed off as a published estimate. | voice-search listicles |
+| K20 | **"153.5 million US voice assistant users in 2025"** | eMarketer *(misattributed)* | **SUPERSEDED — see SP-3. The attribution is simply wrong.** The figure is **Astute Analytica's** (GlobeNewswire, 2025-12-08), and their framing is "engaged **daily**." eMarketer publishes no 2025 point; a 2025 midpoint of its forecast interpolates to ~152–155M, which is why it passes inspection. | voice-search listicles |
 | K21 | **"Voice assistant market to reach $59.9B by 2033"** | Astute Analytica | Market-sizing press release, no methodology published. | GlobeNewswire, then everywhere |
-| K22 | **"TeamSnap 24 million users"** | TeamSnap | No origin. The company's own PRs say 25M (2021) and 30M (2026). Pure aggregator artifact. | sports-tech blogs |
+| K22 | **"TeamSnap 24 million users"** | TeamSnap | **SUPERSEDED — FALSE KILL, see SP-2.** 24M was **TeamSnap's own homepage copy, Aug 2021–Feb 2022**. Not an aggregator artifact — just five years stale. Current figure is 30M, and TeamSnap's own Feb-2026 PR calls that a **"lifetime platform milestone"** against **2 million daily actives** — a 15x gap. | sports-tech blogs |
 | K23 | **"Average consumer has 8.2 subscriptions / $118 per month"** vs **"4.5 subscriptions"** | — | Two mutually contradictory figures, no origin publisher. Self-contradiction is itself the tell. | subscription-management blogs |
-| K24 | **"Children have ~50 days off school (excluding summer) in a 180-day year"** | — | No origin. Arithmetic suggests the real figure is ~20–30 non-summer weekday closures, i.e. **the circulating number is roughly double**. | 2025 trade/opinion writing |
+| K24 | **"Children have ~50 days off school (excluding summer) in a 180-day year"** | — | **SUPERSEDED — see SP-6.** No origin, and the real figure is now measured: **30–38, median ~34.** CAP (2016) found the largest districts average **29**; independent counts of 2025-26 calendars give NYC 34, LAUSD 35, Chicago 33, Houston 32, Miami-Dade 32, Fairfax 38. **There is no path to 50 that does not smuggle summer back in.** | 2025 trade/opinion writing |
 | K25 | **"add@cozi.com"** | Cozi | Appears nowhere on Cozi's site, FAQ, help sitemap, Wayback snapshots (2014/2017/2020/2023), or in **any of 1,917 Cozi reviews**. | forwarding-feature comparisons |
 
 ### Tier 2 — REAL ORIGIN, LAUNDERED BEYOND USE: cite only with every qualifier restored
@@ -371,7 +374,7 @@ bolted onto a number it never published.
 | K41 | **Skylight/Harris "mental load worth $60,000/year"** and Forbes' **"$3.8 trillion"** | The underlying Harris survey is **sound and citable** (n=2,005 US parents, May 15–22 2024, ±2.9pp). But $60,000 is a **derived calculation** (hours × median wage), and Forbes' $3.8 trillion is a **national extrapolation the survey does not support**. | Derived-figure-as-measurement. A case of our own best source being laundered downstream. |
 | K42 | **Klook "91% of global travelers rely on AI travel planners"** | Vendor survey, n=11,000, **global**, and implausibly high against every other source. | GLOBAL→US, outlier. |
 | K43 | **Litmus email-client share as mailbox-provider share** | Litmus measures the **rendering client's user agent**: Apple = 62.3% of *opens* vs **3.6% of mailboxes** (Validity) vs 17% of US adults using iCloud Mail (Statista). **~90%+ of "Apple" opens are Apple's app reading someone else's mailbox.** | The purest DEVICES-as-PEOPLE case in the corpus. **Caught by S1 before it shipped — the model of what this appendix is for.** |
-| K44 | **"CASA costs $15,000+"** | Traces to a pre-CASA Ask-HN thread and to Google fee language **removed from its own docs between June 2022 and June 2023**. Live lab prices are $675–$8,000. | Date-stripping of retired vendor language. |
+| K44 | **"CASA costs $15,000+"** | **SUPERSEDED — see SP-9.** A **real Google-published fee**, but never CASA's price: it is the **superseded pre-CASA restricted-scope regime** ($15k–$75k+, 2018–2020; lowered to $10k–$75k with a $4,500 floor in 2021–22). Removal window pins to **late Oct–early Nov 2022**, not June 2022–June 2023. Live lab prices $675–$8,000. | Date-stripping of a retired fee schedule from a superseded regime. |
 
 ### Tier 3 — MEASURED, BUT THE MEASUREMENT DOES NOT EXIST
 *Numbers we looked for, could not find at any tier, and are therefore reporting as absent. Stating
@@ -720,3 +723,254 @@ posture, and it is the question to put to counsel first.
   weak-signal sections) were read but not independently re-traced. Given a 25% error rate in the
   sample I did re-trace, **a second pass over the remainder is warranted** before the appendix is
   treated as final.
+
+---
+
+# ═══════════════════════════════════════════
+# SECOND PASS (2026-08-22) — the remaining kills, re-traced
+# ═══════════════════════════════════════════
+
+The first pass found a **25% error rate** in the kills it re-traced, so the ~12 kills it had *not*
+independently re-traced were re-traced too, along with the sources collectors had explicitly flagged
+for a verifier. That was the right call: **three more false kills surfaced**, one of them the
+best-documented statistic in its whole domain.
+
+**Running total across both passes: 22 kills re-traced, 6 FALSE KILLS overturned (27%).** A fleet
+kill is now demonstrably *less* reliable than a coin flip on the question "does an origin exist" —
+though it remains highly reliable on the question that actually matters, "is the circulating number
+usable." Almost every false kill is a case where a **real study exists and the circulating number
+misstates it**, which the collectors correctly refused to print. The verdicts were sound; the
+*reasons* were often wrong, and a wrong reason published in an appendix is a falsifiable claim we
+would have to retract.
+
+## SP-1 to SP-3 — FALSE KILLS (round two)
+
+### SP-1. Harris Poll / Good Sports "18% of parents took on debt for youth sports" — **FALSE KILL. The best-sourced number in its domain.**
+P4 threw this out alongside LendingTree's 79%, reasoning that "a 4× discrepancy between two vendor
+polls means neither is usable." **The discrepancy is denominator and vintage, not contradiction**, and
+the Harris figure is exceptionally well documented:
+- **The Harris Poll for Good Sports, "Cost of Sports Study," fielded Oct 16–18 2024**, n=741 parents
+  of minors; **the 18% base is the 688 whose children ever played a sport**; weighted, **±4.2pp**.
+- **Exact question wording is published** — *"I have taken on debt (e.g., used a credit card I
+  couldn't pay off immediately, taken out a loan, used a line of credit) to afford to pay for my
+  child(ren) to play sports."*
+- http://www.goodsports.org/assets/Good-Sports_Key-Findings-Guide_FINAL.pdf
+- **Verdict: fully usable — promote it into findings.** Caveat only that sponsor Good Sports itself
+  strips the qualifier in its 2025 white paper, relabelling 18% as "of surveyed parents" with no
+  methodology section. Cite the Key Findings Guide, not the white paper.
+
+### SP-2. TeamSnap "24 million users" — **FALSE KILL on origin; stale by five years**
+P4 called it "no origin… pure aggregator artifact." It was **TeamSnap's own homepage copy from Aug
+2021 to Feb 2022**: *"More than 24 million people and 3 million teams, clubs, leagues and
+associations rely on TeamSnap."*
+- Their own timeline: 20M (2019) → 22M (2020) → 23M (Dec 2020) → **25M (Apr 2021 Waud Capital PR)** →
+  **24M (homepage, Aug 2021–Feb 2022)** → 25M (Feb 2023) → **30M (current, teamsnap.com/about)**.
+  The series is non-monotonic, which is itself a sign the vendor is not counting consistently.
+- **The qualifier that matters more than the number:** TeamSnap's Feb-2026 PR calls 30M a
+  **"lifetime platform milestone"** — cumulative people ever served — while separately reporting
+  **2 million daily active users.** A **15× gap.** "Users" is the union of coaches, admins, players
+  and parents. **Never cite any TeamSnap headline as an active-user count.**
+
+### SP-3. Ewing & Seefeldt (Michigan State) youth-sports attrition research — **FALSE KILL of the underlying study**
+P4 killed "70% drop out by 13" as tracing to "no defensible origin." The *number* is dead (see SP-4),
+but a large, real, retrievable study was discarded with it:
+- **Ewing & Seefeldt (1989), *Participation and Attrition Patterns in American Agency-Sponsored and
+  Interscholastic Sports*, Institute for the Study of Youth Sports, Michigan State University**,
+  published in Seefeldt et al. (1993) for the Carnegie Council on Adolescent Development.
+  **Full text free: https://files.eric.ed.gov/fulltext/ED360267.pdf (ERIC ED360267).**
+- **n = 26,000 youth aged 10–18**; the attrition analysis covers **~8,000 youth** (51% girls) across
+  17 regional sites. Funded by the Athletic Footwear Council of the SGMA.
+- Nice 30-year corroboration of the modern replacement: it found dropouts had played **3.2 years
+  (male) / 2.5 (female)** before quitting — bracketing Aspen's 2.9.
+
+## SP-4 to SP-9 — PARTIALS (origin real, number corrupted)
+
+### SP-4. "70% of kids quit sports by 13" — the true value is **35%, ages 11–18**
+- **The laundering event is documented on the record.** Washington Post, Julianna W. Miner,
+  2016-06-01, headlined *"Why 70 percent of kids quit sports by age 13,"* opening: *"According to a
+  poll from the National Alliance for Youth Sports…"* The hyperlink behind "National Alliance for
+  Youth Sports" points to **`https://www.nays.org` — the bare homepage.** No study, no page, no date,
+  no n. **NAYS has never published such a poll**; a Wayback sweep of the domain finds nothing.
+- **What the real MSU study says, verbatim:** *"The attrition rate for youth between the ages of 11
+  and 18 was reported to be **35%**… Gould (1987) synthesized several studies… and found that the
+  average attrition rate was also 35%. There was considerable variance… varying from **22 to 59%**."*
+- **Where "70" probably came from:** the same report notes ~42% of 10-year-olds vs 12.0% of
+  18-year-olds on agency-sponsored teams — a **71% relative decline**. Four qualifiers stripped: it
+  is the report's explicitly cherry-picked *"most dramatic display"* (baseball and swimming), it is
+  ages **10→18** not "by 13," it is **agency-sponsored teams only** (excluding school sports), and it
+  is a **cross-sectional participation gradient, not longitudinal dropout.**
+- **Defensible replacement, with its own qualifiers intact:** Aspen Institute / Utah State **2019
+  National Youth Sport Survey**, n=1,032 youth-sports parents — average age of last regular
+  participation **10.5**, average length of participation **2.9 years**. ⚠️ Three qualifiers to keep:
+  the base is **parents of kids already in sports** (not all children); the figures are **per sport**
+  (a child quits soccer at 9.1 and still plays basketball to 11.2 — Project Play's own prose flattens
+  a per-sport table); and it is **2019 and has not been refreshed** — the current Aspen/Utah State
+  wave (n=1,848, fielded Nov 5–Dec 19 2024) **reports no quit-age figure at all.**
+
+### SP-5. LendingTree "79% went into debt" vs Harris "18%" — **not a contradiction; the 79% is unusable**
+- LendingTree: n=1,006 parents, Qualtrics, **fielded April 8–15 2021**; question wording **not
+  published**. **Stripped qualifier: "competitive."** The base provably is not all parents — the same
+  study reports only 70% have a child in a competitive activity, so 79% cannot sit on a 100% base.
+  "Have *been* in debt" is lifetime; currently-in-debt is 58%.
+- **LendingTree's own later wave re-measures it at 42%** (April 2023, QuestionPro, n=2,000); 2019 was
+  62%. **79% is a one-off 2021 stimulus-era spike.** Note LendingTree's own `<title>` tag drops
+  "Competitive" — **the publisher starts the laundering.**
+- **Net: use Harris 18% (SP-1). Use LendingTree 79% only with "competitive," "ever," "April 2021" and
+  the 42% re-measurement attached — which in practice means don't.**
+
+### SP-6. "~50 school days off excluding summer" — true range **30–38, median ~34**
+- Real research does exist: **Center for American Progress, *Workin' 9 to 5* (2016)** — *"the largest
+  school districts shut their doors for an average of **29 days**"*, NYC 33, LA 34.
+- Independently counted from official **2025-26** calendars (teacher workdays counted as days off,
+  since students do not attend): **NYC 34, LAUSD 35, Chicago 33, Houston 32, Miami-Dade 32, Fairfax
+  38.** Arithmetic check: 261 weekdays − ~48 summer weekdays − 180 instructional = **33**. The NYC and
+  LA counts land within one day of CAP's, independently validating the method.
+- P3's instinct that the circulating 50 was "probably wrong" and "too high" was correct; it is high by
+  roughly 50%.
+
+### SP-7. Edison "57% use voice commands daily" — base swapped, and **Edison itself may be the source of the corruption**
+- True: **57% of *voice-command users*** use voice commands daily. **NPR/Edison Research, *The Smart
+  Audio Report*, Spring 2022, fielded Feb 28–Apr 18 2022**, n=1,190 smart-speaker owners + 560
+  voice-assistant users on other devices + 584 non-users, **US adults 18+**. Question: "How often do
+  you use voice commands?", base "Ever use voice-operated personal assistants." The 2020 wave read 52%.
+- **The tell:** Edison's own solution page says *"Fifty-seven percent of **Americans** use voice
+  commands of some type daily"* — **internally impossible**, since Edison also reports only 62% of
+  Americans use a voice assistant at all. **The base swap may originate with the publisher, not the
+  aggregators.** Cite the report, never the marketing page.
+- **Separately confirmed as genuinely originless:** the "24% cooking / 26% chores / 38% relaxing"
+  triple. The full Smart Audio Report text was enumerated and **contains no context-of-use or
+  in-home-location question at all** — so the plausible "corrupted Edison question" hypothesis is
+  **false**. SerpWatch presents the triple with no inline citation; the only link in that paragraph is
+  an unrelated affiliate link. This is **attribution-by-adjacency**: a credible bibliography lending
+  authority to numbers none of those sources contain. These remain the numbers this brief most wanted.
+
+### SP-8. Onboarding benchmarks — **the cleanest four-move laundering chain in the corpus**
+- **"19.2% complete onboarding"** — real origin **Userpilot, Product Metrics Benchmark Report 2024**,
+  n=**547 B2B SaaS companies**, metric = onboarding **checklist** completion. **Stripped: the median
+  is 10.1%.** Quoting the mean nearly doubles the typical case, and it is B2B SaaS, not "users."
+- **"8.4% global average completion after 30 days"** — real origin **Airship, *Mobile Lifecycle
+  Benchmarks: Activation***, whose own definition is verbatim: *"Day 30 Activation Rate — This
+  measures how many customers **return to the app** on the 30th day after download."* **That is
+  30-day retention, relabelled as onboarding completion.** Then three further moves stack on top: the
+  unit is **~2.6 billion DEVICES counted as people**; the **fielding window (January–June 2023) is
+  stripped** and it is presented as current; and **Airship's own headline is 7–8%, not 8.4%.**
+- **"Top performers 40–50%"** — **genuinely originless.** Airship's real best-category top decile is
+  **24%** (finance). Appears back-formed from an unrelated Userpilot sentence.
+- **This single bullet contains all four laundering moves at once** and is the best teaching example
+  in the appendix.
+
+### SP-9. "CASA costs $15,000+" — a **real Google-published fee**, for a **superseded regime**
+Archived from Google's own OAuth API verification FAQ (`support.google.com/cloud/answer/9110914`):
+- **2018-11-22 and 2020-06-04:** *"Assessments will be conducted by a Google-designated third-party
+  assessor, **may cost between $15,000 and $75,000 (or more)** depending on the complexity of the
+  application, and will be payable by the developer."*
+- **2021-12-02 → 2022-10-27** (Google *lowered* it): *"typically **varies between $10,000 - $75,000
+  (or more)**… **smaller applications may see costs at a lower threshold of $4,500.**"*
+- **Removal pins tighter than P12 assumed:** last snapshot with fee language **2022-10-27**; first
+  without it **2022-11-11** — which is also the first CASA mention. The window is **late Oct–early Nov
+  2022**, not June 2022–June 2023.
+- **P12's WEAK SIGNAL overstates the provenance the other way:** the HN origin is a **2018-10-09
+  comment quoting Google's own FAQ**, not developer-reported pricing, and the Ask HN thread
+  (2020-10-09) has **5 points and 0 comments**. "Developers reported this" is not supportable.
+- **Fair restatement:** $15k–$75k+ was the fee for the **pre-CASA restricted-scope regime**. CASA is
+  tiered and cheaper. Both P12 and this verifier reach the same practical conclusion; the history is
+  now precise enough to publish.
+
+### SP-10. Other corrections from the second pass
+- **Astute Analytica "$59.9B by 2033"** — accurately quoted but **global**, a **forecast** (2025–2033,
+  from a $7.08B 2024 base at 26.80% CAGR), and **no methodology exists**: `/research-methodology` and
+  `/methodology` both 404, and the release discloses no sample, no sources, no model. Rigour is
+  signalled by page count (395 pages, 100 figures) rather than method. **Same document as the 153.5M
+  figure — killing the Astute citation kills both.**
+- **Klook "91% of global travelers"** — real (Travel Pulse 2026, 2026-02-11, n=11,000, 20 markets).
+  Four qualifiers stripped: the population is **Millennials + Gen Z who are Klook's own core users**
+  (an experiences-booking platform's customers, not "global travelers"); *"widely used"* became
+  *"rely on"*; "AI" became "AI travel planners"; and **Klook's own caveat — "its role remains largely
+  functional" — was deleted.** Their sister release ranks **AI suggestions last (33%)** behind reviews
+  (58%) and friends (49%). **Fielding dates and panel provider were disclosed in 2025 and dropped in
+  2026.** The US is ~1 of 20 markets (~5%), so any US-labelled version is unsupported.
+- **"4.5 subscriptions"** — real origin **Deloitte *Digital Media Trends***, and the value is **four,
+  not 4.5**: *"90% of US households have a paid SVOD service (and an average of four services)"*
+  (2026 edition, fielded Oct–Nov 2025, n=3,575). Three losses: category (**streaming video → all
+  subscriptions**), base (**SVOD-subscribing households → all consumers**), and value drift 4 → 4.5.
+  The companion "8.2 subscriptions / $118 per month" remains **fully originless** — almost certainly
+  two unrelated orphans stitched together. Real comparators: C+R Research **$219/mo actual vs $86
+  estimated** (2022, n=1,000); West Monroe **$273/mo** (2021, n=2,500); Bango **5.4 subscriptions**
+  (2025, n=5,000). ⚠️ **The widely circulated "$219/$133" pair is C+R, not West Monroe** — that
+  misattribution is itself in circulation.
+- **Retrospec "96%"** — n=1,000 US parents **is** disclosed (P6 said it was not); everything else is
+  absent — no fielding window, no panel vendor (checked for OnePoll, Talker, SWNS, Pollfish, Prolific,
+  Qualtrics, Censuswide, Dynata: zero hits), no weighting, no MoE, no wording. **Stripped qualifier is
+  Retrospec's own:** the measured item is *"improves their mood **the same day**"*; the headline says
+  *"instantly."* Distributed via **Stacker Studio brand-content syndication**, not a wire. Kill stands.
+- **"Districts use 3–7 apps"** — killed correctly, but note the real study says the **opposite
+  direction**: the modal parent is at **7–9 apps per child**, and district leaders report **10–15**.
+  The circulating number **understates** the only real measurement. Also: the Cornerstone report
+  **contradicts itself on n** (executive summary "50 curriculum leaders" vs methodology body **58**),
+  and teachers are only ever "over 100" with no exact n. Cite it with care.
+- **"60% of parents miss important events"** — **definitively killed.** Full text extraction of the
+  Cornerstone PDF: **"60%" does not appear anywhere**, and neither do "miss," "event," "deadline,"
+  "overlook" or "forget" — zero hits across 22 pages. The complete percentage inventory contains no 60
+  and no near-miss to have been rounded. It is not a distortion of that report; it is unrelated to it.
+- **Vendor corrections confirmed 2/2.** Blue Sombrero **is** Stack Sports (acquired from DICK'S
+  2019-08-22), not NBC Sports Next — **and it no longer exists as a product**: `bluesombrero.com`
+  301-redirects to sportsconnect.com. Bloomz was **not** acquired by ParentSquare (that was **Remind,
+  2023-11-29**). ⚠️ Search trap: "BloomZ Inc." (ticker BLMZ) is an unrelated Japanese voice-acting
+  company. Bloomz's "26,000 schools" has no origin — its actual historical claim was **"over 30,000
+  schools,"** unsourced and static across snapshots — and **Bloomz has since removed the aggregate
+  figure entirely**, which is itself the tell.
+- **"14,000 AI startups / 3,800 shutdowns / 40% failure"** — killed, and the **arithmetic is the
+  tell**: 3,800/14,000 = 27.1% and 1,800/14,000 = 12.9%, summing to **exactly 40%** — but numerator
+  and denominator are **different cohorts** (14,000 founded in 2024 globally vs shutdowns of any
+  vintage, no geography). 40% is the design goal of the arithmetic, not its output. Contradicted by an
+  order of magnitude: **Carta recorded 966 startup shutdowns in all of 2024 across every sector.** The
+  post also labels its own central case study *"(made-up name, real pattern)."*
+
+## SP-11 — SOURCES RETRIEVED that collectors flagged for a verifier
+
+These were flagged as "real, valuable, could not fetch." All eight were retrieved. Several change
+what the program can claim.
+
+| Source | What it actually says |
+|---|---|
+| **Wisconsin shared custody** (M4 flagged) | **Confirmed single-state court-record data — never present as a US rate.** Cancian, Meyer, Brown & Cook, *Demography* 51(4) (2014), Wisconsin court records, divorces 1988–2008; and Meyer, Cancian & Cook, *Family Court Review* 55(4) (2017): for WI divorces filed 2010, **50% shared (35% equal, 15% unequal) vs 12% in 1989 (5% equal, 7% unequal)**. The famous "5% → 35%" maps exactly onto **equal-shared, Wisconsin, 1989→2010**. **The national companion exists and should be used instead:** Meyer, Carlson & Alam, *Demographic Research* 46(38) (2022), **8 waves of the CPS Child Support Supplement, n=18,757** — national shared physical custody after divorce **13% (pre-1985) → 34% (2010–14)**. That paper states Wisconsin runs **9.4 points ahead** of the nation. |
+| **Census custodial-parents series** (M4 flagged) | Current edition found: **"Custodial Parents and Their Child Support: 2022," P60-285, published 2025-08-12**, from the **Child Support Supplement to the April 2023 CPS**. **22.2 million children under 21 have one parent living outside the household — 27.1% of all children under 21 in families; 13.9 million custodial parents (78.2% mothers).** Note the title changed (no longer "Custodial Mothers and Fathers"), and **CPS-CSS does not measure legal custody.** Confirms p60-281 is a different report. |
+| **Child Trends, July 2026** (P12's "highest-value manual retrieval") | Retrieved. **n=1,025 parents of children 5–18, NORC AmeriSpeak probability panel, fielded December 2025**, weighted to CPS. **78.3% seek information about their child's education at least monthly; 2 in 3 use communications from their school — the most-used source by a wide margin; 43% name school communications as the source they trust MOST (more than double any other); 42.9% name social media as the source they trust LEAST.** This is a genuinely strong Tier B source and it was worth chasing. |
+| **CDT student-privacy series** (P12's "second-highest-value") | Retrieved — **and the hoped-for number is not in it.** "Hand in Hand" (Oct 2025), n=1,018 parents of grades 6–12 (+1,030 students, 806 teachers), fielded Jun–Aug 2025. **Zero mentions of third parties, vendors, outside companies, selling, or sharing data with third parties.** The nearest usable figure is **69% of parents concerned about the privacy and security of student data their child's school collects and stores** — which must be described as **school-held data, not third-party sharing.** **P12 #51's negative finding ("no Tier A/B survey measures either construct") therefore SURVIVES and is strengthened.** |
+| **ACA 2024 National Economic Impact Study** | Confirmed: ACA with **University of Michigan Economic Growth Institute**, released 2024-06-03 on 2023 data; **>20,000 records plus survey data from 1,137 camp operations**; **$70B economic impact, $23B labor income, 986,428 workers**; first such study since 1982. **But it supplies NO camper count** — and the only camper number in ACA's own release is the boilerplate *"annually serve 26 million campers."* **So the "26 million" this program is trying to replace is ACA's own unsourced boilerplate, and this study does not substantiate it.** Full report is member-gated. |
+| **The defensible camp-participation replacement** | **Gallup / NSLA / ACA, published 2024-07-26: 30 million youth engaged in summer opportunities = 55% of K-12 youth**; 48% of K-12 parents wished their child could have participated but could not; **only 11 of 25 million low-income students accessed summer programs.** Narrower and better documented alternative: **AA3PM — ~12 million children (23%) took part in a structured summer experience in 2024.** |
+| **America After 3PM 5th ed.** | Nailed down. **n=30,515 US parents/guardians of a school-age child**, ≥200 interviews in all 50 states + DC; subset of 14,663 got follow-ups; **fielded Jan 31–Apr 21 2025**; non-probability opt-in online panels plus supplementary phone; English and Spanish; weighted to ACS and NCES; **MoE <1%**. **⚠️ Edge Research is NOT named as the AA3PM fielding partner** — it appears only for a separate *provider* survey (Oct 27–Dec 22 2025). **P4 #15 and P3 #6 attribute AA3PM to Edge Research; that attribution is unsupported and should be dropped.** Headlines: parents of **29.6M children** would enroll in afterschool; only **6.95M (13%)** are enrolled — **22.6M unmet demand**. Summer companion: **24.6M want a structured summer experience, 51% (12,598,498 children) missing out.** |
+| **Nah (2004) tolerable waiting time** (P9 flagged unverifiable) | **Verified, including the 38 seconds.** *Behaviour & Information Technology* 23(3):153–163; free predecessor at AMCIS 2003 paper 285. **Method: lab experiment, 70 undergraduate MIS students** (36 control / 34 treatment). First broken link: **mean 13s (median 9s) without feedback vs mean 37.6s (median 22.6s) with feedback**; second link 4s vs 17s; third 3.3s vs 6.7s — **tolerance collapses fast once users learn loads can fail.** Conclusion verbatim: *"the tolerable waiting time for information retrieval is approximately 2 seconds."* **The popular "~2s tolerable, ~38s with feedback" conflates two quantities** — 2s is the modal/settled tolerance, 38s is the *mean first-encounter* wait with a progress indicator, from n=34 students in 2003. P9 was right not to assert it; it can now be cited precisely. |
+
+## SP-12 — NEWLY KILLED in the second pass
+
+### Digital Promise "74% of US districts use more than 26 edtech tools" — **KILL as stated (n=40, self-selected)**
+P12 listed this in WEAK SIGNAL as "tempting because it is quoted inside PowerSchool's SEC 10-K" and
+untraced. It is now traced, and it should not be promoted:
+- Origin is an **infographic, not a report**: *"The State of Data Interoperability in Public
+  Education,"* Digital Promise, 2017-08-03. Figures are stated as claimed (74%; 17% use more than 100;
+  only 33% have linked more than ½ of tools to their SIS).
+- **Method, verbatim: "This infographic was informed by a survey of the Digital Promise League of
+  Innovative Schools' Data Interoperability Working Group. The 40 respondents hold leadership roles in
+  district technology across 40 U.S. public school districts."**
+- **n = 40**, a self-selected working group of CTOs from a network explicitly branded *"Innovative,"*
+  self-selected *again* into a data-interoperability working group — i.e. the sub-population most
+  likely to have many tools and to care about integrating them. **Presenting this as "74% of US
+  districts," as the 10-K framing implies, overstates it substantially.** Nine years old.
+- **Verdict: do not promote. If used at all: "in a 2017 survey of 40 district technology leaders in
+  Digital Promise's League of Innovative Schools…"** — at which point it is not worth the sentence.
+
+## SP-13 — Method limits of the second pass
+
+- **The WebSearch budget (200/200) was exhausted before the second pass began.** All of it is
+  publisher-site and archive verification by direct fetch — which is the *stronger* test for "does an
+  origin exist," but it means the **aggregator-enumeration column is less complete** than the origin
+  findings for the TeamSnap, Klook, subscription and LendingTree items. The origin verdicts are solid;
+  the "who repeats it" lists are partial.
+- **archive.org went "Temporarily Offline"** partway through, after the TeamSnap and Google fee
+  snapshots were captured but before some aggregator sweeps.
+- **One item deserves a re-run with fresh search budget:** the "24% cooking / 26% chores / 38%
+  relaxing" triple. It is killed on all evidence reachable, but it has the texture of a real
+  early-2010s Google/Northstar mobile-voice question, and it is the single set of numbers this brief
+  most wants. A false kill there would cost us the best context-of-use data in the study.
+- Also unfinished: mapping how widely the **LendingTree 79%** circulates stripped of "competitive."
