@@ -51,3 +51,6 @@ mvp/MVP/.vix/
 *.p8
 mvp-backend/secrets/*
 !mvp-backend/secrets/README.md
+
+# Codex CLI local MCP config (holds a live Grafana service-account token)
+.codex/
