@@ -21,9 +21,6 @@ mvp-backend/data/.sync-audit.log
 mvp-backend/data/*.parquet
 !mvp-backend/data/articles.parquet
 !mvp-backend/data/categories.parquet
-!mvp-backend/data/community_posts.parquet
-!mvp-backend/data/mvp.parquet
-!mvp-backend/data/post_replies.parquet
 # ...and ANY parquet loose at the backend root. `export_parquet` writes relative
 # to the CWD, so running it (or a test that calls it) from `mvp-backend/` rather
 # than with MVP_DUCKDB_PATH set drops ~44 user-state files — auth_tokens,
@@ -54,3 +51,17 @@ mvp-backend/secrets/*
 
 # Codex CLI local MCP config (holds a live Grafana service-account token)
 .codex/
+
+# Public sharing: local profiles/conversations and generated data stay local.
+mvp-backend/local-storage/
+mvp-backend/tools/voice_bench_results/
+.claude/settings.local.json
+.pytest_cache/
+node_modules/
+dist/
+build/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.pem
+*.key
