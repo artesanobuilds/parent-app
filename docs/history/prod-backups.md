@@ -120,3 +120,34 @@ locks that.
     - `8ee35ebdcc23b41758cdc5c3542ee5f1 articles.parquet`
     - `99e73584ea36c5ecbba6ea4264fb8da3 categories.parquet`
 
+
+## 2026-10-11T15:44:32Z
+
+- **Reason:** PR #1 deployment, merged revision 68df0ce; documentation and contract tests only, no migrations; narrow content rollback baseline
+- **Remote:** `https://mvp-backend-production-8678.up.railway.app`
+- **Location:** `/Users/miguelalvarado/Desktop/mvp-prod-snapshot-2026-10-11`
+- **Captured:** articles.parquet categories.parquet
+- **md5:**
+    - `8ee35ebdcc23b41758cdc5c3542ee5f1 articles.parquet`
+    - `99e73584ea36c5ecbba6ea4264fb8da3 categories.parquet`
+
+
+## 2026-10-11T15:52:26.283Z
+
+- **Reason:** before harness PR #4, migration 25 and startup orphan cleanup. Deployed baseline `1c22e19d460e841100bfebb06de424db3d470eaf` (PR #3).
+- **Method:** Railway native copy-on-write snapshot of entire production `/app/data` volume; data stays on Railway. Includes DuckDB and WAL, SQLite checkpoints and sidecars, and table snapshots. No family records downloaded.
+- **Volume instance:** `1363a8c9-5b23-45ca-ab4e-1417e4d9a67d`.
+- **Backup ID:** `d39c36c7-ba7d-48bb-a53a-e74c0f23ceba`.
+- **Name:** `pre-harness-pr4-migration25-20261011`.
+- **Verification:** platform backup list returned matching ID/name/time, native backing snapshot identifier, 156 MB referenced; source volume READY. [Railway documents listed backups as available for restore](https://docs.railway.com/volumes/backups).
+- **Limits:** workflow-status API returned Not Authorized. No restore drill or content-level checksum performed; record is a platform-listed crash-consistent snapshot, not a restore-tested or application-quiesced backup. Databases remain separate transaction domains. No backup restore was attempted.
+- **Baseline:** 45 articles, 110 categories; all harness rollout flags unset/default off. Content backup and checksum manifest also recorded above.
+
+## 2026-10-11T15:58:38.892Z
+
+- **Reason:** before harness PR #6, migration 26 (research/warmup attempts and deadlines). Deployed baseline `bd4c3605a43facab771d2c643a6c70599aa251f5` (PR #5), migration 25 already applied successfully.
+- **Method/location:** Railway native full-volume snapshot, production `/app/data`, volume instance `1363a8c9-5b23-45ca-ab4e-1417e4d9a67d`; no family records downloaded.
+- **Backup ID:** `dc310026-ee92-4495-b299-9459ac8faec8`.
+- **Name:** `pre-harness-pr6-migration26-20261011`.
+- **Verification:** matching fresh platform backup-list record, 156 MB referenced, source volume READY. Same crash-consistency and untested-restore limits as the earlier snapshot; workflow-status API inaccessible to this login.
+- **Baseline:** 45 articles / 110 categories, persistent synthetic profile survived the prior two restarts; all live harness OpenAPI schemas unchanged; rollout flags remain default off.

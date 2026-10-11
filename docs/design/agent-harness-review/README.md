@@ -468,3 +468,30 @@ The review is maintained in this Markdown source. The PDF is generated from the 
 [R3]: https://github.com/artesanobuilds/parent-app/blob/798d2f44ea7bec6a17a09b3f8f4ad10f9a0efe0a/mvp-backend/app/checkpointing.py#L103
 [R4]: https://github.com/artesanobuilds/parent-app/blob/798d2f44ea7bec6a17a09b3f8f4ad10f9a0efe0a/mvp-backend/app/cos/tools.py#L27
 [R5]: https://github.com/artesanobuilds/parent-app/blob/798d2f44ea7bec6a17a09b3f8f4ad10f9a0efe0a/mvp-backend/parent-dashboard/src/api/index.ts#L321
+
+
+## What the refactor changed
+
+**Implementation recap · 11 October 2026.** These five points summarize the work delivered after the original proposal above. The seven implementation PRs are merged and deployed; the new shared-runtime switches remain off for staged activation. See the [implementation notes](IMPLEMENTATION.md) and [production verification record](../../history/harness-production-rollout-2026-10-11.md) for evidence and coverage limits.
+
+- **Duplicated execution logic → shared execution with distinct policies.** Chat, voice and onboarding handled streaming, retries and cleanup separately. The refactor introduces a shared execution service with surface-specific policies, preserving existing REST and streaming contracts so mobile clients need no coordinated update.
+
+  ![Before: each surface owns a separate loop. After: adapters and distinct policies use a shared execution service behind the same API.](assets/refactor-01-shared-execution.png)
+
+- **Success before durable storage → persistence before completion.** Some agent paths signaled completion before saving the answer. Successful agent turns now persist their final transcript before the completion marker, reducing lost conversations after disconnects. Tokens still stream incrementally; failed finalization does not report success.
+
+  ![Before: DONE precedes saving, leaving a disconnect window. After: the transcript commits before DONE is emitted.](assets/refactor-02-durable-completion.png)
+
+- **Ambiguous recovery → database effects that are idempotent under replay.** An interruption could leave a committed mutation without a checkpointed tool result. Protected mutations and their operation receipts now commit in one DuckDB transaction. Replaying the same tenant, thread and tool-call ID with matching command arguments returns the recorded result instead of applying the mutation again. A new tool-call ID is a new operation; external effects need their own guarantees.
+
+  ![Before: a crash after a database write leaves replay uncertain. After: one transaction stores the mutation and receipt, allowing recovery to return the result without repeating the write.](assets/refactor-03-idempotent-effects.png)
+
+- **Competing turns and deletion races → conversation ownership and family fences.** Concurrent requests could conflict, and unfinished work could recreate deleted family data. Conversation gates now serialize turns; family deletion closes admission, drains admitted work, advances the generation and coordinates the cascade and subsequent cleanup. Stale writes are rejected, and failed cleanup remains recoverable. Ownership remains process-local.
+
+  ![Before: overlapping turns share state and late writes can follow deletion. After: conversation ownership serializes turns and family fences coordinate deletion and cleanup.](assets/refactor-04-ownership-and-fences.png)
+
+- **Incomplete resource limits → bounded jobs and caches.** Background work and retained agent graphs lacked consistent lifetime and size limits. Jobs now use deadlines, heartbeats and attempt identities to reject late writes; graph caches use bounded LRU eviction, and compatible checkpoint connections are reused. Canceling a coroutine does not kill a synchronous thread or guarantee that provider billing stops immediately.
+
+  ![Before: work can outlive requests and retained graphs accumulate. After: job attempts have explicit limits, caches evict entries and checkpoint connections are reused.](assets/refactor-05-bounded-resources.png)
+
+The figures are embedded PNGs for reliable README rendering, with matching editable SVGs in `assets/`. Reproduce this five-figure set with `python3 render_refactor_lessons.py` from this directory (`rsvg-convert` required). This implementation recap supplements the original design PDF.

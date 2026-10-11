@@ -2,6 +2,8 @@
 
 This guide supplements [the production deployment runbook](../../history/deploy-runbook.md). The PR stack is implementation work, not a deployment record. Production deployment requires Miguel's explicit authorization for that deployment. Merge order and rollout order are separate decisions.
 
+The initial production rollout completed on 2026-10-11 with switches off. See the [deployment evidence](../../history/harness-production-rollout-2026-10-11.md) for exact commits, snapshots, checks and limits.
+
 ## What earlier deployments taught us
 
 The earlier Claude Code deployment notes and checked-in history describe three failures this rollout must avoid:
@@ -18,7 +20,7 @@ Historical notes also describe an obsolete entrypoint that removed the database 
 2. Run the complete backend suite, the public contract suite in both runtime modes, migration/restart/deletion fault tests, dashboard TypeScript/build checks, and the prescribed iOS build when that simulator is available. The implementation session passed a generic simulator SDK build; a named simulator runtime was unavailable.
 3. Review additive migrations 25 and 26, the changed export exclusions, and startup orphan cleanup. The DDL is additive, but recovery removes child rows whose required parent no longer exists (kid messages, window notifications and Circle children). Include those affected tables in the approved backup scope and verify valid other-family rows survive. Use populated synthetic fixtures; do not copy a real family into an agent's workspace.
 4. Record the exact commit, current migration version, current rollout switches and expected smoke results. Set latency/error/cost thresholds from measured baseline data. Offline fake-provider tests do not establish production model quality or latency.
-5. Under the separately authorized deployment, back up the affected state with the existing per-file backup script, store it in ignored snapshots, and commit the backup ledger entry. Never use bulk `/data/export`. Include the current checkpoint database in the approved backup scope if recovery may require it; a parquet-only snapshot does not cover conversation checkpoints.
+5. Under the separately authorized deployment, take a consistent backup covering the affected tables and checkpoints, and commit its metadata to the backup ledger. The existing per-file script refreshes content only; other family parquets can be stale, and it does not cover SQLite checkpoints. Use a verified native volume snapshot or an approved consistent database procedure for these migrations. Keep family data on the protected platform; never use bulk `/data/export`. Record platform verification separately from a completed restore drill.
 
 ## Controlled rollout
 
