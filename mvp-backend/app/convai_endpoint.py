@@ -230,6 +230,33 @@ async def convai_chat_completions(
 
 async def _stream_response(user_id: str, kid_name: str, thread_id: str, message: str,
                            silence_nudges: int = 0):
+    from contextlib import aclosing
+    from app.agent_runtime.context import RunContext
+    from app.agent_runtime.policies import shared_execution_enabled
+    from app.agent_runtime.service import owned_stream
+
+    context = RunContext(user_id, "kid_voice", f"kid:{user_id}:{kid_name}:{thread_id}")
+    shared = shared_execution_enabled("kid_voice")
+    async def workflow(disconnected):
+        async with aclosing(_stream_response_impl(
+                user_id, kid_name, thread_id, message, silence_nudges,
+                context=context, disconnected=disconnected, shared=shared)) as events:
+            async for event in events:
+                yield event
+    try:
+        async with aclosing(owned_stream(context, workflow, rendezvous=True,
+                                        close_on_disconnect=True)) as events:
+            async for event in events:
+                yield event
+    except Exception:
+        logger.exception("[convai] execution failed")
+        yield _openai_delta(content="Something went wrong. Let's try again.",
+                            chat_id=uuid.uuid4().hex[:12])
+        yield _openai_done()
+
+
+async def _stream_response_impl(user_id: str, kid_name: str, thread_id: str, message: str,
+                           silence_nudges: int = 0, *, context, disconnected, shared):
     turn_started = time.monotonic()
     storage = _storage()
     chat_id = uuid.uuid4().hex[:12]
@@ -237,7 +264,7 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
     from app.cost_logging import CostLoggingCallbackHandler, log_perf, new_workflow_id
     # ONE id for the whole voice turn (agent + moderation + the perf line), so
     # every [COST] line and the [PERF] line for this turn join on `workflow=`.
-    voice_wf = new_workflow_id()
+    voice_wf = context.run_id
 
     # Turn timings. `model_ttft_ms` is when the model's first token reached US;
     # `ttfb_ms` is when the first delta reached ElevenLabs. The gap between them
@@ -384,9 +411,11 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
     # Self-heal a thread poisoned by a cancelled tool call (see
     # app/thread_repair.py) before running the turn.
     from app.thread_repair import repair_thread
-    repair_started = time.monotonic()
-    await repair_thread(agent, config_lg)
-    repair_ms = _ms(repair_started)
+    async def timed_repair(graph, graph_config):
+        nonlocal repair_ms
+        repair_started = time.monotonic()
+        await repair_thread(graph, graph_config)
+        repair_ms = _ms(repair_started)
 
     sm = moderation.StreamingModerator(
         user_id=user_id, kid_name=kid_name, agent_id=agent_id, age_band=age_band,
@@ -436,36 +465,43 @@ async def _stream_response(user_id: str, kid_name: str, thread_id: str, message:
         # payload per token, which is pure overhead on a voice hot path where
         # every ms is audible. The two filters we use (`event["event"]` kind and
         # `data.chunk.content`) are identical across versions.
-        async for event in agent.astream_events(
-            {"messages": [HumanMessage(content=message)]},
-            config=config_lg,
-            version="v2",
-        ):
-            kind = event["event"]
-            if kind == "on_tool_start" and model_ttft_ms is None:
-                # A tool ran before the first spoken token — that turn's latency
-                # belongs in its own bucket, not the plain-answer distribution.
-                tool_turn = 1
-            if kind == "on_chat_model_stream":
-                content = event["data"]["chunk"].content
-                # In v2 a chunk's content can be a LIST of content blocks (tool-call
-                # deltas), not a str. Concatenating that into the buffer or feeding
-                # it to the moderator would blow up mid-turn, so skip anything that
-                # isn't spoken text — the tool result comes back as a later chunk.
-                if not content or not isinstance(content, str):
-                    continue
-                if model_ttft_ms is None:
-                    model_ttft_ms = _ms(turn_started)  # before moderation buffering
-                assistant_buffer += content
-                for safe in sm.feed(content):
-                    _mark_yield()
-                    yield _openai_delta(content=safe, chat_id=chat_id)
-                if sm.state.value == "blocked":
-                    _apply_block_side_effects()
-                    _mark_yield()
-                    yield _openai_delta(content=sm.replacement_message(), chat_id=chat_id)
-                    yield _end_call_tool_delta(chat_id)
-                    break
+        from contextlib import aclosing
+        from app.agent_runtime.specialized import graph_events
+        async with aclosing(graph_events(
+                agent, {"messages": [HumanMessage(content=message)]}, config_lg, context,
+                shared=shared, version="v2", repair=timed_repair)) as events:
+            async for event in events:
+                if disconnected.is_set():
+                    return
+                kind = event.kind
+                if kind == "tool_start" and model_ttft_ms is None:
+                    # A tool ran before the first spoken token — that turn's latency
+                    # belongs in its own bucket, not the plain-answer distribution.
+                    tool_turn = 1
+                if kind == "token":
+                    content = event.content
+                    # In v2 a chunk's content can be a LIST of content blocks (tool-call
+                    # deltas), not a str. Concatenating that into the buffer or feeding
+                    # it to the moderator would blow up mid-turn, so skip anything that
+                    # isn't spoken text — the tool result comes back as a later chunk.
+                    if not content or not isinstance(content, str):
+                        continue
+                    if model_ttft_ms is None:
+                        model_ttft_ms = _ms(turn_started)  # before moderation buffering
+                    assistant_buffer += content
+                    for safe in sm.feed(content):
+                        _mark_yield()
+                        yield _openai_delta(content=safe, chat_id=chat_id)
+                    if sm.state.value == "blocked":
+                        _apply_block_side_effects()
+                        _mark_yield()
+                        yield _openai_delta(content=sm.replacement_message(), chat_id=chat_id)
+                        yield _end_call_tool_delta(chat_id)
+                        break
+
+
+        if disconnected.is_set():
+            return
 
         for chunk in sm.finalize():
             _mark_yield()

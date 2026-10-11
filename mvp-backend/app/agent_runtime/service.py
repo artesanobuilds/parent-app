@@ -12,6 +12,7 @@ import time
 from contextlib import aclosing, nullcontext, asynccontextmanager
 from weakref import WeakKeyDictionary
 from dataclasses import dataclass
+from contextvars import ContextVar
 from typing import Any, AsyncIterator, Callable
 
 from app.agent_runtime.context import RunContext
@@ -32,6 +33,7 @@ class RunInterrupted(RuntimeError):
 
 # All tasks use the current ASGI event loop; separate test loops are isolated.
 _families = WeakKeyDictionary()
+_owned_thread = ContextVar("owned_agent_thread", default=None)
 
 
 def _family_state():
@@ -51,13 +53,16 @@ async def _call(hook, *args):
             await value
 
 
-async def owned_stream(context: RunContext, factory: Callable, *, wait_timeout=30):
+async def owned_stream(context: RunContext, factory: Callable, *, wait_timeout=30,
+                       acquire_ownership=True, rendezvous=False, close_on_disconnect=False):
     """Run an async iterator under ownership, joining on close or cancellation.
 
     The bounded output queue races the disconnect signal so a producer never
     waits for an absent consumer. The producer is never cancelled by that
     consumer, including repeated cancellation while joining.
     """
+    if not acquire_ownership and _owned_thread.get() != context.thread_key:
+        raise RuntimeError("Nested execution requires ownership of the same thread")
     state = _family_state()
     if context.user_id in state["fenced"]:
         raise FamilyAdmissionClosed("Family execution is temporarily unavailable")
@@ -68,7 +73,8 @@ async def owned_stream(context: RunContext, factory: Callable, *, wait_timeout=3
     async def publish(item):
         if disconnected.is_set():
             return
-        put = asyncio.create_task(queue.put(item))
+        acknowledged = asyncio.Event() if rendezvous and item is not end else None
+        put = asyncio.create_task(queue.put((item, acknowledged)))
         closed = asyncio.create_task(disconnected.wait())
         try:
             await asyncio.wait((put, closed), return_when=asyncio.FIRST_COMPLETED)
@@ -77,19 +83,37 @@ async def owned_stream(context: RunContext, factory: Callable, *, wait_timeout=3
                 if not task.done():
                     task.cancel()
             await asyncio.gather(put, closed, return_exceptions=True)
+        if acknowledged is not None and not disconnected.is_set():
+            ack = asyncio.create_task(acknowledged.wait())
+            closed = asyncio.create_task(disconnected.wait())
+            try:
+                await asyncio.wait((ack, closed), return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for task in (ack, closed):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(ack, closed, return_exceptions=True)
 
     async def produce():
         started = time.monotonic()
         outcome = "failed"
         try:
-            async with conversation_gates.hold(context.thread_key, timeout=wait_timeout):
+            gate = (conversation_gates.hold(context.thread_key, timeout=wait_timeout)
+                    if acquire_ownership else nullcontext())
+            async with gate:
                 # A canceled waiter must not start a turn after the prior owner exits.
                 if disconnected.is_set():
                     outcome = "interrupted"
                     return
-                async with aclosing(factory(disconnected)) as events:
-                    async for event in events:
-                        await publish(event)
+                ownership_token = _owned_thread.set(context.thread_key)
+                try:
+                    async with aclosing(factory(disconnected)) as events:
+                        async for event in events:
+                            await publish(event)
+                            if close_on_disconnect and disconnected.is_set():
+                                break
+                finally:
+                    _owned_thread.reset(ownership_token)
             outcome = "interrupted" if disconnected.is_set() else "completed"
         except RunInterrupted:
             outcome = "interrupted"
@@ -104,7 +128,7 @@ async def owned_stream(context: RunContext, factory: Callable, *, wait_timeout=3
             if disconnected.is_set():
                 while not queue.empty():
                     queue.get_nowait()
-                queue.put_nowait(end)
+                queue.put_nowait((end, None))
 
     producer = asyncio.create_task(produce(), name=f"agent-run:{context.run_id}")
     runs = state["runs"].setdefault(context.user_id, {})
@@ -116,12 +140,14 @@ async def owned_stream(context: RunContext, factory: Callable, *, wait_timeout=3
     producer.add_done_callback(forget)
     try:
         while True:
-            event = await queue.get()
+            event, acknowledged = await queue.get()
             if event is end:
                 break
             if isinstance(event, _Failure):
                 raise event.error
             yield event
+            if acknowledged is not None:
+                acknowledged.set()
     finally:
         disconnected.set()
         # Keep joining under repeated ASGI cancel scopes. Ownership stays with
@@ -174,6 +200,7 @@ class AgentExecutionService:
         self, agent: Any, inputs: dict, config: dict, context: RunContext, *,
         version="v1", repair=None, is_internal=None, is_retryable=None,
         before=None, reconcile=None, finalize=None, scope=None, agent_factory=None,
+        acquire_ownership=True,
     ) -> AsyncIterator[RunEvent]:
         """Hooks execute inside ownership and the same context as graph tools.
 
@@ -226,7 +253,7 @@ class AgentExecutionService:
                         raise
             # Scope exit may commit the run ledger; it too precedes completion.
             yield RunEvent("completed")
-        async with aclosing(owned_stream(context, execute)) as events:
+        async with aclosing(owned_stream(context, execute, acquire_ownership=acquire_ownership)) as events:
             async for event in events:
                 yield event
 

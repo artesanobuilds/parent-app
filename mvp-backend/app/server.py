@@ -1895,11 +1895,37 @@ def kid_set_pin(req: KidPinRequest, user_id: str = Depends(current_user)):
     return {"ok": True}
 
 
-async def generate_kid_stream(
+async def generate_kid_stream(user_id: str, kid_name: str, thread_id: str,
+                              message: str) -> AsyncGenerator[str, None]:
+    from contextlib import aclosing
+    from app.agent_runtime.context import RunContext
+    from app.agent_runtime.policies import shared_execution_enabled
+    from app.agent_runtime.service import owned_stream
+
+    context = RunContext(user_id, "kid_text", f"kid:{user_id}:{kid_name}:{thread_id}")
+    shared = shared_execution_enabled("kid_text")
+    async def workflow(disconnected):
+        async with aclosing(_generate_kid_stream_impl(
+                user_id, kid_name, thread_id, message, context=context,
+                disconnected=disconnected, shared=shared)) as events:
+            async for event in events:
+                yield event
+    try:
+        async with aclosing(owned_stream(context, workflow, rendezvous=True,
+                                        close_on_disconnect=True)) as events:
+            async for event in events:
+                yield event
+    except Exception:
+        logger.exception("[kid_chat] execution failed")
+        yield encode_run_event(RunEvent("error", content="Something went wrong. Please try again."))
+
+
+async def _generate_kid_stream_impl(
     user_id: str,
     kid_name: str,
     thread_id: str,
     message: str,
+    *, context, disconnected, shared: bool,
 ) -> AsyncGenerator[str, None]:
     """
     Streams the kid agent response with moderation gates.
@@ -1945,7 +1971,7 @@ async def generate_kid_stream(
 
     # One workflow id for the whole kid turn — the agent LLM, the input/output
     # moderation LLM, and any tool/search all log cost under it (feature varies).
-    kid_wf = new_workflow_id()
+    kid_wf = context.run_id
 
     # Pre-input gate
     pre = moderation.moderate_input(
@@ -2072,29 +2098,37 @@ async def generate_kid_stream(
             )
 
     try:
-        async for event in agent.astream_events(
-            {"messages": [HumanMessage(content=message)]},
-            config=config_lg,
-            version="v1",
-        ):
-            kind = event["event"]
-            if kind == "on_chat_model_stream":
-                content = event["data"]["chunk"].content
-                if not content:
-                    continue
-                assistant_buffer += content
-                for safe in sm.feed(content):
-                    yield f"data: {json.dumps({'type': 'token', 'content': safe})}\n\n"
-                if sm.state.value == "blocked":
-                    # Lock/kill BEFORE the replacement reaches the kid (B-7).
-                    _apply_block_side_effects()
-                    yield f"data: {json.dumps({'type': 'token', 'content': sm.replacement_message()})}\n\n"
-                    yield f"data: {json.dumps({'type': 'blocked', 'content': (sm.block_reason.category if sm.block_reason else 'unknown')})}\n\n"
-                    break
-            elif kind == "on_tool_start":
-                yield encode_run_event(RunEvent("tool_start", tool=event["name"]))
-            elif kind == "on_tool_end":
-                yield encode_run_event(RunEvent("tool_end", tool=event["name"]))
+        from contextlib import aclosing
+        from app.agent_runtime.specialized import graph_events
+        async with aclosing(graph_events(
+                agent, {"messages": [HumanMessage(content=message)]}, config_lg, context,
+                shared=shared, version="v1",
+                repair=thread_repair.repair_thread if shared else None)) as events:
+            async for event in events:
+                if disconnected.is_set():
+                    return
+                kind = event.kind
+                if kind == "token":
+                    content = event.content
+                    if not content:
+                        continue
+                    assistant_buffer += content
+                    for safe in sm.feed(content):
+                        yield f"data: {json.dumps({'type': 'token', 'content': safe})}\n\n"
+                    if sm.state.value == "blocked":
+                        # Lock/kill BEFORE the replacement reaches the kid (B-7).
+                        _apply_block_side_effects()
+                        yield f"data: {json.dumps({'type': 'token', 'content': sm.replacement_message()})}\n\n"
+                        yield f"data: {json.dumps({'type': 'blocked', 'content': (sm.block_reason.category if sm.block_reason else 'unknown')})}\n\n"
+                        break
+                elif kind == "tool_start":
+                    yield encode_run_event(RunEvent("tool_start", tool=event.tool))
+                elif kind == "tool_end":
+                    yield encode_run_event(RunEvent("tool_end", tool=event.tool))
+
+
+        if disconnected.is_set():
+            return
 
         # End-of-stream flush. finalize() may flag late (under-threshold or
         # whole-output recheck) — handle that BEFORE [DONE].
