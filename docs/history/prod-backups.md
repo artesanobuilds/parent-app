@@ -142,3 +142,12 @@ locks that.
 - **Verification:** platform backup list returned matching ID/name/time, native backing snapshot identifier, 156 MB referenced; source volume READY. [Railway documents listed backups as available for restore](https://docs.railway.com/volumes/backups).
 - **Limits:** workflow-status API returned Not Authorized. No restore drill or content-level checksum performed; record is a platform-listed crash-consistent snapshot, not a restore-tested or application-quiesced backup. Databases remain separate transaction domains. No backup restore was attempted.
 - **Baseline:** 45 articles, 110 categories; all harness rollout flags unset/default off. Content backup and checksum manifest also recorded above.
+
+## 2026-10-11T15:58:38.892Z
+
+- **Reason:** before harness PR #6, migration 26 (research/warmup attempts and deadlines). Deployed baseline `bd4c3605a43facab771d2c643a6c70599aa251f5` (PR #5), migration 25 already applied successfully.
+- **Method/location:** Railway native full-volume snapshot, production `/app/data`, volume instance `1363a8c9-5b23-45ca-ab4e-1417e4d9a67d`; no family records downloaded.
+- **Backup ID:** `dc310026-ee92-4495-b299-9459ac8faec8`.
+- **Name:** `pre-harness-pr6-migration26-20261011`.
+- **Verification:** matching fresh platform backup-list record, 156 MB referenced, source volume READY. Same crash-consistency and untested-restore limits as the earlier snapshot; workflow-status API inaccessible to this login.
+- **Baseline:** 45 articles / 110 categories, persistent synthetic profile survived the prior two restarts; all live harness OpenAPI schemas unchanged; rollout flags remain default off.
