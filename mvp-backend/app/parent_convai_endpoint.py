@@ -110,41 +110,66 @@ async def parent_convai_chat_completions(
     )
 
 
+def _storage():
+    from app.agent_runtime.dependencies import get
+    try:
+        return get().storage
+    except RuntimeError:
+        # Compatibility for direct adapter callers outside an ASGI lifespan.
+        from app.server import storage_backend
+        return storage_backend
+
+
 async def _stream_response(user_id: str, thread_id: str, message: str,
                            silence_nudges: int = 0):
     from contextlib import aclosing
     from app.agent_runtime.context import RunContext
     from app.agent_runtime.policies import shared_execution_enabled
-    from app.agent_runtime.service import owned_stream
+    from app.agent_runtime.service import owned_stream, RunInterrupted
     from app.agent_runtime.sessions import resolve_parent_thread
+    from app.agent_runtime.durability import scope_for
 
     shared = shared_execution_enabled("parent_voice")
-    if shared or silence_nudges:
+    # Silence prompts are deterministic presentation, not persisted agent turns.
+    if silence_nudges:
         async with aclosing(_stream_response_impl(user_id, thread_id, message,
-                            silence_nudges, shared=shared)) as events:
+                                                 silence_nudges)) as events:
             async for event in events:
                 yield event
         return
     context = RunContext(user_id, "parent_voice", resolve_parent_thread(user_id, "voice", thread_id))
-    async def legacy(_disconnected):
-        async with aclosing(_stream_response_impl(user_id, thread_id, message,
-                            silence_nudges, shared=False)) as events:
-            async for event in events:
-                yield event
+
+    async def legacy(disconnected):
+        terminal = None
+        with scope_for(_storage())(context):
+            async with aclosing(_stream_response_impl(user_id, thread_id, message,
+                                shared=False, context=context, disconnected=disconnected)) as events:
+                async for event in events:
+                    if event == _openai_done():
+                        terminal = event
+                    else:
+                        yield event
+            if disconnected.is_set():
+                raise RunInterrupted("Voice turn disconnected before completion")
+        if terminal is not None:
+            yield terminal
+
     try:
-        async with aclosing(owned_stream(context, legacy)) as events:
+        stream = (_stream_response_impl(user_id, thread_id, message, shared=True, context=context)
+                  if shared else owned_stream(context, legacy))
+        async with aclosing(stream) as events:
             async for event in events:
                 yield event
     except Exception:
-        logger.exception("[parent-convai] legacy admission/execution failed")
+        logger.exception("[parent-convai] admission/execution failed")
         yield _openai_delta(
             content="I hit a snag on my end — give me a second, then ask me again.",
             chat_id=uuid.uuid4().hex[:12])
-        yield _openai_done()
+        # No successful terminator when durable finalization or scope exit failed.
 
 
 async def _stream_response_impl(user_id: str, thread_id: str, message: str,
-                                silence_nudges: int = 0, *, shared=False):
+                                silence_nudges: int = 0, *, shared=False, context=None, disconnected=None):
     turn_started = time.monotonic()
     chat_id = uuid.uuid4().hex[:12]
 
@@ -179,7 +204,7 @@ async def _stream_response_impl(user_id: str, thread_id: str, message: str,
     from app.cost_logging import CostLoggingCallbackHandler, log_perf, new_workflow_id
     # ONE id for the whole voice turn, shared by the cost handler and the perf
     # line so a turn's spend and its latency join on `workflow=`.
-    voice_wf = new_workflow_id()
+    voice_wf = context.run_id
     _voice_cost = CostLoggingCallbackHandler(
         feature="parent_voice", workflow=voice_wf, session=thread_id, user=user_id
     )
@@ -195,9 +220,21 @@ async def _stream_response_impl(user_id: str, thread_id: str, message: str,
     # Self-heal before the turn: a prior cancelled turn (ElevenLabs barge-in /
     # timeout abort) can leave a dangling tool call that would 400 every
     # request on this thread forever. See app/thread_repair.py.
+    from app.agent_runtime.durability import (
+        append_transcript, scope_for, reconcile_receipts, repair_with_receipts, ensure_connected,
+    )
+    storage = _storage()
+    def before(_context):
+        append_transcript(storage, context, "parent_voice_threads", thread_id, "user", message)
+
+    def finalize(_context, text):
+        if text:
+            append_transcript(storage, context, "parent_voice_threads", thread_id, "assistant", text)
+
     repair_started = time.monotonic()
     if not shared:
-        await repair_thread(agent, config)
+        before(context)
+        await repair_with_receipts(context, agent, config, repair_thread)
     repair_ms = _ms(repair_started)
 
     # Turn timings. `model_ttft_ms` is when the model's first token reached US;
@@ -251,17 +288,19 @@ async def _stream_response_impl(user_id: str, thread_id: str, message: str,
             repair_ms = _ms(started)
 
         if shared:
-            context = RunContext(user_id, "parent_voice", config["configurable"]["thread_id"],
-                                 run_id=voice_wf)
             async with aclosing(execution_service.stream(
                     agent, {"messages": [HumanMessage(content=message)]}, config, context,
                     version="v2", repair=timed_repair,
                     is_internal=agent_module.is_internal_event,
                     is_retryable=is_dangling_tool_error,
+                    scope=scope_for(storage), reconcile=reconcile_receipts,
+                    before=before, finalize=finalize,
                     agent_factory=lambda: get_agent(user_id))) as events:
                 async for event in events:
                     yield event
         else:
+            ensure_connected(disconnected)
+            transcript = []
             async with aclosing(agent.astream_events(
                     {"messages": [HumanMessage(content=message)]}, config=config,
                     version="v2")) as events:
@@ -269,13 +308,18 @@ async def _stream_response_impl(user_id: str, thread_id: str, message: str,
                     if not agent_module.is_internal_event(raw):
                         event = normalize(raw)
                         if event is not None:
+                            if event.kind == "token":
+                                transcript.append(event.content)
                             yield event
+            ensure_connected(disconnected)
+            finalize(context, "".join(transcript))
 
     try:
         for attempt in ((1,) if shared else (1, 2)):
             stripper = _LinkStripper()
             yielded = False
             tool_started = False
+            completed = False
             try:
                 # version="v2" is the cheaper event API — v1 builds a much heavier
                 # event payload per token, pure overhead on a voice hot path where
@@ -283,6 +327,8 @@ async def _stream_response_impl(user_id: str, thread_id: str, message: str,
                 from contextlib import aclosing
                 async with aclosing(graph_events()) as events:
                     async for event in events:
+                        if event.kind == "completed":
+                            completed = True
                         if event.kind == "tool_start":
                             tool_started = True
                         if event.kind != "token":
@@ -306,6 +352,12 @@ async def _stream_response_impl(user_id: str, thread_id: str, message: str,
                             _mark_yield(content=False)
                             yield _show_content_tool_delta(cid, chat_id)
 
+                # Family cancellation can exhaust the owned iterator while its
+                # consumer stays connected. Only Completed proves that the
+                # assistant transcript and run scope finished successfully.
+                if shared and not completed:
+                    from app.agent_runtime.service import RunInterrupted
+                    raise RunInterrupted("Voice turn ended before durable completion")
                 tail = stripper.flush()
                 if tail:
                     _mark_yield()
@@ -324,19 +376,13 @@ async def _stream_response_impl(user_id: str, thread_id: str, message: str,
                         "[parent-convai] dangling tool call mid-run — repairing and "
                         "retrying user=%s thread=%s", user_id, thread_id,
                     )
-                    await repair_thread(agent, config)
+                    await repair_with_receipts(context, agent, config, repair_thread)
                     continue
                 logger.exception(
                     "[parent-convai] stream error user=%s thread=%s", user_id, thread_id
                 )
-                _mark_yield()
-                yield _openai_delta(
-                    content="I hit a snag on my end — give me a second, then ask me again.",
-                    chat_id=chat_id,
-                )
-                yield _openai_done()
                 _emit_perf("error")
-                return
+                raise
     finally:
         # A barge-in is the MOST common way a voice turn ends, and it unwinds
         # this generator without reaching either exit above. Emitting only on

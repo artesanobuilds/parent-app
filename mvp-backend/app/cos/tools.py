@@ -16,6 +16,7 @@ import logging
 from typing import Optional
 
 from langchain.tools import tool
+from app.services.operations import durable_tool, current_run, prepared_tool, prepared_storage
 
 from app.cos import planning
 from app.cos import verticals as cos_verticals
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 def _storage():
+    if current_run() is not None:
+        return prepared_storage(current_run().storage)
     # Late import: app.server builds storage at module load, importing it at the
     # top would create a cycle (server imports the cos router which imports this).
     from app.server import storage_backend
@@ -126,7 +129,7 @@ def _weekly_rrule_error(rrule):
 
 
 def _make_track_activity_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def TrackActivity(
         name: str,
         kid_name: Optional[str] = None,
@@ -233,7 +236,7 @@ def _capture_tracked(user_id: str, activity_id: str) -> None:
 
 
 def _make_add_to_calendar_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def AddToCalendar(
         title: str,
         kid_name: Optional[str] = None,
@@ -281,7 +284,7 @@ def _make_add_to_calendar_tool(user_id: str):
 
 
 def _make_add_recurring_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def AddRecurringAppointment(
         title: str,
         kid_name: Optional[str] = None,
@@ -323,7 +326,7 @@ def _make_add_recurring_tool(user_id: str):
 
 
 def _make_add_caregiver_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def AddCaregiver(
         name: str,
         role: str = "other",
@@ -353,7 +356,7 @@ def _make_add_caregiver_tool(user_id: str):
 
 
 def _make_assign_logistics_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def AssignLogistics(
         task: str,
         week_start: Optional[str] = None,
@@ -395,7 +398,7 @@ def _make_assign_logistics_tool(user_id: str):
 
 
 def _make_add_todo_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def AddTodo(
         title: str,
         kid_name: Optional[str] = None,
@@ -429,7 +432,7 @@ def _make_add_todo_tool(user_id: str):
 
 
 def _make_complete_todo_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def CompleteTodo(todo_id: str) -> str:
         """Mark a to-do as done by its id."""
         try:
@@ -443,7 +446,7 @@ def _make_complete_todo_tool(user_id: str):
 
 
 def _make_update_todo_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def UpdateTodo(
         todo_id: str,
         title: Optional[str] = None,
@@ -747,7 +750,7 @@ def _make_draft_email_tool(user_id: str):
 
 
 def _make_lookup_and_save_activity_tool(user_id: str):
-    @tool
+    @prepared_tool(user_id)
     def LookupAndSaveActivity(
         activity_name: str,
         kid_name: Optional[str] = None,
@@ -804,7 +807,6 @@ def _make_lookup_and_save_activity_tool(user_id: str):
                 return _tool_error("LookupAndSaveActivity", exc, user_id)
             from app import observability as obs
             obs.count("cos.lookup.path", path="candidate")  # free — no web spend
-            _maybe_enter_watched(user_id, activity_id, status)
             _capture_tracked(user_id, activity_id)
             return (
                 f"Saved '{match.get('name') or activity_name}' as {status} "
@@ -863,7 +865,6 @@ def _make_lookup_and_save_activity_tool(user_id: str):
             return _tool_error("LookupAndSaveActivity", exc, user_id)
         from app import observability as obs
         obs.count("cos.lookup.path", path="web")  # Tavily + extraction spend
-        _maybe_enter_watched(user_id, activity_id, status)
         _capture_tracked(user_id, activity_id)
 
         bits = []
@@ -888,7 +889,7 @@ def _make_lookup_and_save_activity_tool(user_id: str):
 
 
 def _make_update_activity_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def UpdateActivity(
         activity_id: str,
         status: Optional[str] = None,
@@ -973,7 +974,7 @@ def _make_update_activity_tool(user_id: str):
 
 
 def _make_watch_registration_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def WatchRegistration(
         opens_at: str,
         activity_id: Optional[str] = None,
@@ -1017,7 +1018,7 @@ def _make_watch_registration_tool(user_id: str):
 
 
 def _make_untrack_activity_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def UntrackActivity(activity_id: str) -> str:
         """Permanently remove a tracked activity from the plan (un-pin from the
         shortlist, or delete one added by mistake). Prefer
@@ -1044,7 +1045,7 @@ def _make_untrack_activity_tool(user_id: str):
 
 
 def _make_start_discovery_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def StartDiscovery(
         focus: Optional[str] = None,
         radius_miles: Optional[int] = None,

@@ -6,9 +6,18 @@ order: 5
 
 # What's new
 
-Every update we ship, newest first — what changed and how to find it. Features marked
-*app update* arrive on your phone through TestFlight; everything else is live the moment
-it's listed here.
+Every update, newest first — what changed and how to find it. Each entry says
+whether it is available now or prepared for an upcoming rollout. Features marked
+*app update* arrive on your phone through TestFlight.
+
+## October 10, 2026 — more reliable coaching and planning saves
+
+**Available with the next backend rollout; no app update required.** The coach
+saves family details before confirming them in text or voice. If an interrupted
+conversation resumes a known planning action, the saved action is recovered
+instead of added twice. Open **Coach** and type or speak as usual; saved family
+details remain available in **Settings → Profile**, and planning items remain
+on your existing activity and to-do screens.
 
 ## August 21, 2026 — a brand-new welcome, and a Home built around today
 

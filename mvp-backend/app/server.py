@@ -1,5 +1,6 @@
 from app.agent_runtime.adapters.text import encode as encode_run_event
 from app.agent_runtime.events import RunEvent
+import asyncio
 import json
 import logging
 import os
@@ -81,6 +82,8 @@ async def lifespan(app: FastAPI):
     from app.agent_runtime.dependencies import RuntimeDependencies, bind
     bind(RuntimeDependencies(storage_backend, profiling_service, chat_memory,
                              onboarding_memory, coach_threads))
+    await checkpointing.retry_pending_checkpoint_purges(storage_backend)
+    purge_retries = asyncio.create_task(checkpointing.checkpoint_purge_retries(storage_backend))
     load_persisted_state()
     # Activity-research background worker. Sweep any run a prior restart left
     # 'running' back to 'queued' (re-runs are idempotent), then start the daemon.
@@ -120,6 +123,8 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("[warmup] worker failed to start")
     yield
+    purge_retries.cancel()
+    await asyncio.gather(purge_retries, return_exceptions=True)
     try:
         from app.research.worker import research_worker
         if research_worker is not None:
@@ -432,22 +437,35 @@ def load_persisted_state():
 
 def persist_state(user_id: str | None = None):
     """Persist state. If user_id is given, only save that user. Otherwise save all."""
-    if user_id:
-        user_ids = {user_id}
-    else:
-        user_ids = set(chat_memory.user_ids()) | set(onboarding_memory.user_ids())
-        # Include profile-only users
-        user_ids |= set(profiling_service.export_snapshot().keys())
+    from app.services.operations import publication_lock
 
-    for uid in user_ids:
-        storage_backend.save_user_data(uid, "chat_threads", chat_memory.snapshot_user(uid))
-        storage_backend.save_user_data(uid, "onboarding_threads", onboarding_memory.snapshot_user(uid))
+    # Snapshot only after durable writers have committed AND published their
+    # caches. Capturing all_profiles before this lock can overwrite newer data.
+    with publication_lock(storage_backend):
+        if user_id:
+            user_ids = {user_id}
+        else:
+            user_ids = set(chat_memory.user_ids()) | set(onboarding_memory.user_ids())
+            # Include profile-only users
+            user_ids |= set(profiling_service.export_snapshot().keys())
 
-    # Persist profiles for targeted users
-    all_profiles = profiling_service.export_snapshot()
-    for uid in user_ids:
-        if uid in all_profiles:
-            storage_backend.save_user_data(uid, "profiles", all_profiles[uid])
+        all_profiles = profiling_service.export_snapshot()
+        for uid in user_ids:
+            try:
+                with storage_backend.transaction():
+                    storage_backend.assert_family_writable(uid)
+                    storage_backend.save_user_data(uid, "chat_threads", chat_memory.snapshot_user(uid))
+                    storage_backend.save_user_data(uid, "onboarding_threads", onboarding_memory.snapshot_user(uid))
+                    if uid in all_profiles:
+                        storage_backend.save_user_data(uid, "profiles", all_profiles[uid])
+            except PermissionError:
+                if user_id is not None:
+                    raise
+                # A read can lazily re-create an empty cache after deletion. Global
+                # shutdown snapshots discard that cache; they never resurrect it.
+                profiling_service.remove_family(uid)
+                chat_memory.remove_user(uid)
+                onboarding_memory.remove_user(uid)
 
     storage_backend.export_parquet()
     logger.debug(f"[storage] persisted state for users: {list(user_ids)}")
@@ -457,7 +475,8 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
     from contextlib import aclosing
     from app.agent_runtime.context import RunContext
     from app.agent_runtime.policies import shared_execution_enabled
-    from app.agent_runtime.service import execution_service, owned_stream
+    from app.agent_runtime.service import execution_service, owned_stream, RunInterrupted
+    from app.agent_runtime.durability import scope_for, reconcile_receipts, append_transcript
     from app.agent_runtime.sessions import resolve_parent_thread
 
     shared = shared_execution_enabled("chat")
@@ -465,11 +484,21 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
     context = RunContext(user_id, "chat", resolve_parent_thread(
         user_id, "chat", thread_id, conversation_id), conversation_id)
     if not shared:
-        async def legacy(_disconnected):
-            async with aclosing(_generate_stream_legacy(
-                    message, thread_id, user_id, conversation_id=conversation_id)) as events:
-                async for event in events:
-                    yield event
+        async def legacy(disconnected):
+            terminal = None
+            with scope_for(storage_backend)(context):
+                async with aclosing(_generate_stream_legacy(
+                        message, thread_id, user_id, conversation_id=conversation_id,
+                        context=context, disconnected=disconnected)) as events:
+                    async for event in events:
+                        if event == "data: [DONE]\n\n":
+                            terminal = event
+                        else:
+                            yield event
+                if disconnected.is_set():
+                    raise RunInterrupted("Parent turn disconnected before completion")
+            if terminal is not None:
+                yield terminal
         try:
             async with aclosing(owned_stream(context, legacy)) as events:
                 async for event in events:
@@ -483,16 +512,15 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
     config = {"configurable": {"thread_id": context.thread_key}, "callbacks": [
         CostLoggingCallbackHandler(feature="coach", workflow=context.run_id,
                                    session=transcript_key, user=user_id)]}
-    thread_messages = chat_memory.get_thread_messages(user_id, transcript_key)
-
     def before(_context):
-        thread_messages.append({"role": "user", "content": message})
+        append_transcript(storage_backend, context, "chat_threads", transcript_key,
+                          "user", message, memory=chat_memory)
         coach_threads.touch(user_id, conversation_id)
 
     def finalize(_context, text):
         if text:
-            thread_messages.append({"role": "assistant", "content": text})
-        persist_state(user_id)
+            append_transcript(storage_backend, context, "chat_threads", transcript_key,
+                              "assistant", text, memory=chat_memory)
 
     try:
         async with aclosing(execution_service.stream(
@@ -500,7 +528,8 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
                 config, context, repair=thread_repair.repair_thread,
                 is_internal=agent_module.is_internal_event,
                 is_retryable=thread_repair.is_dangling_tool_error,
-                before=before, finalize=finalize, agent_factory=lambda: get_agent(user_id))) as events:
+                before=before, finalize=finalize, scope=scope_for(storage_backend),
+                reconcile=reconcile_receipts, agent_factory=lambda: get_agent(user_id))) as events:
             async for event in events:
                 if event.kind == "completed":
                     yield "data: [DONE]\n\n"
@@ -512,7 +541,7 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
 
 
 async def _generate_stream_legacy(message: str, thread_id: str, user_id: str,
-                                  conversation_id: str | None = None) -> AsyncGenerator[str, None]:
+                                  conversation_id: str | None = None, *, context, disconnected=None) -> AsyncGenerator[str, None]:
     """
     Streams events from the LangGraph agent.
     Format: SSE (Server-Sent Events)
@@ -538,8 +567,9 @@ async def _generate_stream_legacy(message: str, thread_id: str, user_id: str,
     )
     config = {"configurable": {"thread_id": memory_key}, "callbacks": [cost_cb]}
 
-    thread_messages = chat_memory.get_thread_messages(user_id, transcript_key)
-    thread_messages.append({"role": "user", "content": message})
+    from app.agent_runtime.durability import append_transcript, repair_with_receipts, ensure_connected
+    append_transcript(storage_backend, context, "chat_threads", transcript_key,
+                      "user", message, memory=chat_memory)
     # Record the turn so the conversation appears in the history list with a
     # real timestamp before it is ever closed/titled.
     coach_threads.touch(user_id, conversation_id)
@@ -547,12 +577,13 @@ async def _generate_stream_legacy(message: str, thread_id: str, user_id: str,
     # Self-heal a thread poisoned by a cancelled tool call before the turn
     # (see app/thread_repair.py — without this one interrupted turn breaks
     # the thread forever).
-    await thread_repair.repair_thread(agent, config)
+    await repair_with_receipts(context, agent, config, thread_repair.repair_thread)
 
     for attempt in (1, 2):
         assistant_buffer = ""
         tool_started = False
         try:
+            ensure_connected(disconnected)
             # Stream events from the graph
             # "values" mode streams the full state at each step
             # "updates" mode streams only the changes
@@ -589,72 +620,56 @@ async def _generate_stream_legacy(message: str, thread_id: str, user_id: str,
                         logger.debug(f"[chat] tool_end name={event.get('name')} output={event.get('data', {}).get('output')}")
                     yield encode_run_event(RunEvent("tool_end", tool=event["name"]))
 
+            ensure_connected(disconnected)
             if assistant_buffer:
-                thread_messages.append({"role": "assistant", "content": assistant_buffer})
-            persist_state(user_id)
+                append_transcript(storage_backend, context, "chat_threads", transcript_key,
+                                  "assistant", assistant_buffer, memory=chat_memory)
             yield "data: [DONE]\n\n"
             return
 
         except Exception as e:
             if attempt == 1 and not assistant_buffer and not tool_started and thread_repair.is_dangling_tool_error(e):
                 logger.warning(f"[chat] dangling tool call mid-run — repairing and retrying user_id={user_id} thread_id={thread_id}")
-                await thread_repair.repair_thread(agent, config)
+                await repair_with_receipts(context, agent, config, thread_repair.repair_thread)
                 continue
             logger.exception(f"[chat] stream error user_id={user_id} thread_id={thread_id}")
-            yield f"data: {json.dumps({'type': 'error', 'content': 'Something went wrong. Please try again.'})}\n\n"
-            return
+            raise
 
 
 async def generate_onboarding_stream(message: str, thread_id: str, user_id: str) -> AsyncGenerator[str, None]:
-    """
-    Streams events from the onboarding agent.
-    Format: SSE (Server-Sent Events)
-    """
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"[onboarding] start user_id={user_id} thread_id={thread_id} message={message[:200]}")
-    agent = get_onboarding_agent(user_id)
-    memory_key = f"onboarding:{user_id}:{thread_id}"
-    cost_cb = CostLoggingCallbackHandler(
-        feature="onboarding", workflow=new_workflow_id(), session=thread_id, user=user_id
-    )
-    config = {"configurable": {"thread_id": memory_key}, "callbacks": [cost_cb]}
+    from contextlib import aclosing
+    from app.agent_runtime.context import RunContext
+    from app.agent_runtime.service import execution_service
+    from app.agent_runtime.durability import scope_for, reconcile_receipts, append_transcript
 
-    thread_messages = onboarding_memory.get_thread_messages(user_id, thread_id)
-    thread_messages.append({"role": "user", "content": message})
-    assistant_buffer = ""
+    context = RunContext(user_id, "onboarding", f"onboarding:{user_id}:{thread_id}")
+    config = {"configurable": {"thread_id": context.thread_key}, "callbacks": [
+        CostLoggingCallbackHandler(feature="onboarding", workflow=context.run_id,
+                                   session=thread_id, user=user_id)]}
 
-    await thread_repair.repair_thread(agent, config)
+    def before(_context):
+        append_transcript(storage_backend, context, "onboarding_threads", thread_id,
+                          "user", message, memory=onboarding_memory)
+
+    def finalize(_context, text):
+        if text:
+            append_transcript(storage_backend, context, "onboarding_threads", thread_id,
+                              "assistant", text, memory=onboarding_memory)
 
     try:
-        async for event in agent.astream_events(
-            {"messages": [HumanMessage(content=message)]},
-            config=config,
-            version="v1"
-        ):
-            kind = event["event"]
-
-            if kind == "on_chat_model_stream":
-                content = event["data"]["chunk"].content
-                if content:
-                    assistant_buffer += content
-                    yield encode_run_event(RunEvent("token", content=content))
-            elif kind == "on_tool_start":
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"[onboarding] tool_start name={event.get('name')} input={event.get('data', {}).get('input')}")
-                yield encode_run_event(RunEvent("tool_start", tool=event["name"]))
-            elif kind == "on_tool_end":
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"[onboarding] tool_end name={event.get('name')} output={event.get('data', {}).get('output')}")
-                yield encode_run_event(RunEvent("tool_end", tool=event["name"]))
-
-        yield "data: [DONE]\n\n"
-        if assistant_buffer:
-            thread_messages.append({"role": "assistant", "content": assistant_buffer})
-        persist_state(user_id)
-
-    except Exception as e:
-        logger.exception(f"[onboarding] stream error user_id={user_id} thread_id={thread_id}")
-        yield f"data: {json.dumps({'type': 'error', 'content': 'Something went wrong. Please try again.'})}\n\n"
+        async with aclosing(execution_service.stream(
+                None, {"messages": [HumanMessage(content=message)]}, config, context,
+                repair=thread_repair.repair_thread, before=before, finalize=finalize,
+                scope=scope_for(storage_backend), reconcile=reconcile_receipts,
+                agent_factory=lambda: get_onboarding_agent(user_id))) as events:
+            async for event in events:
+                if event.kind == "completed":
+                    yield "data: [DONE]\n\n"
+                else:
+                    yield encode_run_event(event)
+    except Exception:
+        logger.exception("[onboarding] stream failed")
+        yield encode_run_event(RunEvent("error", content="Something went wrong. Please try again."))
 
 # ── Auth (closed-beta opaque tokens) ─────────────────────────────────
 
@@ -1890,11 +1905,37 @@ def kid_set_pin(req: KidPinRequest, user_id: str = Depends(current_user)):
     return {"ok": True}
 
 
-async def generate_kid_stream(
+async def generate_kid_stream(user_id: str, kid_name: str, thread_id: str,
+                              message: str) -> AsyncGenerator[str, None]:
+    from contextlib import aclosing
+    from app.agent_runtime.context import RunContext
+    from app.agent_runtime.policies import shared_execution_enabled
+    from app.agent_runtime.service import owned_stream
+
+    context = RunContext(user_id, "kid_text", f"kid:{user_id}:{kid_name}:{thread_id}")
+    shared = shared_execution_enabled("kid_text")
+    async def workflow(disconnected):
+        async with aclosing(_generate_kid_stream_impl(
+                user_id, kid_name, thread_id, message, context=context,
+                disconnected=disconnected, shared=shared)) as events:
+            async for event in events:
+                yield event
+    try:
+        async with aclosing(owned_stream(context, workflow, rendezvous=True,
+                                        close_on_disconnect=True)) as events:
+            async for event in events:
+                yield event
+    except Exception:
+        logger.exception("[kid_chat] execution failed")
+        yield encode_run_event(RunEvent("error", content="Something went wrong. Please try again."))
+
+
+async def _generate_kid_stream_impl(
     user_id: str,
     kid_name: str,
     thread_id: str,
     message: str,
+    *, context, disconnected, shared: bool,
 ) -> AsyncGenerator[str, None]:
     """
     Streams the kid agent response with moderation gates.
@@ -1940,7 +1981,7 @@ async def generate_kid_stream(
 
     # One workflow id for the whole kid turn — the agent LLM, the input/output
     # moderation LLM, and any tool/search all log cost under it (feature varies).
-    kid_wf = new_workflow_id()
+    kid_wf = context.run_id
 
     # Pre-input gate
     pre = moderation.moderate_input(
@@ -2067,29 +2108,37 @@ async def generate_kid_stream(
             )
 
     try:
-        async for event in agent.astream_events(
-            {"messages": [HumanMessage(content=message)]},
-            config=config_lg,
-            version="v1",
-        ):
-            kind = event["event"]
-            if kind == "on_chat_model_stream":
-                content = event["data"]["chunk"].content
-                if not content:
-                    continue
-                assistant_buffer += content
-                for safe in sm.feed(content):
-                    yield f"data: {json.dumps({'type': 'token', 'content': safe})}\n\n"
-                if sm.state.value == "blocked":
-                    # Lock/kill BEFORE the replacement reaches the kid (B-7).
-                    _apply_block_side_effects()
-                    yield f"data: {json.dumps({'type': 'token', 'content': sm.replacement_message()})}\n\n"
-                    yield f"data: {json.dumps({'type': 'blocked', 'content': (sm.block_reason.category if sm.block_reason else 'unknown')})}\n\n"
-                    break
-            elif kind == "on_tool_start":
-                yield encode_run_event(RunEvent("tool_start", tool=event["name"]))
-            elif kind == "on_tool_end":
-                yield encode_run_event(RunEvent("tool_end", tool=event["name"]))
+        from contextlib import aclosing
+        from app.agent_runtime.specialized import graph_events
+        async with aclosing(graph_events(
+                agent, {"messages": [HumanMessage(content=message)]}, config_lg, context,
+                shared=shared, version="v1",
+                repair=thread_repair.repair_thread if shared else None)) as events:
+            async for event in events:
+                if disconnected.is_set():
+                    return
+                kind = event.kind
+                if kind == "token":
+                    content = event.content
+                    if not content:
+                        continue
+                    assistant_buffer += content
+                    for safe in sm.feed(content):
+                        yield f"data: {json.dumps({'type': 'token', 'content': safe})}\n\n"
+                    if sm.state.value == "blocked":
+                        # Lock/kill BEFORE the replacement reaches the kid (B-7).
+                        _apply_block_side_effects()
+                        yield f"data: {json.dumps({'type': 'token', 'content': sm.replacement_message()})}\n\n"
+                        yield f"data: {json.dumps({'type': 'blocked', 'content': (sm.block_reason.category if sm.block_reason else 'unknown')})}\n\n"
+                        break
+                elif kind == "tool_start":
+                    yield encode_run_event(RunEvent("tool_start", tool=event.tool))
+                elif kind == "tool_end":
+                    yield encode_run_event(RunEvent("tool_end", tool=event.tool))
+
+
+        if disconnected.is_set():
+            return
 
         # End-of-stream flush. finalize() may flag late (under-threshold or
         # whole-output recheck) — handle that BEFORE [DONE].
@@ -2408,7 +2457,23 @@ def kid_moderation_events(user_id: str, kid_name: Optional[str] = None,
 
 
 @app.delete("/family/{user_id}")
-def delete_family(user_id: str, authenticated_user: str = Depends(current_user)):
+async def delete_family(user_id: str, authenticated_user: str = Depends(current_user)):
+    authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    from app.agent_runtime.service import execution_service
+    # Close admission and join active/queued producers BEFORE either database
+    # is touched. No transaction may remain open while graph tools drain.
+    async with execution_service.family_fence(user_id):
+        return await checkpointing.join_cleanup(_delete_family_data, user_id, authenticated_user)
+
+
+def invalidate_family_agent_caches(user_id: str) -> None:
+    agent_module._agent_cache.pop(user_id, None)
+    from app import onboarding_agent
+    onboarding_agent._onboarding_agent_cache.pop(user_id, None)
+    kid_agent_service.invalidate_user(user_id)
+
+
+def _delete_family_data(user_id: str, authenticated_user: str):
     """
     Honor the consent screen's "delete history at any time" promise. Cascades
     across every kid-data table; writes one audit_events row recording the
@@ -2454,7 +2519,8 @@ def delete_family(user_id: str, authenticated_user: str = Depends(current_user))
     # Agent conversation checkpoints are durable now — sweep every thread this
     # family owns (parent text + voice, onboarding, each kid). Never raises;
     # the DB cascade above already stands.
-    _threads_purged = checkpointing.delete_user_threads(user_id)
+    invalidate_family_agent_caches(user_id)
+    _threads_purged = checkpointing.purge_family_checkpoints(storage_backend, user_id)
     if _threads_purged:
         counts["agent_threads"] = _threads_purged
     # Photos live outside the DB entirely — sweep the family's whole blob
@@ -2470,7 +2536,7 @@ def delete_family(user_id: str, authenticated_user: str = Depends(current_user))
         except Exception:
             logger.warning("[delete-family] PostHog person deletion failed (non-fatal)")
     try:
-        storage_backend.export_all_parquet()
+        storage_backend.refresh_family_snapshots(user_id)
     except Exception:
         # The DB rows are gone (the delete stands); a failed snapshot refresh
         # must be visible, not silent — the stale snapshot still holds PII.

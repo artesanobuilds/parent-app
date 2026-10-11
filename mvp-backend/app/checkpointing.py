@@ -327,11 +327,14 @@ class DurableCheckpointer(BaseCheckpointSaver[str]):
             logger.warning("[checkpointer] sync close failed", exc_info=True)
 
     def thread_ids(self) -> list[str]:
-        """Every thread id with at least one checkpoint. Used by the delete
-        cascade; also handy when debugging a poisoned thread in prod."""
+        """Thread IDs from checkpoints AND unfinished writes.
+
+        An interrupted write can survive without a corresponding checkpoint;
+        family cleanup must include both tables.
+        """
         saver = self._sync()
         with saver.cursor(transaction=False) as cur:
-            cur.execute("SELECT DISTINCT thread_id FROM checkpoints")
+            cur.execute("SELECT thread_id FROM checkpoints UNION SELECT thread_id FROM writes")
             return [row[0] for row in cur.fetchall()]
 
 
@@ -341,26 +344,113 @@ class DurableCheckpointer(BaseCheckpointSaver[str]):
 checkpointer: DurableCheckpointer = DurableCheckpointer()
 
 
-def delete_user_threads(user_id: str) -> int:
-    """Drop every checkpoint belonging to one user. Returns threads deleted.
+def _checkpoint_owner(thread_id: str) -> str:
+    """Read the owner segment of the existing, unescaped thread namespaces."""
+    parts = thread_id.split(":")
+    if parts[0] in {"onboarding", "kid"} and len(parts) > 1:
+        return parts[1]
+    return parts[0]
 
-    Part of the consent screen's "delete history at any time" promise. Matches
-    every thread id this app mints for a family — the parent's text and voice
-    threads (`{user}:...`), the onboarding thread (`onboarding:{user}:...`) and
-    each kid's (`kid:{user}:{kid}:...`) — by user-id segment, so a new id
-    scheme can't silently start leaking. Never raises: a failed sweep must be
-    logged, not allowed to abort the DB cascade that already succeeded.
+
+def delete_user_threads(user_id: str, *, strict: bool = False) -> int:
+    """Delete verified family threads without treating a namespace as an owner.
+
+    Legacy thread keys do not escape user IDs or parent voice thread IDs. A
+    reserved or colon-containing user ID therefore has ambiguous ownership;
+    fail closed before any deletion, retaining the lifecycle retry obligation.
+    Such identities need independent ownership evidence before manual repair.
+    Compatibility callers still receive a best-effort count; strict callers
+    receive failures and must not mark the purge complete.
     """
-    prefixes = (f"{user_id}:", f"onboarding:{user_id}:", f"kid:{user_id}:")
     deleted = 0
     try:
+        if not user_id or ":" in user_id or user_id in {"kid", "onboarding"}:
+            raise ValueError("Ambiguous legacy checkpoint owner; independent ownership evidence required")
         for thread_id in checkpointer.thread_ids():
-            if thread_id.startswith(prefixes) or thread_id == user_id:
+            if _checkpoint_owner(thread_id) == user_id:
                 checkpointer.delete_thread(thread_id)
                 deleted += 1
+        if any(_checkpoint_owner(thread_id) == user_id
+               for thread_id in checkpointer.thread_ids()):
+            raise RuntimeError("Checkpoint verification found remaining family threads")
     except Exception:
         logger.exception("[checkpointer] failed to purge threads for %s", user_id)
+        if strict:
+            raise
         return deleted
     if deleted:
         logger.info("[checkpointer] purged %d thread(s) for %s", deleted, user_id)
     return deleted
+
+
+def purge_family_checkpoints(storage, user_id: str) -> int:
+    """Clear the durable pending flag only after verified SQLite deletion.
+
+    The caller holds execution_service.family_fence. Failure leaves a durable
+    retry obligation and blocks new scoped runs; the domain cascade still stands.
+    """
+    pending = next((row for row in storage.pending_checkpoint_purges()
+                    if row['user_id'] == user_id), None)
+    if pending is None:
+        return 0
+    try:
+        # Freeze the durable identity inventory while verifying ownership and
+        # deleting SQLite rows. No async wait or provider work occurs here.
+        with storage.transaction():
+            known_users = {row[0] for row in storage._con.execute(
+                "SELECT user_id FROM user_data UNION SELECT user_id FROM user_accounts "
+                "UNION SELECT user_id FROM agent_family_fences"
+            ).fetchall()}
+            candidates = [thread for thread in checkpointer.thread_ids()
+                          if _checkpoint_owner(thread) == user_id]
+            for other in known_users - {user_id}:
+                prefixes = (f"{other}:", f"onboarding:{other}:", f"kid:{other}:")
+                if (other.startswith(user_id + ":") or user_id.startswith(other + ":")
+                        or any(thread == other or thread.startswith(prefixes)
+                               for thread in candidates)):
+                    raise ValueError("Overlapping legacy checkpoint owners; independent ownership evidence required")
+            count = delete_user_threads(user_id, strict=True)
+            storage.mark_checkpoint_purged(user_id, pending['generation'])
+            return count
+    except Exception:
+        logger.exception('[checkpointer] family purge remains pending for %s', user_id)
+        return 0
+
+
+async def join_cleanup(fn, *args):
+    """Keep the family fence until a synchronous cleanup actually finishes."""
+    task = asyncio.create_task(asyncio.to_thread(fn, *args))
+    canceled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            canceled = True
+    result = task.result()
+    if canceled:
+        raise asyncio.CancelledError
+    return result
+
+
+def _retry_family_cleanup(storage, user_id):
+    purge_family_checkpoints(storage, user_id)
+    try:
+        storage.refresh_family_snapshots(user_id)
+    except Exception:
+        logger.exception('[checkpointer] snapshot cleanup remains pending for %s', user_id)
+
+
+async def retry_pending_checkpoint_purges(storage) -> None:
+    from app.agent_runtime.service import execution_service
+    for pending in storage.pending_family_cleanups():
+        async with execution_service.family_fence(pending['user_id']):
+            await join_cleanup(_retry_family_cleanup, storage, pending['user_id'])
+
+
+async def checkpoint_purge_retries(storage, interval: float = 30) -> None:
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await retry_pending_checkpoint_purges(storage)
+        except Exception:
+            logger.exception('[checkpointer] pending purge retry failed')

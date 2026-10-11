@@ -96,7 +96,7 @@ def test_cos_follows_active_named_conversation(harness):
     ]
 
 
-@pytest.mark.parametrize("surface", ["chat", "cos", pytest.param("onboarding", marks=pytest.mark.xfail(strict=True, reason="PR3: onboarding still completes before persistence"))])
+@pytest.mark.parametrize("surface", ["chat", "cos", "onboarding"])
 def test_assistant_is_durable_at_success_marker(harness, surface):
     h = harness
 

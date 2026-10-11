@@ -203,10 +203,13 @@ class _FlakyAgent:
         }
 
 
-def _collect_stream(monkeypatch, agent):
+def _collect_stream(monkeypatch, agent, tmp_path):
     from app import parent_convai_endpoint
 
     monkeypatch.setattr(parent_convai_endpoint, "get_agent", lambda user_id: agent)
+    from app.duckdb_storage import DuckDBStorage
+    storage = DuckDBStorage(tmp_path / "voice-repair.duckdb")
+    monkeypatch.setattr(parent_convai_endpoint, "_storage", lambda: storage)
 
     async def run():
         chunks = []
@@ -214,19 +217,22 @@ def _collect_stream(monkeypatch, agent):
             chunks.append(chunk)
         return "".join(chunks)
 
-    return asyncio.run(run())
+    try:
+        return asyncio.run(run())
+    finally:
+        storage._con.close()
 
 
-def test_parent_voice_retries_once_after_dangling_tool_400(monkeypatch):
+def test_parent_voice_retries_once_after_dangling_tool_400(monkeypatch, tmp_path):
     agent = _FlakyAgent(fail_times=1)
-    out = _collect_stream(monkeypatch, agent)
+    out = _collect_stream(monkeypatch, agent, tmp_path)
     assert "All better now." in out
     assert "snag" not in out
     assert agent.stream_calls == 2
 
 
-def test_parent_voice_falls_back_when_retry_also_fails(monkeypatch):
+def test_parent_voice_falls_back_when_retry_also_fails(monkeypatch, tmp_path):
     agent = _FlakyAgent(fail_times=99)
-    out = _collect_stream(monkeypatch, agent)
+    out = _collect_stream(monkeypatch, agent, tmp_path)
     assert "I hit a snag on my end" in out
     assert agent.stream_calls == 2  # exactly one retry, never a loop

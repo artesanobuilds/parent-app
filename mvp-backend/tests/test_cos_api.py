@@ -48,6 +48,10 @@ async def _fake_astream_events(*args, **kwargs):
 
 
 class _FakeAgent:
+    async def aget_state(self, config):
+        from types import SimpleNamespace
+        return SimpleNamespace(values={"messages": []})
+
     def astream_events(self, *args, **kwargs):
         return _fake_astream_events(*args, **kwargs)
 

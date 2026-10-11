@@ -213,7 +213,9 @@ def test_surface_streams_only_with_thread_repair(rel):
     assert "astream_events" in calls, (
         f"{rel} no longer streams an agent — drop it from _AGENT_SURFACES"
     )
-    assert "repair_thread" in calls, (
+    # Durable adapters reconcile known effects before invoking the same repair
+    # through repair_with_receipts. The HTTP fault tests pin that ordering.
+    assert "repair_thread" in calls or "repair_with_receipts" in calls, (
         f"{rel} streams the merged parent agent without app/thread_repair's "
         "pre-flight self-heal. A cancelled tool call would poison that thread "
         "forever (memory `debugging_voice_thread_poisoning`)."

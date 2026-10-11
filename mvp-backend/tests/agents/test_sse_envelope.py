@@ -39,6 +39,10 @@ async def _fake_astream_events(*args, **kwargs):
 
 
 class _FakeAgent:
+    async def aget_state(self, config):
+        from types import SimpleNamespace
+        return SimpleNamespace(values={"messages": []})
+
     def astream_events(self, *args, **kwargs):
         return _fake_astream_events(*args, **kwargs)
 
@@ -60,6 +64,12 @@ def test_generate_stream_envelope(monkeypatch, tmp_path):
     monkeypatch.setenv("MVP_DUCKDB_PATH", str(tmp_path / "test.duckdb"))
     server = pytest.importorskip("app.server")
 
+    from app.duckdb_storage import DuckDBStorage
+    storage = DuckDBStorage(tmp_path / "sse.duckdb")
+    monkeypatch.setattr(server, "storage_backend", storage)
+    from types import SimpleNamespace
+    monkeypatch.setattr(server, "coach_threads", SimpleNamespace(
+        active_conversation_id=lambda _: None, touch=lambda *args: None))
     monkeypatch.setattr(server, "get_agent", lambda user_id: _FakeAgent())
     monkeypatch.setattr(server, "persist_state", lambda user_id: None)
     monkeypatch.setattr(
