@@ -212,3 +212,46 @@ def test_disconnect_does_not_publish_assistant_history(rig, monkeypatch, surface
     asyncio.run(run())
     assert [row['role'] for row in history(rig, surface)] == ['user']
     assert rig.storage._con.execute('SELECT outcome FROM agent_runs').fetchone()[0] == 'interrupted'
+
+
+def test_shared_voice_family_fence_withholds_success_for_connected_consumer(rig, monkeypatch):
+    """Family cancellation ends the service iterator without a Completed event."""
+    import asyncio
+    from app.agent_runtime.service import execution_service
+
+    class SlowGraph:
+        async def aget_state(self, config):
+            return SimpleNamespace(values={'messages': []})
+
+        async def astream_events(self, *args, **kwargs):
+            yield {'event': 'on_chat_model_stream', 'data': {'chunk': SimpleNamespace(content='First')}}
+            await released.wait()
+            yield {'event': 'on_chat_model_stream', 'data': {'chunk': SimpleNamespace(content=' Last')}}
+
+    install(monkeypatch, rig, SlowGraph(), shared=True)
+
+    async def run():
+        nonlocal released
+        released = asyncio.Event()
+        stream = rig.voice._stream_response('alice', 'phone', 'hi')
+        first = await anext(stream)
+        assert 'First' in first
+        canceling = asyncio.create_task(execution_service.cancel_family('alice'))
+        try:
+            await asyncio.sleep(0.01)
+            assert not canceling.done(), 'family cancellation joins outstanding graph work'
+            released.set()
+            await canceling
+            return first + ''.join([event async for event in stream])
+        finally:
+            released.set()
+            await canceling
+            execution_service.release_family('alice')
+            await stream.aclose()
+
+    released = None
+    response = asyncio.run(run())
+    assert '[DONE]' not in response
+    assert 'snag on my end' in response
+    assert [row['role'] for row in history(rig, 'parent_voice')] == ['user']
+    assert rig.storage._con.execute('SELECT outcome FROM agent_runs').fetchone()[0] == 'interrupted'

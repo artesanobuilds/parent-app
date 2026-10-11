@@ -319,6 +319,7 @@ async def _stream_response_impl(user_id: str, thread_id: str, message: str,
             stripper = _LinkStripper()
             yielded = False
             tool_started = False
+            completed = False
             try:
                 # version="v2" is the cheaper event API — v1 builds a much heavier
                 # event payload per token, pure overhead on a voice hot path where
@@ -326,6 +327,8 @@ async def _stream_response_impl(user_id: str, thread_id: str, message: str,
                 from contextlib import aclosing
                 async with aclosing(graph_events()) as events:
                     async for event in events:
+                        if event.kind == "completed":
+                            completed = True
                         if event.kind == "tool_start":
                             tool_started = True
                         if event.kind != "token":
@@ -349,6 +352,12 @@ async def _stream_response_impl(user_id: str, thread_id: str, message: str,
                             _mark_yield(content=False)
                             yield _show_content_tool_delta(cid, chat_id)
 
+                # Family cancellation can exhaust the owned iterator while its
+                # consumer stays connected. Only Completed proves that the
+                # assistant transcript and run scope finished successfully.
+                if shared and not completed:
+                    from app.agent_runtime.service import RunInterrupted
+                    raise RunInterrupted("Voice turn ended before durable completion")
                 tail = stripper.flush()
                 if tail:
                     _mark_yield()
