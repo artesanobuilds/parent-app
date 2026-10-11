@@ -120,3 +120,14 @@ locks that.
     - `8ee35ebdcc23b41758cdc5c3542ee5f1 articles.parquet`
     - `99e73584ea36c5ecbba6ea4264fb8da3 categories.parquet`
 
+
+## 2026-10-11T15:44:32Z
+
+- **Reason:** PR #1 deployment, merged revision 68df0ce; documentation and contract tests only, no migrations; narrow content rollback baseline
+- **Remote:** `https://mvp-backend-production-8678.up.railway.app`
+- **Location:** `/Users/miguelalvarado/Desktop/mvp-prod-snapshot-2026-10-11`
+- **Captured:** articles.parquet categories.parquet
+- **md5:**
+    - `8ee35ebdcc23b41758cdc5c3542ee5f1 articles.parquet`
+    - `99e73584ea36c5ecbba6ea4264fb8da3 categories.parquet`
+
