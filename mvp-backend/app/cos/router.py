@@ -11,6 +11,9 @@ terminated by ``data: [DONE]``) so existing clients can reuse their parser.
 """
 from __future__ import annotations
 
+from app.agent_runtime.adapters.text import encode as encode_run_event
+from app.agent_runtime.events import RunEvent
+
 import json
 import logging
 from typing import Any, Dict, List, Optional
@@ -104,11 +107,11 @@ async def _cos_chat_stream(user_id: str, thread_id: str, message: str):
                     content = event["data"]["chunk"].content
                     if content:
                         assistant_buffer += content
-                        yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+                        yield encode_run_event(RunEvent("token", content=content))
                 elif kind == "on_tool_start":
-                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': event['name']})}\n\n"
+                    yield encode_run_event(RunEvent("tool_start", tool=event["name"]))
                 elif kind == "on_tool_end":
-                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name']})}\n\n"
+                    yield encode_run_event(RunEvent("tool_end", tool=event["name"]))
 
             yield "data: [DONE]\n\n"
             if assistant_buffer:

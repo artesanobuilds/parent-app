@@ -1,3 +1,5 @@
+from app.agent_runtime.adapters.text import encode as encode_run_event
+from app.agent_runtime.events import RunEvent
 import json
 import logging
 import os
@@ -76,6 +78,9 @@ coach_threads = CoachThreadStore(storage=storage_backend, memory=chat_memory)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.agent_runtime.dependencies import RuntimeDependencies, bind
+    bind(RuntimeDependencies(storage_backend, profiling_service, chat_memory,
+                             onboarding_memory, coach_threads))
     load_persisted_state()
     # Activity-research background worker. Sweep any run a prior restart left
     # 'running' back to 'queued' (re-runs are idempotent), then start the daemon.
@@ -511,17 +516,17 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
                     if content:
                         # Format as SSE data
                         assistant_buffer += content
-                        yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+                        yield encode_run_event(RunEvent("token", content=content))
 
                 elif kind == "on_tool_start":
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(f"[chat] tool_start name={event.get('name')} input={event.get('data', {}).get('input')}")
-                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': event['name']})}\n\n"
+                    yield encode_run_event(RunEvent("tool_start", tool=event["name"]))
 
                 elif kind == "on_tool_end":
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(f"[chat] tool_end name={event.get('name')} output={event.get('data', {}).get('output')}")
-                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name']})}\n\n"
+                    yield encode_run_event(RunEvent("tool_end", tool=event["name"]))
 
             yield "data: [DONE]\n\n"
             if assistant_buffer:
@@ -571,15 +576,15 @@ async def generate_onboarding_stream(message: str, thread_id: str, user_id: str)
                 content = event["data"]["chunk"].content
                 if content:
                     assistant_buffer += content
-                    yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+                    yield encode_run_event(RunEvent("token", content=content))
             elif kind == "on_tool_start":
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(f"[onboarding] tool_start name={event.get('name')} input={event.get('data', {}).get('input')}")
-                yield f"data: {json.dumps({'type': 'tool_start', 'tool': event['name']})}\n\n"
+                yield encode_run_event(RunEvent("tool_start", tool=event["name"]))
             elif kind == "on_tool_end":
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(f"[onboarding] tool_end name={event.get('name')} output={event.get('data', {}).get('output')}")
-                yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name']})}\n\n"
+                yield encode_run_event(RunEvent("tool_end", tool=event["name"]))
 
         yield "data: [DONE]\n\n"
         if assistant_buffer:
@@ -2021,9 +2026,9 @@ async def generate_kid_stream(
                     yield f"data: {json.dumps({'type': 'blocked', 'content': (sm.block_reason.category if sm.block_reason else 'unknown')})}\n\n"
                     break
             elif kind == "on_tool_start":
-                yield f"data: {json.dumps({'type': 'tool_start', 'tool': event['name']})}\n\n"
+                yield encode_run_event(RunEvent("tool_start", tool=event["name"]))
             elif kind == "on_tool_end":
-                yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name']})}\n\n"
+                yield encode_run_event(RunEvent("tool_end", tool=event["name"]))
 
         # End-of-stream flush. finalize() may flag late (under-threshold or
         # whole-output recheck) — handle that BEFORE [DONE].
