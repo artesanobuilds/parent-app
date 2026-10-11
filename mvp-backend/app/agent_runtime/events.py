@@ -15,5 +15,5 @@ def normalize(event: Mapping[str, Any]) -> RunEvent | None:
         if isinstance(content, str) and content:
             return RunEvent("token", content=content)
     if kind in ("on_tool_start", "on_tool_end"):
-        return RunEvent("tool_start" if kind == "on_tool_start" else "tool_end", tool=event["name"])
+        return RunEvent("tool_start" if kind == "on_tool_start" else "tool_end", tool=event.get("name", ""))
     return None
