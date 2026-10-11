@@ -31,8 +31,11 @@ class ScriptedAgent:
                 yield {"event": "on_chat_model_stream", "data": {"chunk": SimpleNamespace(content=item)}}
 
 
-@pytest.fixture
-def harness(monkeypatch, tmp_path):
+@pytest.fixture(params=["legacy", "shared"])
+def harness(request, monkeypatch, tmp_path):
+    for surface in ("CHAT", "COS", "PARENT_VOICE", "ONBOARDING", "KID_TEXT", "KID_VOICE"):
+        monkeypatch.setenv("MVP_SHARED_RUNTIME_" + surface, "1" if request.param == "shared" else "0")
+    monkeypatch.setenv("MVP_COS_ACTIVE_CONVERSATION", "0")
     from fastapi.testclient import TestClient
     from app import server
     from app import profiling

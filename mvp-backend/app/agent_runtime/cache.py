@@ -44,6 +44,12 @@ class AgentCache(MutableMapping):
         with self._lock:
             return len(self._items)
 
+    def pop(self, key, *default):
+        # MutableMapping.pop otherwise separates read/delete lock acquisitions.
+        # Eviction or invalidation can run between them on another thread.
+        with self._lock:
+            return self._items.pop(key, *default)
+
     def clear(self):
         with self._lock:
             self._items.clear()
