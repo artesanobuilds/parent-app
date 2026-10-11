@@ -34,6 +34,12 @@ fakes that do zero LLM/network work.
 from __future__ import annotations
 
 import asyncio
+import copy
+from dataclasses import replace
+import time
+
+from app.jobs.context import JobContext, JobStopped, StepStorage
+from app.jobs.runner import JobReaper
 import json
 import logging
 import os
@@ -145,7 +151,7 @@ def _step_timeout() -> float:
 # ── step 1: the family profile ───────────────────────────────────────
 
 def step_family(storage: Any, user_id: str, ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """Read back what /profile/seed wrote and flush it to durable storage.
+    """Read back what /profile/seed durably wrote.
 
     Deliberately does NOT re-do the seed: `/profile/seed` plus its durable
     client-side retry remains the one write path for onboarding answers. This
@@ -158,12 +164,9 @@ def step_family(storage: Any, user_id: str, ctx: Dict[str, Any]) -> Dict[str, An
     parent = family.get("parent") or {}
     children = family.get("children") or {}
 
-    try:
-        from app.server import persist_state
-        persist_state(user_id)
-    except Exception:  # noqa: BLE001 — a snapshot flush must never fail the beat
-        logger.exception("[warmup] persist_state failed for %s", user_id)
-
+    # The seed endpoint owns profile persistence. Warmup only reads it: a
+    # delayed cache snapshot here could overwrite a newer profile or recreate a
+    # deleted family, bypassing the step's storage fence.
     ctx["family"] = family
     return {
         "profile_present": bool(parent.get("name") or children),
@@ -254,6 +257,11 @@ def step_coach(storage: Any, user_id: str, ctx: Dict[str, Any]) -> Dict[str, Any
 
     from app.agent import llm
 
+    job = ctx.get("job_context")
+    if job:
+        job.check()
+        from app.jobs.middleware import bounded_model
+        llm = bounded_model(llm, job.remaining(ctx["step_budget"]))
     draft = llm.with_structured_output(_NudgeDraft).invoke([
         {"role": "system", "content": _NUDGE_SYSTEM},
         {"role": "user", "content": "Family profile:\n" + _family_context_text(family)},
@@ -467,6 +475,7 @@ class OnboardingWarmupWorker:
         step_timeout: Optional[float] = None,
     ) -> None:
         self._storage = storage
+        self._reaper = JobReaper(storage, "warmup")
         self._steps = dict(step_funcs) if step_funcs is not None else dict(STEP_FUNCS)
         self._poll = poll_interval
         self._concurrency = concurrency if concurrency is not None else _default_concurrency()
@@ -474,9 +483,9 @@ class OnboardingWarmupWorker:
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._threads: List[threading.Thread] = []
-        # One shared pool for the timeout wrapper. A step that blows its budget
-        # keeps running here as a daemon orphan — we stop WAITING on it, which
-        # is the whole point: the parent is never held behind it.
+        # Bound both executing and queued steps. Timed-out synchronous work
+        # retains its slot until it actually returns; no accumulating backlog.
+        self._slots = threading.BoundedSemaphore(max(2, self._concurrency * 2))
         self._pool = ThreadPoolExecutor(
             max_workers=max(2, self._concurrency * 2),
             thread_name_prefix="warmup-step",
@@ -487,6 +496,7 @@ class OnboardingWarmupWorker:
         if any(t.is_alive() for t in self._threads):
             return
         self._stop.clear()
+        self._reaper.start()
         self._threads = []
         for i in range(self._concurrency):
             t = threading.Thread(target=self._loop, name=f"warmup-worker-{i}", daemon=True)
@@ -500,6 +510,7 @@ class OnboardingWarmupWorker:
 
     def stop(self, timeout: float = 3.0) -> None:
         self._stop.set()
+        self._reaper.stop()
         self._wake.set()
         for t in self._threads:
             t.join(timeout)
@@ -517,7 +528,7 @@ class OnboardingWarmupWorker:
         worked = False
         while not self._stop.is_set():
             try:
-                run = self._storage.claim_next_queued_warmup_run()
+                run = self._storage.claim_next_queued_warmup_run(max(1, self._step_timeout * len(STEP_KEYS) + 5))
             except Exception:
                 logger.exception("[warmup] claim_next_queued_warmup_run failed")
                 break
@@ -538,12 +549,12 @@ class OnboardingWarmupWorker:
         run_id = run["id"]
         user_id = run["user_id"]
         steps = run.get("steps") or initial_steps()
+        job = JobContext.from_run(self._storage, "warmup", run, self._stop)
         ctx: Dict[str, Any] = {"run_id": run_id, "result": dict(run.get("result") or {})}
 
         try:
             for step in steps:
-                if self._stop.is_set():
-                    break
+                job.check()
                 # Idempotent re-run after a restart: don't redo finished beats.
                 if step.get("state") in _TERMINAL_STEP_STATES:
                     continue
@@ -552,15 +563,15 @@ class OnboardingWarmupWorker:
                 if fn is None:
                     step["state"] = SKIPPED
                     step["detail"] = {"reason": "no implementation registered"}
-                    self._persist(run_id, steps)
+                    self._persist(job, steps)
                     continue
 
                 step["state"] = RUNNING
                 step["error"] = None
-                self._persist(run_id, steps)
+                self._persist(job, steps)
 
                 try:
-                    detail = self._run_step(fn, user_id, ctx) or {}
+                    detail = self._run_step(fn, user_id, ctx, job) or {}
                     step["state"] = SKIPPED if detail.get("skipped") else DONE
                     step["detail"] = detail
                 except FuturesTimeout:
@@ -571,18 +582,19 @@ class OnboardingWarmupWorker:
                     step["state"] = FAILED
                     step["error"] = str(exc)[:500]
                     logger.exception("[warmup] run %s step %s failed", run_id, key)
-                self._persist(run_id, steps)
+                self._persist(job, steps)
         except Exception:  # noqa: BLE001 — belt and braces around the loop itself
             logger.exception("[warmup] run %s loop failed", run_id)
 
+        self._storage.reap_expired_job_attempts("warmup")
         failed = [s["key"] for s in steps if s.get("state") == FAILED]
         result = dict(ctx.get("result") or {})
         result["failed_steps"] = failed
         # `done` even with failed steps: the ONBOARDING is complete either way —
         # a degraded Home is the failure mode we accept, a blocked parent is not.
         # Conditional finalize so a cancel mid-flight stays terminal.
-        if self._storage.finalize_warmup_run_if_running(
-            run_id, status="done", steps=steps, result=result,
+        if self._storage.finalize_job_attempt(
+            job, status="done", steps=steps, result=result,
             error=("; ".join(failed) or None),
         ):
             logger.info(
@@ -592,16 +604,37 @@ class OnboardingWarmupWorker:
         else:
             logger.info("[warmup] run %s left 'running' mid-flight (cancelled?)", run_id)
 
-    def _run_step(self, fn: StepFn, user_id: str, ctx: Dict[str, Any]) -> Dict[str, Any]:
-        """Call one step with a hard wall-clock budget."""
-        future = self._pool.submit(fn, self._storage, user_id, ctx)
-        return future.result(timeout=self._step_timeout)
-
-    def _persist(self, run_id: str, steps: List[Dict[str, Any]]) -> None:
+    def _run_step(self, fn: StepFn, user_id: str, ctx: Dict[str, Any], job: JobContext) -> Dict[str, Any]:
+        """Bound waiting and fence late writes; running threads are not killed."""
+        budget = job.remaining(self._step_timeout)
+        if not self._slots.acquire(blocking=False):
+            raise RuntimeError("warmup step capacity exhausted")
+        canceled = threading.Event()
+        step_ctx = copy.deepcopy(ctx)
+        step_ctx.update(job_context=replace(job, deadline=min(job.deadline, time.monotonic() + budget)), step_budget=budget)
+        storage = StepStorage(self._storage, job, time.monotonic() + budget, canceled)
         try:
-            self._storage.update_warmup_run(run_id, steps=steps)
-        except Exception:  # noqa: BLE001 — progress writes are cosmetic
-            logger.exception("[warmup] progress write failed for run %s", run_id)
+            future = self._pool.submit(fn, storage, user_id, step_ctx)
+        except BaseException:
+            self._slots.release()
+            raise
+        future.add_done_callback(lambda _: self._slots.release())
+        try:
+            result = future.result(timeout=budget)
+            job.check()
+            step_ctx.pop("job_context", None)
+            step_ctx.pop("step_budget", None)
+            ctx.clear()
+            ctx.update(step_ctx)
+            return result
+        finally:
+            # Retire this step even on exceptions. Its storage handle cannot be
+            # reused by work continuing after the caller stops waiting.
+            canceled.set()
+            future.cancel()
+
+    def _persist(self, job: JobContext, steps: List[Dict[str, Any]]) -> None:
+        self._storage.update_job_progress(job, steps=steps)
 
 
 # ── module singleton, wired up by the server lifespan ────────────────

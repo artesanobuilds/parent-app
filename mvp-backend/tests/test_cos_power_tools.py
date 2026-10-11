@@ -56,6 +56,13 @@ class FakeStorage:
 def _tool(name, user_id=USER):
     for t in cos_tools.build_cos_tools(user_id):
         if t.name == name:
+            # These are business-logic unit tests with FakeStorage. Exercise
+            # that body directly; test_durable_agent_commands runs the actual
+            # decorated ToolNode against DuckDB (receipts + ownership + replay).
+            fn = getattr(t.func, "__wrapped__", None)
+            if fn is not None:
+                from types import SimpleNamespace
+                return SimpleNamespace(invoke=lambda args: fn(**args))
             return t
     raise AssertionError(f"tool {name} not built")
 

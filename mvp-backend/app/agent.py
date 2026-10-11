@@ -30,6 +30,8 @@ Three things that are easy to get wrong here:
    if a surface streams this agent without repairing first.
 """
 import json
+from app.agent_runtime.cache import AgentCache
+
 import logging
 import os
 from pathlib import Path
@@ -50,6 +52,8 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from app.profiling import profiling_service
+from app.services.profiles import ParentUpdate, ChildUpdate, update_parent, update_child
+from app.services.operations import durable_tool
 from app.content import content_catalog_for_prompt
 from app.checkpointing import checkpointer
 from app.cos.prompt import COS_ROLE_SECTIONS
@@ -322,65 +326,8 @@ def _build_system_prompt(
     return "\n\n".join(parts)
 
 
-class ParentUpdate(BaseModel):
-    name: Optional[str] = None
-    pronouns: Optional[str] = None
-    postal_code: Optional[str] = None
-    country: Optional[str] = None
-    primary_language: Optional[str] = None
-    parent_age_range: Optional[str] = None
-    adults_in_household: Optional[int] = None
-    household_structure: Optional[str] = None
-    employment: Optional[str] = None
-    work_hours: Optional[str] = None
-    energy_pattern: Optional[str] = None
-    default_stress_response: Optional[str] = None
-    dreaded_moment: Optional[str] = None
-    support_system: Optional[str] = None
-    support_boundaries: Optional[str] = None
-    cultural_background: Optional[str] = None
-    parenting_style: Optional[str] = None
-    stressors: Optional[List[str]] = None
-    goals: Optional[List[str]] = None
-    coping_strategies: Optional[List[str]] = None
-    deescalation_works: Optional[List[str]] = None
-    deescalation_backfires: Optional[List[str]] = None
-    mental_health_notes: Optional[str] = None
-    co_parenting: Optional[str] = None
-    guidance_style: Optional[str] = None
-
-
-class ChildUpdate(BaseModel):
-    child_name: str
-    pronouns: Optional[str] = None
-    age: Optional[float] = None
-    grade_band: Optional[str] = None
-    temperament: Optional[str] = None
-    interests: Optional[List[str]] = None
-    strengths: Optional[List[str]] = None
-    academic_strengths: Optional[List[str]] = None
-    challenges: Optional[List[str]] = None
-    emotion_regulation: Optional[str] = None
-    social_profile: Optional[str] = None
-    learning_profile: Optional[str] = None
-    neurodiversity: Optional[str] = None
-    sensory_notes: Optional[str] = None
-    sleep_routine: Optional[str] = None
-    health_notes: Optional[str] = None
-    triggers: Optional[List[str]] = None
-    escalation_pattern: Optional[str] = None
-    calming_strategies: Optional[List[str]] = None
-    recent_changes: Optional[List[str]] = None
-    school_context: Optional[str] = None
-    teacher_notes: Optional[str] = None
-    sibling_conflicts: Optional[List[str]] = None
-    repair_helpers: Optional[List[str]] = None
-    motivators: Optional[List[str]] = None
-    safety_flags: Optional[str] = None
-
-
 def _make_parent_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def LearnedAboutParent(parent_updates: ParentUpdate) -> str:
         """
         Silently save new details about the parent gleaned from the conversation.
@@ -391,14 +338,14 @@ def _make_parent_tool(user_id: str):
         payload = parent_updates.model_dump(exclude_none=True)
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"[coaching_tool] LearnedAboutParent user_id={user_id} updates={payload}")
-        updated = profiling_service.update_parent_profile(user_id, payload)
-        return f"Parent profile updated: {updated}"
+        updated = update_parent(user_id, payload)
+        return "Parent profile updated."
 
     return LearnedAboutParent
 
 
 def _make_child_tool(user_id: str):
-    @tool
+    @durable_tool(user_id)
     def LearnedAboutChild(update: ChildUpdate) -> str:
         """
         Silently save new details about a child gleaned from the conversation.
@@ -410,8 +357,8 @@ def _make_child_tool(user_id: str):
         child_name = payload.pop("child_name")
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"[coaching_tool] LearnedAboutChild user_id={user_id} child_name={child_name} updates={payload}")
-        updated = profiling_service.update_child_profile(user_id, child_name, payload)
-        return f"Child profile updated: {updated}"
+        updated = update_child(user_id, child_name, payload)
+        return "Child profile updated."
 
     return LearnedAboutChild
 
@@ -434,7 +381,7 @@ def build_parent_tools(user_id: str) -> list:
     ]
 
 
-_agent_cache: Dict[str, Dict[str, Any]] = {}
+_agent_cache = AgentCache()
 
 def _saved_signal_context(user_name: str) -> str:
     """Revealed preference: what this parent actually SAVES (vs the goals they

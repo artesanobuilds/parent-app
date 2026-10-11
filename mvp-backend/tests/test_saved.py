@@ -38,9 +38,9 @@ def test_saved_lifecycle():
     from fastapi.testclient import TestClient
     import app.server as server
 
+    _reconnect_shared_storage(server)
     try:
         with TestClient(server.app) as client:
-            _reconnect_shared_storage(server)
             storage = server.storage_backend
             storage.create_article({
                 "id": "art-save-1", "category": "cat-sleep", "title": "Bedtime Wars",

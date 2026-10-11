@@ -70,6 +70,8 @@ class _ThreadSafeConn:
     def __init__(self, con: "duckdb.DuckDBPyConnection"):
         self._con = con
         self._lock = threading.RLock()
+        self._transaction_depth = 0
+        self._rollback_only = False
 
     def execute(self, sql: str, params: Optional[list] = None) -> _BufferedResult:
         with self._lock:
@@ -91,13 +93,24 @@ class _ThreadSafeConn:
         execute() calls re-acquire it fine. Rolls back on any exception.
         """
         with self._lock:
-            self._con.execute("BEGIN TRANSACTION")
+            outer = self._transaction_depth == 0
+            if outer:
+                self._con.execute("BEGIN TRANSACTION")
+                self._rollback_only = False
+            self._transaction_depth += 1
             try:
                 yield self
-                self._con.execute("COMMIT")
-            except Exception:
-                self._con.execute("ROLLBACK")
+                if outer:
+                    if self._rollback_only:
+                        raise RuntimeError("Nested transaction failed; refusing partial commit")
+                    self._con.execute("COMMIT")
+            except BaseException:
+                self._rollback_only = True
+                if outer:
+                    self._con.execute("ROLLBACK")
                 raise
+            finally:
+                self._transaction_depth -= 1
 
     def close(self) -> None:
         with self._lock:
@@ -114,6 +127,8 @@ logger = logging.getLogger(__name__)
 # identity subset and legal_acceptances. One shared list means the two
 # cascades cannot drift when a new user-keyed table is added — add it HERE.
 FAMILY_CASCADE_TABLES: List[str] = [
+    "agent_operation_receipts",
+    "agent_runs",
     "kid_agent_crisis_locks",
     "kid_agent_configs",
     "kid_credentials",
@@ -1091,6 +1106,9 @@ class DuckDBStorage(StorageBackend):
     # snapshot filename. Used for both export (A2/A3) and bootstrap-merge (A2).
     # auth_tokens is safe to export — only sha256 hashes are stored at rest.
     BOOTSTRAP_TABLES = [
+        ("agent_family_fences", "agent_family_fences.parquet"),
+        ("agent_runs", "agent_runs.parquet"),
+        ("agent_operation_receipts", "agent_operation_receipts.parquet"),
         ("user_data", "mvp.parquet"),
         ("categories", "categories.parquet"),
         ("articles", "articles.parquet"),
@@ -1275,6 +1293,27 @@ class DuckDBStorage(StorageBackend):
                 # restart is "the last committed state").
                 logger.warning(f"[duckdb] bootstrap of {table} from {pq_name} skipped: {exc}")
 
+        # A partial export can refresh a parent snapshot while leaving its
+        # old child snapshot. Clean only the known required joins, after every
+        # table has loaded, so those orphan records cannot resurrect.
+        self._remove_orphaned_family_children()
+
+        # A crash after the deletion commit but before snapshot export leaves
+        # old parquet rows. The durable tombstone wins over those snapshots.
+        for recovered_user, permanently_deleted, snapshot_pending in self._con.execute(
+            "SELECT user_id, deleted, snapshot_purge_pending FROM agent_family_fences "
+            "WHERE deleted = TRUE OR snapshot_purge_pending = TRUE"
+        ).fetchall():
+            swept_tables = FAMILY_CASCADE_TABLES if permanently_deleted else [
+                table for table in FAMILY_CASCADE_TABLES if table not in FAMILY_RESET_SKIP_TABLES
+            ]
+            has_rows = any(self._con.execute(
+                f"SELECT 1 FROM {table} WHERE user_id = ? LIMIT 1", [recovered_user]
+            ).fetchone() for table in swept_tables)
+            if snapshot_pending or has_rows:
+                cascade = self.delete_family if permanently_deleted else self.reset_family
+                cascade(user_id=recovered_user, actor="snapshot-recovery")
+
         # Seed legal documents from repo markdown AFTER the bootstrap merge, so
         # a slug that already has a published row (restored from parquet, or
         # CMS-published) is never re-seeded — otherwise a redeploy would
@@ -1319,21 +1358,115 @@ class DuckDBStorage(StorageBackend):
 
     # ── StorageBackend interface ──────────────────────────────────────
 
+    def assert_family_writable(self, user_id: str, generation: int | None = None) -> int:
+        """Called while holding the transaction lock, before any harness write."""
+        row = self._con.execute(
+            "SELECT generation, deleted, checkpoint_purge_pending, snapshot_purge_pending FROM agent_family_fences WHERE user_id = ?", [user_id]
+        ).fetchone()
+        current = row[0] if row else 0
+        if (row and (row[1] or row[2] or row[3])) or (generation is not None and generation != current):
+            raise PermissionError("Family was deleted, reset, or is awaiting durable cleanup")
+        return current
+
+    _FAMILY_CHILD_JOINS = (
+        ("kid_messages", "agent_id", "kid_agent_configs"),
+        ("window_notifications", "window_id", "registration_windows"),
+        ("circle_messages", "conversation_id", "circle_conversations"),
+        ("circle_participants", "conversation_id", "circle_conversations"),
+    )
+
+    def _remove_orphaned_family_children(self) -> None:
+        with self._con.transaction():
+            for child, foreign_key, parent in self._FAMILY_CHILD_JOINS:
+                self._con.execute(
+                    f"DELETE FROM {child} WHERE {foreign_key} NOT IN (SELECT id FROM {parent})"
+                )
+
+    def pending_family_cleanups(self) -> List[Dict[str, Any]]:
+        return [dict(user_id=row[0], generation=row[1]) for row in self._con.execute(
+            "SELECT user_id, generation FROM agent_family_fences "
+            "WHERE checkpoint_purge_pending = TRUE OR snapshot_purge_pending = TRUE"
+        ).fetchall()]
+
+    def refresh_family_snapshots(self, user_id: str) -> None:
+        """Keep reset/deletion fenced until all snapshots are readable and clean.
+
+        Ordinary shutdown export is best-effort. A deletion obligation is not:
+        failure must survive restart and prevent stale parquet resurrection.
+        """
+        with self._con._lock:
+            fence = self._con.execute(
+                "SELECT generation, deleted, snapshot_purge_pending FROM agent_family_fences WHERE user_id=?",
+                [user_id],
+            ).fetchone()
+            if not fence or not fence[2]:
+                return
+            self.export_all_parquet(strict=True)
+            absent_tables = set(FAMILY_CASCADE_TABLES)
+            if not fence[1]:
+                absent_tables -= FAMILY_RESET_SKIP_TABLES
+            for table, filename in self.BOOTSTRAP_TABLES:
+                path = str(self.parquet_dir / filename)
+                # Re-open every exported file, including the joined/circle
+                # tables. For user-keyed swept tables also verify absence.
+                self._con.execute("SELECT count(*) FROM read_parquet(?)", [path]).fetchone()
+                if table in absent_tables and self._con.execute(
+                    "SELECT count(*) FROM read_parquet(?) WHERE user_id=?", [path, user_id]
+                ).fetchone()[0]:
+                    raise RuntimeError("Snapshot still contains removed family rows")
+            files = dict(self.BOOTSTRAP_TABLES)
+            for child, foreign_key, parent in self._FAMILY_CHILD_JOINS:
+                if self._con.execute(
+                    f"SELECT count(*) FROM read_parquet(?) WHERE {foreign_key} "
+                    "NOT IN (SELECT id FROM read_parquet(?))",
+                    [str(self.parquet_dir / files[child]), str(self.parquet_dir / files[parent])],
+                ).fetchone()[0]:
+                    raise RuntimeError("Snapshot contains orphaned family child rows")
+            with self._con.transaction():
+                self._con.execute(
+                    "UPDATE agent_family_fences SET snapshot_purge_pending=FALSE "
+                    "WHERE user_id=? AND generation=?", [user_id, fence[0]],
+                )
+                # Publish the cleared obligation only after clean data files.
+                # Failure rolls back the flag; new family writes stay blocked.
+                self._export_table_atomic("agent_family_fences", self.parquet_dir / "agent_family_fences.parquet")
+
+    def pending_checkpoint_purges(self) -> List[Dict[str, Any]]:
+        return [dict(user_id=row[0], generation=row[1]) for row in self._con.execute(
+            "SELECT user_id, generation FROM agent_family_fences "
+            "WHERE checkpoint_purge_pending = TRUE"
+        ).fetchall()]
+
+    def mark_checkpoint_purged(self, user_id: str, generation: int | None = None) -> bool:
+        query = "UPDATE agent_family_fences SET checkpoint_purge_pending = FALSE WHERE user_id = ?"
+        params = [user_id]
+        if generation is not None:
+            query += " AND generation = ?"
+            params.append(generation)
+        return bool(self._con.execute(query + " RETURNING user_id", params).fetchone())
+
     def save_user_data(self, user_id: str, name: str, data: Dict[str, Any]) -> None:
         try:
             payload = json.dumps(data, ensure_ascii=False)
-            self._con.execute(
-                """
-                INSERT INTO user_data (user_id, name, data, updated_at)
-                VALUES (?, ?, ?, now())
-                ON CONFLICT (user_id, name)
-                DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at
-                """,
-                [user_id, name, payload],
-            )
+            with self._con.transaction():
+                from app.services.operations import current_run
+                run = current_run()
+                if run and run.user_id != user_id:
+                    raise PermissionError("Write tenant does not match authenticated run")
+                self.assert_family_writable(user_id, run.generation if run else None)
+                self._con.execute(
+                    """
+                    INSERT INTO user_data (user_id, name, data, updated_at)
+                    VALUES (?, ?, ?, now())
+                    ON CONFLICT (user_id, name)
+                    DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at
+                    """,
+                    [user_id, name, payload],
+                )
             logger.debug(f"[duckdb] saved {name} for user {user_id}")
         except Exception as exc:
             logger.error(f"[duckdb] failed to save {name} for user {user_id}: {exc}")
+            raise
 
     def load_user_data(self, user_id: str, name: str) -> Optional[Dict[str, Any]]:
         try:
@@ -2412,6 +2545,17 @@ class DuckDBStorage(StorageBackend):
         # auth_tokens still present). The proxy holds the connection lock for
         # the duration, so no other thread joins this transaction.
         with self._con.transaction():
+            if action == "family.reset" and self._con.execute(
+                "SELECT 1 FROM agent_family_fences WHERE user_id=? AND deleted=TRUE", [user_id]
+            ).fetchone():
+                raise PermissionError("A deleted family cannot be reset")
+            self._con.execute(
+                "INSERT INTO agent_family_fences (user_id, generation, deleted, checkpoint_purge_pending, snapshot_purge_pending) "
+                "VALUES (?, 1, ?, TRUE, TRUE) ON CONFLICT (user_id) DO UPDATE SET "
+                "generation = agent_family_fences.generation + 1, deleted = excluded.deleted, "
+                "checkpoint_purge_pending = TRUE, snapshot_purge_pending = TRUE, updated_at = now()",
+                [user_id, action == "family_deleted"],
+            )
             # kid_messages joins via agent_id, so collect agent_ids first and
             # snapshot the pre-delete row count before running DELETEs.
             agent_ids = [r[0] for r in self._con.execute(
@@ -3259,21 +3403,23 @@ class DuckDBStorage(StorageBackend):
         """Insert a queued run and return its run_id."""
         import uuid
         run_id = str(uuid.uuid4())
-        self._con.execute(
-            """
-            INSERT INTO research_runs (
-                id, user_id, status, location_json, kids_json, params_json,
-                progress_json, candidate_count, created_at
-            ) VALUES (?, ?, 'queued', ?, ?, ?, ?, 0, now())
-            """,
-            [
-                run_id, user_id,
-                json.dumps(location, ensure_ascii=False),
-                json.dumps(kids, ensure_ascii=False),
-                json.dumps(params or {}, ensure_ascii=False),
-                json.dumps({"phase": "queued"}, ensure_ascii=False),
-            ],
-        )
+        with self._con.transaction():
+            self.assert_family_writable(user_id)
+            self._con.execute(
+                """
+                INSERT INTO research_runs (
+                    id, user_id, status, location_json, kids_json, params_json,
+                    progress_json, candidate_count, created_at
+                ) VALUES (?, ?, 'queued', ?, ?, ?, ?, 0, now())
+                """,
+                [
+                    run_id, user_id,
+                    json.dumps(location, ensure_ascii=False),
+                    json.dumps(kids, ensure_ascii=False),
+                    json.dumps(params or {}, ensure_ascii=False),
+                    json.dumps({"phase": "queued"}, ensure_ascii=False),
+                ],
+            )
         return run_id
 
     def enqueue_research_run(
@@ -3291,6 +3437,7 @@ class DuckDBStorage(StorageBackend):
         create a run. Closes the check-then-create TOCTOU on POST /research/runs.
         Returns {run_id, status, deduped}."""
         with self._con.transaction():
+            self.assert_family_writable(user_id)
             active = self.get_active_research_run(user_id)
             if active is not None:
                 # A run still `queued` hasn't been claimed by a worker yet — so
@@ -3317,26 +3464,116 @@ class DuckDBStorage(StorageBackend):
             )
             return {"run_id": run_id, "status": "queued", "deduped": False}
 
-    def claim_next_queued_run(self) -> Optional[Dict[str, Any]]:
-        """Atomically pick the oldest queued run, flip it to running, and return
-        it. Single UPDATE...RETURNING so two workers can't claim the same row."""
-        row = self._con.execute(
-            """
-            UPDATE research_runs
-               SET status = 'running', started_at = now(),
-                   progress_json = json_object('phase', 'starting')
-             WHERE id = (
-                 SELECT id FROM research_runs
-                  WHERE status = 'queued'
-                  ORDER BY created_at
-                  LIMIT 1
-             )
-            RETURNING id
-            """,
-        ).fetchone()
-        if row is None:
-            return None
-        return self.get_research_run(row[0])
+    @staticmethod
+    def _job_table(kind):
+        return {"research": "research_runs", "warmup": "onboarding_warmup_runs"}[kind]
+
+    def _claim_job_attempt(self, kind, budget_seconds):
+        import uuid
+        from datetime import datetime, timedelta, timezone
+        token = str(uuid.uuid4())
+        deadline = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=budget_seconds)
+        table = self._job_table(kind)
+        self.reap_expired_job_attempts(kind)
+        with self._con.transaction():
+            row = self._con.execute(
+                f"UPDATE {table} SET status='running', started_at=now(), "
+                "attempt_token=?, deadline_at=COALESCE(deadline_at, ?), heartbeat_at=now() "
+                f"WHERE id=(SELECT id FROM {table} WHERE status='queued' "
+                "AND (deadline_at IS NULL OR deadline_at > now()) ORDER BY created_at LIMIT 1) "
+                "RETURNING id, deadline_at", [token, deadline],
+            ).fetchone()
+            if not row:
+                return None
+            if kind == "research":
+                self.update_research_run(row[0], progress={"phase": "starting"})
+            run = self.get_research_run(row[0]) if kind == "research" else self.get_warmup_run(row[0])
+            # Private claim metadata never enters the public row serializers.
+            run.update(_attempt_token=token, _deadline_at=row[1].isoformat())
+            return run
+
+    def job_attempt_active(self, kind, run_id, token):
+        return bool(self._con.execute(
+            f"SELECT 1 FROM {self._job_table(kind)} WHERE id=? AND attempt_token=? "
+            "AND status='running' AND deadline_at > now()", [run_id, token],
+        ).fetchone())
+
+    @contextmanager
+    def job_write_guard(self, context):
+        # A lock, not an outer transaction: domain methods own their transactions.
+        with self._con._lock:
+            context.check()
+            yield
+
+    def update_job_progress(self, context, **fields):
+        with self.job_write_guard(context):
+            if context.kind == "research":
+                self.update_research_run(context.run_id, **fields)
+            else:
+                self.update_warmup_run(context.run_id, **fields)
+            self._con.execute(
+                f"UPDATE {self._job_table(context.kind)} SET heartbeat_at=now() WHERE id=?",
+                [context.run_id],
+            )
+
+    def finalize_job_attempt(self, context, **fields):
+        from app.jobs.context import JobStopped
+        try:
+            with self.job_write_guard(context):
+                if context.kind == "research":
+                    return self.finalize_run_if_running(context.run_id, **fields)
+                return self.finalize_warmup_run_if_running(context.run_id, **fields)
+        except JobStopped:
+            return False
+
+    def publish_research_attempt(self, context, user_id, candidates, progress):
+        from app.jobs.context import JobStopped
+        try:
+            with self.job_write_guard(context):
+                # Validation, candidate replacement and terminal state share one
+                # transaction. Readers/cancel cannot see a partial publication.
+                with self._con.transaction():
+                    self._insert_activity_candidates(context.run_id, user_id, candidates)
+                    context.check()
+                    return self.finalize_run_if_running(
+                        context.run_id, status="done", candidate_count=len(candidates),
+                        progress=progress,
+                    )
+        except JobStopped:
+            return False
+
+    def reap_expired_job_attempts(self, kind):
+        table = self._job_table(kind)
+        with self._con.transaction():
+            rows = self._con.execute(
+                f"SELECT id FROM {table} WHERE status IN ('running','queued') "
+                "AND deadline_at <= now()",
+            ).fetchall()
+            for (run_id,) in rows:
+                if kind == "warmup":
+                    run = self.get_warmup_run(run_id)
+                    steps = run['steps']
+                    for step in steps:
+                        if step.get('state') not in ('done', 'failed', 'skipped'):
+                            step.update(state='failed', error='job deadline exceeded')
+                    failed = [step['key'] for step in steps if step.get('state') == 'failed']
+                    result = dict(run.get('result') or {}, failed_steps=failed)
+                    self.update_warmup_run(run_id, status='done', steps=steps, result=result,
+                                           error='job deadline exceeded', finished=True)
+                else:
+                    self.update_research_run(run_id, status='failed',
+                        error='job deadline exceeded', progress={'phase': 'failed'}, finished=True)
+            return len(rows)
+
+    def claim_next_queued_run(self, budget_seconds: float = 600) -> Optional[Dict[str, Any]]:
+        return self._claim_job_attempt("research", budget_seconds)
+
+    def cancel_research_run(self, run_id):
+        return bool(self._con.execute(
+            "UPDATE research_runs SET status='canceled', finished_at=now(), "
+            "progress_json=json_object('phase', 'canceled') "
+            "WHERE id=? AND status IN ('queued', 'running') RETURNING id", [run_id],
+        ).fetchone())
 
     def update_research_run(
         self,
@@ -3406,7 +3643,7 @@ class DuckDBStorage(StorageBackend):
         rows = self._con.execute(
             """
             UPDATE research_runs
-               SET status = 'queued', started_at = NULL,
+               SET status = 'queued', started_at = NULL, attempt_token = NULL,
                    progress_json = json_object('phase', 'requeued_after_restart')
              WHERE status = 'running'
             RETURNING id
@@ -3545,18 +3782,20 @@ class DuckDBStorage(StorageBackend):
         """Insert a queued warm-up run and return its run_id."""
         import uuid
         run_id = str(uuid.uuid4())
-        self._con.execute(
-            """
-            INSERT INTO onboarding_warmup_runs (
-                id, user_id, status, steps_json, context_json, created_at
-            ) VALUES (?, ?, 'queued', ?, ?, now())
-            """,
-            [
-                run_id, user_id,
-                json.dumps(steps, ensure_ascii=False),
-                json.dumps(context or {}, ensure_ascii=False),
-            ],
-        )
+        with self._con.transaction():
+            self.assert_family_writable(user_id)
+            self._con.execute(
+                """
+                INSERT INTO onboarding_warmup_runs (
+                    id, user_id, status, steps_json, context_json, created_at
+                ) VALUES (?, ?, 'queued', ?, ?, now())
+                """,
+                [
+                    run_id, user_id,
+                    json.dumps(steps, ensure_ascii=False),
+                    json.dumps(context or {}, ensure_ascii=False),
+                ],
+            )
         return run_id
 
     def get_active_warmup_run(self, user_id: str) -> Optional[Dict[str, Any]]:
@@ -3581,31 +3820,15 @@ class DuckDBStorage(StorageBackend):
         check + insert share one transaction so two simultaneous submits can't
         both create. Returns {run_id, status, deduped}."""
         with self._con.transaction():
+            self.assert_family_writable(user_id)
             active = self.get_active_warmup_run(user_id)
             if active is not None:
                 return {"run_id": active["id"], "status": active["status"], "deduped": True}
             run_id = self.create_warmup_run(user_id=user_id, steps=steps, context=context)
             return {"run_id": run_id, "status": "queued", "deduped": False}
 
-    def claim_next_queued_warmup_run(self) -> Optional[Dict[str, Any]]:
-        """Atomically pick the oldest queued run and flip it to running. Single
-        UPDATE...RETURNING so two workers can't claim the same row."""
-        row = self._con.execute(
-            """
-            UPDATE onboarding_warmup_runs
-               SET status = 'running', started_at = now()
-             WHERE id = (
-                 SELECT id FROM onboarding_warmup_runs
-                  WHERE status = 'queued'
-                  ORDER BY created_at
-                  LIMIT 1
-             )
-            RETURNING id
-            """,
-        ).fetchone()
-        if row is None:
-            return None
-        return self.get_warmup_run(row[0])
+    def claim_next_queued_warmup_run(self, budget_seconds: float = 120) -> Optional[Dict[str, Any]]:
+        return self._claim_job_attempt("warmup", budget_seconds)
 
     def update_warmup_run(
         self,
@@ -3673,7 +3896,7 @@ class DuckDBStorage(StorageBackend):
         rows = self._con.execute(
             """
             UPDATE onboarding_warmup_runs
-               SET status = 'queued', started_at = NULL
+               SET status = 'queued', started_at = NULL, attempt_token = NULL
              WHERE status = 'running'
             RETURNING id
             """,
@@ -3763,6 +3986,11 @@ class DuckDBStorage(StorageBackend):
         """Replace this run's candidates with `candidates` in one transaction.
         Delete-then-insert keeps a re-run (after a restart) idempotent. Returns
         the number inserted."""
+        with self._con.transaction():
+            self._insert_activity_candidates(run_id, user_id, candidates)
+        return len(candidates)
+
+    def _insert_activity_candidates(self, run_id, user_id, candidates):
         import uuid
         cols = (
             "id", "run_id", "user_id", "kid_name", "name", "provider", "category",
@@ -3772,26 +4000,24 @@ class DuckDBStorage(StorageBackend):
             "fit_reason", "raw_json",
         )
         placeholders = ", ".join(["?"] * len(cols))
-        with self._con.transaction() as con:
-            con.execute("DELETE FROM activity_candidates WHERE run_id = ?", [run_id])
-            for c in candidates:
-                con.execute(
-                    f"INSERT INTO activity_candidates ({', '.join(cols)}) VALUES ({placeholders})",
-                    [
-                        str(uuid.uuid4()), run_id, user_id,
-                        c.get("kid_name"), c.get("name") or "Untitled", c.get("provider"),
-                        c.get("category"), c.get("age_min"), c.get("age_max"),
-                        c.get("start_date"), c.get("end_date"), c.get("schedule_text"),
-                        c.get("price_text"), c.get("price_amount"), c.get("location_text"),
-                        c.get("city"), c.get("region"), c.get("distance_mi"),
-                        c.get("signup_url"), c.get("source_url"),
-                        json.dumps(c.get("contact") or {}, ensure_ascii=False) if c.get("contact") else None,
-                        c.get("fit_score"),
-                        c.get("fit_reason"),
-                        json.dumps(c.get("raw") or c, ensure_ascii=False),
-                    ],
-                )
-        return len(candidates)
+        self._con.execute("DELETE FROM activity_candidates WHERE run_id = ?", [run_id])
+        for c in candidates:
+            self._con.execute(
+                f"INSERT INTO activity_candidates ({', '.join(cols)}) VALUES ({placeholders})",
+                [
+                    str(uuid.uuid4()), run_id, user_id,
+                    c.get("kid_name"), c.get("name") or "Untitled", c.get("provider"),
+                    c.get("category"), c.get("age_min"), c.get("age_max"),
+                    c.get("start_date"), c.get("end_date"), c.get("schedule_text"),
+                    c.get("price_text"), c.get("price_amount"), c.get("location_text"),
+                    c.get("city"), c.get("region"), c.get("distance_mi"),
+                    c.get("signup_url"), c.get("source_url"),
+                    json.dumps(c.get("contact") or {}, ensure_ascii=False) if c.get("contact") else None,
+                    c.get("fit_score"),
+                    c.get("fit_reason"),
+                    json.dumps(c.get("raw") or c, ensure_ascii=False),
+                ],
+            )
 
     def get_candidate_category(self, candidate_id: str) -> Optional[str]:
         row = self._con.execute(
@@ -5920,19 +6146,24 @@ class DuckDBStorage(StorageBackend):
             for r in rows
         ]
 
-    def export_all_parquet(self) -> None:
+    def export_all_parquet(self, *, strict: bool = False) -> None:
         """
         Export every table in BOOTSTRAP_TABLES atomically (A2). This is the
         full backup path — kid/consent/audit/auth tables included, so a volume
         rebuild can recover them. user_data uses its conventional mvp.parquet
         name. Failures on individual tables are logged but don't abort the rest.
+        strict=True raises after attempting every table if any export failed.
         """
+        failures = []
         for table, pq_name in self.BOOTSTRAP_TABLES:
             target = self.parquet_dir / pq_name
             try:
                 self._export_table_atomic(table, target)
             except Exception as exc:
                 logger.error(f"[duckdb] export of {table} → {pq_name} failed: {exc}")
+                failures.append(table)
+        if strict and failures:
+            raise OSError("Snapshot export failed for: " + ", ".join(failures))
 
     def ping(self) -> bool:
         """Cheap liveness probe for the health check (A6): confirms the DB is

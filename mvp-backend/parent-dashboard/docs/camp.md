@@ -26,6 +26,10 @@ and MVP works the whole problem week by week.
 5. **Coast.** Confirmations and reminders get picked up; the card moves to
    All set when nothing's left.
 
+A canceled Discovery search cannot add late results. If a search runs out of
+time, you can start another from **Plan → Discovery**; any options you already
+saved to your board stay there.
+
 ## Week coverage
 
 For every break week, each kid is either covered (a camp, a class, a

@@ -11,6 +11,9 @@ terminated by ``data: [DONE]``) so existing clients can reuse their parser.
 """
 from __future__ import annotations
 
+from app.agent_runtime.adapters.text import encode as encode_run_event
+from app.agent_runtime.events import RunEvent
+
 import json
 import logging
 from typing import Any, Dict, List, Optional
@@ -59,6 +62,76 @@ class CosChatRequest(BaseModel):
 
 
 async def _cos_chat_stream(user_id: str, thread_id: str, message: str):
+    from contextlib import aclosing
+    from app import agent as agent_module, thread_repair
+    from app.agent_runtime.context import RunContext
+    from app.agent_runtime.policies import shared_execution_enabled
+    from app.agent_runtime.service import execution_service, owned_stream, RunInterrupted
+    from app.agent_runtime.durability import scope_for, reconcile_receipts, append_cos_transcript
+    from app.agent_runtime.sessions import resolve_parent_thread, resolve_parent_conversation
+    from app.cost_logging import CostLoggingCallbackHandler
+
+    shared = shared_execution_enabled("cos")
+    from app.server import coach_threads
+    conversation_id = resolve_parent_conversation(user_id, "cos", coach_threads)
+    context = RunContext(user_id, "cos", resolve_parent_thread(
+        user_id, "cos", thread_id, conversation_id), conversation_id)
+    storage = _storage()
+    if not shared:
+        async def legacy(disconnected):
+            terminal = None
+            with scope_for(storage)(context):
+                async with aclosing(_cos_chat_stream_legacy(user_id, thread_id, message,
+                                                           context=context, disconnected=disconnected)) as events:
+                    async for event in events:
+                        if event == "data: [DONE]\n\n":
+                            terminal = event
+                        else:
+                            yield event
+                if disconnected.is_set():
+                    raise RunInterrupted("Planning turn disconnected before completion")
+            if terminal is not None:
+                yield terminal
+        try:
+            async with aclosing(owned_stream(context, legacy)) as events:
+                async for event in events:
+                    yield event
+        except Exception as exc:
+            logger.exception("[harness] legacy admission/execution failed")
+            yield encode_run_event(RunEvent("error", content=str(exc)))
+        return
+
+    storage = _storage()
+    config = {"configurable": {"thread_id": context.thread_key}, "callbacks": [
+        CostLoggingCallbackHandler(feature="cos", workflow=context.run_id,
+                                   session=thread_id, user=user_id)]}
+
+    def before(_context):
+        append_cos_transcript(storage, context, thread_id, "user", message)
+
+    def finalize(_context, text):
+        if text:
+            append_cos_transcript(storage, context, thread_id, "assistant", text)
+
+    try:
+        async with aclosing(execution_service.stream(
+                None, {"messages": [HumanMessage(content=message)]},
+                config, context, repair=thread_repair.repair_thread,
+                is_internal=agent_module.is_internal_event,
+                is_retryable=thread_repair.is_dangling_tool_error,
+                before=before, finalize=finalize, scope=scope_for(storage),
+                reconcile=reconcile_receipts, agent_factory=lambda: get_cos_agent(user_id))) as events:
+            async for event in events:
+                if event.kind == "completed":
+                    yield "data: [DONE]\n\n"
+                else:
+                    yield encode_run_event(event)
+    except Exception as exc:
+        logger.exception("[cos] shared stream error")
+        yield encode_run_event(RunEvent("error", content=str(exc)))
+
+
+async def _cos_chat_stream_legacy(user_id: str, thread_id: str, message: str, *, context, disconnected=None):
     """SSE generator mirroring app.server.generate_stream's envelope.
 
     Runs the MERGED parent agent on the merged per-parent text thread — the
@@ -68,12 +141,13 @@ async def _cos_chat_stream(user_id: str, thread_id: str, message: str):
     """
     from app import agent as agent_module
     from app import thread_repair
+    from app.agent_runtime.durability import append_cos_transcript, repair_with_receipts, ensure_connected
 
     storage = _storage()
-    storage.append_cos_message(user_id, thread_id=thread_id, role="user", content=message)
+    append_cos_transcript(storage, context, thread_id, "user", message)
 
     agent = get_cos_agent(user_id)
-    memory_key = agent_module.thread_key(user_id, "cos", thread_id)
+    memory_key = context.thread_key
     from app.cost_logging import CostLoggingCallbackHandler, new_workflow_id
     cost_cb = CostLoggingCallbackHandler(
         feature="cos", workflow=new_workflow_id(), session=thread_id, user=user_id
@@ -85,16 +159,20 @@ async def _cos_chat_stream(user_id: str, thread_id: str, message: str):
     # and its own checkpointer, so one aborted plan turn poisoned it forever
     # (the outage in memory `debugging_voice_thread_poisoning`). Now that it
     # shares the parent thread, it must never be the path that skips repair.
-    await thread_repair.repair_thread(agent, config)
+    await repair_with_receipts(context, agent, config, thread_repair.repair_thread)
 
     for attempt in (1, 2):
         assistant_buffer = ""
+        tool_started = False
         try:
+            ensure_connected(disconnected)
             async for event in agent.astream_events(
                 {"messages": [HumanMessage(content=message)]},
                 config=config,
                 version="v1",
             ):
+                if event["event"] == "on_tool_start":
+                    tool_started = True
                 # Harness-internal model calls (summarization) must not be
                 # streamed to the client — see app/agent.is_internal_event.
                 if agent_module.is_internal_event(event):
@@ -104,31 +182,29 @@ async def _cos_chat_stream(user_id: str, thread_id: str, message: str):
                     content = event["data"]["chunk"].content
                     if content:
                         assistant_buffer += content
-                        yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+                        yield encode_run_event(RunEvent("token", content=content))
                 elif kind == "on_tool_start":
-                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': event['name']})}\n\n"
+                    yield encode_run_event(RunEvent("tool_start", tool=event["name"]))
                 elif kind == "on_tool_end":
-                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name']})}\n\n"
+                    yield encode_run_event(RunEvent("tool_end", tool=event["name"]))
 
-            yield "data: [DONE]\n\n"
+            ensure_connected(disconnected)
             if assistant_buffer:
-                storage.append_cos_message(
-                    user_id, thread_id=thread_id, role="assistant", content=assistant_buffer
-                )
+                append_cos_transcript(storage, context, thread_id, "assistant", assistant_buffer)
+            yield "data: [DONE]\n\n"
             return
         except Exception as exc:
             # Poisoned mid-run: repair and retry once, but only if nothing has
             # streamed yet — a retry after partial output would repeat text.
-            if attempt == 1 and not assistant_buffer and thread_repair.is_dangling_tool_error(exc):
+            if attempt == 1 and not assistant_buffer and not tool_started and thread_repair.is_dangling_tool_error(exc):
                 logger.warning(
                     "[cos] dangling tool call mid-run — repairing and retrying "
                     "user=%s thread=%s", user_id, thread_id,
                 )
-                await thread_repair.repair_thread(agent, config)
+                await repair_with_receipts(context, agent, config, thread_repair.repair_thread)
                 continue
             logger.error(f"[cos] stream error: {exc}")
-            yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
-            return
+            raise
 
 
 @router.post("/chat")

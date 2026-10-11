@@ -53,107 +53,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Matches the content links the parent agent emits. `id` stops at the closing
-# paren; whitespace guards against accidental over-capture.
-_LINK_RE = re.compile(r"\[([^\]]*)\]\(mvp://(library|community)/([^)\s]+)\)")
-_HOLD_CAP = 120  # backstop: never buffer a "pending link" longer than this
-_LINK_TARGETS = ("mvp://library/", "mvp://community/")
-_MAX_LABEL = 80  # a content title; anything longer isn't a link label
-
-
-def _is_plausible_link(tail: str) -> bool:
-    """Could `tail` (which starts at a '[') still become an mvp:// link once more
-    tokens arrive?
-
-    This is the whole point of the hold. The old rule — hold everything after the
-    last '[' until a link closes or 300 chars pile up — stalled speech for up to
-    300 characters on ANY bracketed aside in prose, which the parent hears as the
-    coach going silent mid-sentence. Now we hold only while the tail is still on a
-    path to a real link, and flush the instant it can't be one:
-
-      "[Some tit"              → inside the label      → plausible
-      "[Some title]"           → label just closed     → plausible
-      "[Some title](mvp://li"  → target prefix-matches → plausible
-      "[sic] and then"         → prose aside           → flush now
-      "[docs](https://…"       → not an mvp:// target  → flush now
-    """
-    close = tail.find("]")
-    if close == -1:
-        # Still inside the label. A "label" this long is prose, not a title.
-        return len(tail) - 1 <= _MAX_LABEL
-    if close - 1 > _MAX_LABEL:
-        return False
-    rest = tail[close + 1:]
-    if not rest:
-        return True                       # "[label]" — the "](" may be next chunk
-    if not rest.startswith("("):
-        return False                      # "[label] more prose" — never a link
-    partial = rest[1:]
-    # Prefix-compatible in either direction: "mvp://li" is a partial of the target,
-    # "mvp://library/abc" is the target plus an id we're still waiting to close.
-    return any(t.startswith(partial) or partial.startswith(t) for t in _LINK_TARGETS)
-
-
-class _LinkStripper:
-    """Incrementally strip mvp:// content links from streamed text, emitting the
-    human label as speech and surfacing (kind, id) pairs to fire client tools.
-    Holds a trailing partial so a link split across token chunks still matches."""
-
-    def __init__(self) -> None:
-        self._buf = ""
-
-    def feed(self, text: str) -> Tuple[str, List[Tuple[str, str]]]:
-        self._buf += text
-        out: List[str] = []
-        tools: List[Tuple[str, str]] = []
-        while True:
-            m = _LINK_RE.search(self._buf)
-            if not m:
-                break
-            out.append(self._buf[: m.start()])   # text before the link
-            out.append(m.group(1))               # speak the label, drop the URL
-            tools.append((m.group(2), m.group(3)))
-            self._buf = self._buf[m.end():]
-        # Hold from the last '[' ONLY while that tail is still a plausible link in
-        # progress — a real link must never leak its URL into speech, but ordinary
-        # bracketed prose must not stall it either. _HOLD_CAP stays as a backstop
-        # for the pathological case (e.g. "[t](mvp://library/" that never closes).
-        idx = self._buf.rfind("[")
-        tail = self._buf[idx:] if idx != -1 else ""
-        if idx == -1 or len(tail) > _HOLD_CAP or not _is_plausible_link(tail):
-            safe, self._buf = self._buf, ""
-        else:
-            safe, self._buf = self._buf[:idx], tail
-        return "".join(out) + safe, tools
-
-    def flush(self) -> str:
-        s, self._buf = self._buf, ""
-        return s
-
-
-def _show_content_tool_delta(content_id: str, chat_id: str) -> str:
-    """OpenAI tool-call delta for a display-only client tool. finish_reason stays
-    null (non-terminal) so the agent keeps talking — contrast the kid endpoint's
-    end_call which terminates the turn.
-
-    `show_article` is the ONLY tool name: the community board is retired, iOS
-    has no handler for a post card, and firing a tool the client doesn't
-    implement is how the ElevenLabs turn stalls."""
-    name = "show_article"
-    delta = {
-        "tool_calls": [{
-            "index": 0,
-            "id": f"call_{uuid.uuid4().hex[:8]}",
-            "type": "function",
-            "function": {"name": name, "arguments": json.dumps({"id": content_id})},
-        }]
-    }
-    obj = {
-        "id": f"chatcmpl-{chat_id}",
-        "object": "chat.completion.chunk",
-        "choices": [{"delta": delta, "index": 0, "finish_reason": None}],
-    }
-    return f"data: {json.dumps(obj)}\n\n"
+# Compatibility exports preserve callers and tests.
+from app.agent_runtime.adapters.voice import (
+    _LinkStripper, _is_plausible_link, _show_content_tool_delta,
+    _MAX_LABEL, _HOLD_CAP, _LINK_RE, _LINK_TARGETS,
+)
 
 
 @router.post("/v1/parent/chat/completions")
@@ -206,8 +110,66 @@ async def parent_convai_chat_completions(
     )
 
 
+def _storage():
+    from app.agent_runtime.dependencies import get
+    try:
+        return get().storage
+    except RuntimeError:
+        # Compatibility for direct adapter callers outside an ASGI lifespan.
+        from app.server import storage_backend
+        return storage_backend
+
+
 async def _stream_response(user_id: str, thread_id: str, message: str,
                            silence_nudges: int = 0):
+    from contextlib import aclosing
+    from app.agent_runtime.context import RunContext
+    from app.agent_runtime.policies import shared_execution_enabled
+    from app.agent_runtime.service import owned_stream, RunInterrupted
+    from app.agent_runtime.sessions import resolve_parent_thread
+    from app.agent_runtime.durability import scope_for
+
+    shared = shared_execution_enabled("parent_voice")
+    # Silence prompts are deterministic presentation, not persisted agent turns.
+    if silence_nudges:
+        async with aclosing(_stream_response_impl(user_id, thread_id, message,
+                                                 silence_nudges)) as events:
+            async for event in events:
+                yield event
+        return
+    context = RunContext(user_id, "parent_voice", resolve_parent_thread(user_id, "voice", thread_id))
+
+    async def legacy(disconnected):
+        terminal = None
+        with scope_for(_storage())(context):
+            async with aclosing(_stream_response_impl(user_id, thread_id, message,
+                                shared=False, context=context, disconnected=disconnected)) as events:
+                async for event in events:
+                    if event == _openai_done():
+                        terminal = event
+                    else:
+                        yield event
+            if disconnected.is_set():
+                raise RunInterrupted("Voice turn disconnected before completion")
+        if terminal is not None:
+            yield terminal
+
+    try:
+        stream = (_stream_response_impl(user_id, thread_id, message, shared=True, context=context)
+                  if shared else owned_stream(context, legacy))
+        async with aclosing(stream) as events:
+            async for event in events:
+                yield event
+    except Exception:
+        logger.exception("[parent-convai] admission/execution failed")
+        yield _openai_delta(
+            content="I hit a snag on my end — give me a second, then ask me again.",
+            chat_id=uuid.uuid4().hex[:12])
+        # No successful terminator when durable finalization or scope exit failed.
+
+
+async def _stream_response_impl(user_id: str, thread_id: str, message: str,
+                                silence_nudges: int = 0, *, shared=False, context=None, disconnected=None):
     turn_started = time.monotonic()
     chat_id = uuid.uuid4().hex[:12]
 
@@ -238,11 +200,11 @@ async def _stream_response(user_id: str, thread_id: str, message: str,
                             ttfb_ms=ms, tool_turn=0, outcome="silence")
         return
 
-    agent = get_agent(user_id)
+    agent = None if shared else get_agent(user_id)
     from app.cost_logging import CostLoggingCallbackHandler, log_perf, new_workflow_id
     # ONE id for the whole voice turn, shared by the cost handler and the perf
     # line so a turn's spend and its latency join on `workflow=`.
-    voice_wf = new_workflow_id()
+    voice_wf = context.run_id
     _voice_cost = CostLoggingCallbackHandler(
         feature="parent_voice", workflow=voice_wf, session=thread_id, user=user_id
     )
@@ -258,8 +220,21 @@ async def _stream_response(user_id: str, thread_id: str, message: str,
     # Self-heal before the turn: a prior cancelled turn (ElevenLabs barge-in /
     # timeout abort) can leave a dangling tool call that would 400 every
     # request on this thread forever. See app/thread_repair.py.
+    from app.agent_runtime.durability import (
+        append_transcript, scope_for, reconcile_receipts, repair_with_receipts, ensure_connected,
+    )
+    storage = _storage()
+    def before(_context):
+        append_transcript(storage, context, "parent_voice_threads", thread_id, "user", message)
+
+    def finalize(_context, text):
+        if text:
+            append_transcript(storage, context, "parent_voice_threads", thread_id, "assistant", text)
+
     repair_started = time.monotonic()
-    await repair_thread(agent, config)
+    if not shared:
+        before(context)
+        await repair_with_receipts(context, agent, config, repair_thread)
     repair_ms = _ms(repair_started)
 
     # Turn timings. `model_ttft_ms` is when the model's first token reached US;
@@ -300,52 +275,89 @@ async def _stream_response(user_id: str, thread_id: str, message: str,
             ttfb_ms=ttfb_ms, tool_turn=tool_turn, outcome=outcome,
         )
 
+    async def graph_events():
+        from contextlib import aclosing
+        from app.agent_runtime.context import RunContext
+        from app.agent_runtime.events import normalize
+        from app.agent_runtime.service import execution_service
+
+        async def timed_repair(graph, run_config):
+            nonlocal repair_ms
+            started = time.monotonic()
+            await repair_thread(graph, run_config)
+            repair_ms = _ms(started)
+
+        if shared:
+            async with aclosing(execution_service.stream(
+                    agent, {"messages": [HumanMessage(content=message)]}, config, context,
+                    version="v2", repair=timed_repair,
+                    is_internal=agent_module.is_internal_event,
+                    is_retryable=is_dangling_tool_error,
+                    scope=scope_for(storage), reconcile=reconcile_receipts,
+                    before=before, finalize=finalize,
+                    agent_factory=lambda: get_agent(user_id))) as events:
+                async for event in events:
+                    yield event
+        else:
+            ensure_connected(disconnected)
+            transcript = []
+            async with aclosing(agent.astream_events(
+                    {"messages": [HumanMessage(content=message)]}, config=config,
+                    version="v2")) as events:
+                async for raw in events:
+                    if not agent_module.is_internal_event(raw):
+                        event = normalize(raw)
+                        if event is not None:
+                            if event.kind == "token":
+                                transcript.append(event.content)
+                            yield event
+            ensure_connected(disconnected)
+            finalize(context, "".join(transcript))
+
     try:
-        for attempt in (1, 2):
+        for attempt in ((1,) if shared else (1, 2)):
             stripper = _LinkStripper()
             yielded = False
+            tool_started = False
+            completed = False
             try:
                 # version="v2" is the cheaper event API — v1 builds a much heavier
                 # event payload per token, pure overhead on a voice hot path where
                 # every ms is audible. Our two filters are identical across versions.
-                async for event in agent.astream_events(
-                    {"messages": [HumanMessage(content=message)]},
-                    config=config,
-                    version="v2",
-                ):
-                    # A summarization pass inside the harness streams like any
-                    # other model call. Unfiltered it would be SPOKEN to the
-                    # parent — see app/agent.is_internal_event.
-                    if agent_module.is_internal_event(event):
-                        continue
-                    if event["event"] != "on_chat_model_stream":
-                        # A tool ran before the first spoken token — that turn's
-                        # latency belongs in its own bucket, not the plain-answer one.
-                        if event["event"] == "on_tool_start" and model_ttft_ms is None:
-                            tool_turn = 1
-                        continue
-                    content = event["data"]["chunk"].content
-                    # In v2 a chunk's content can be a LIST of content blocks (tool-call
-                    # deltas), not a str. Feeding that to the link stripper would blow up
-                    # mid-turn, so skip anything that isn't spoken text.
-                    if not content or not isinstance(content, str):
-                        continue
-                    if model_ttft_ms is None:
-                        model_ttft_ms = _ms(turn_started)  # before the link-stripper hold
-                    safe, tools = stripper.feed(content)
-                    if safe:
-                        yielded = True
-                        _mark_yield()
-                        yield _openai_delta(content=safe, chat_id=chat_id)
-                    for kind, cid in tools:
-                        # A retired mvp://community/ link is stripped from speech
-                        # (above) but fires nothing — there is no card to show.
-                        if kind != "library":
+                from contextlib import aclosing
+                async with aclosing(graph_events()) as events:
+                    async for event in events:
+                        if event.kind == "completed":
+                            completed = True
+                        if event.kind == "tool_start":
+                            tool_started = True
+                        if event.kind != "token":
+                            if event.kind == "tool_start" and model_ttft_ms is None:
+                                tool_turn = 1
                             continue
-                        yielded = True
-                        _mark_yield(content=False)
-                        yield _show_content_tool_delta(cid, chat_id)
+                        content = event.content
+                        if model_ttft_ms is None:
+                            model_ttft_ms = _ms(turn_started)  # before the link-stripper hold
+                        safe, tools = stripper.feed(content)
+                        if safe:
+                            yielded = True
+                            _mark_yield()
+                            yield _openai_delta(content=safe, chat_id=chat_id)
+                        for kind, cid in tools:
+                            # A retired mvp://community/ link is stripped from speech
+                            # (above) but fires nothing — there is no card to show.
+                            if kind != "library":
+                                continue
+                            yielded = True
+                            _mark_yield(content=False)
+                            yield _show_content_tool_delta(cid, chat_id)
 
+                # Family cancellation can exhaust the owned iterator while its
+                # consumer stays connected. Only Completed proves that the
+                # assistant transcript and run scope finished successfully.
+                if shared and not completed:
+                    from app.agent_runtime.service import RunInterrupted
+                    raise RunInterrupted("Voice turn ended before durable completion")
                 tail = stripper.flush()
                 if tail:
                     _mark_yield()
@@ -359,24 +371,18 @@ async def _stream_response(user_id: str, thread_id: str, message: str,
                 # tool call after our pre-flight check): repair and retry once,
                 # but only if nothing streamed yet — a retry after spoken output
                 # would repeat the sentence to the parent.
-                if attempt == 1 and not yielded and is_dangling_tool_error(exc):
+                if not shared and attempt == 1 and not yielded and not tool_started and is_dangling_tool_error(exc):
                     logger.warning(
                         "[parent-convai] dangling tool call mid-run — repairing and "
                         "retrying user=%s thread=%s", user_id, thread_id,
                     )
-                    await repair_thread(agent, config)
+                    await repair_with_receipts(context, agent, config, repair_thread)
                     continue
                 logger.exception(
                     "[parent-convai] stream error user=%s thread=%s", user_id, thread_id
                 )
-                _mark_yield()
-                yield _openai_delta(
-                    content="I hit a snag on my end — give me a second, then ask me again.",
-                    chat_id=chat_id,
-                )
-                yield _openai_done()
                 _emit_perf("error")
-                return
+                raise
     finally:
         # A barge-in is the MOST common way a voice turn ends, and it unwinds
         # this generator without reaching either exit above. Emitting only on

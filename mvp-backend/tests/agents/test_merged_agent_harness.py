@@ -213,7 +213,9 @@ def test_surface_streams_only_with_thread_repair(rel):
     assert "astream_events" in calls, (
         f"{rel} no longer streams an agent — drop it from _AGENT_SURFACES"
     )
-    assert "repair_thread" in calls, (
+    # Durable adapters reconcile known effects before invoking the same repair
+    # through repair_with_receipts. The HTTP fault tests pin that ordering.
+    assert "repair_thread" in calls or "repair_with_receipts" in calls, (
         f"{rel} streams the merged parent agent without app/thread_repair's "
         "pre-flight self-heal. A cancelled tool call would poison that thread "
         "forever (memory `debugging_voice_thread_poisoning`)."
@@ -239,12 +241,8 @@ def test_text_surfaces_share_one_thread_and_voice_does_not():
     assert thread_key("u2", "chat", "x") != chat, "threads stay per-parent"
 
 
-def test_cos_router_uses_the_merged_thread_key():
-    src = (BACKEND_ROOT / "app" / "cos" / "router.py").read_text()
-    assert 'f"cos:{user_id}' not in src, (
-        "/cos/chat is back on its own LangGraph thread — the merge is undone"
-    )
-    assert "thread_key(" in src
+# Actual /chat and /cos/chat checkpoint routing is exercised by the HTTP
+# contract tests (legacy keys, selected conversations, both runtime modes).
 
 
 # ── household + library wiring ───────────────────────────────────────

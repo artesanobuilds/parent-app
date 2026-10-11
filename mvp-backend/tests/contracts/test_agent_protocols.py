@@ -67,7 +67,7 @@ def test_text_auth_validation_and_cross_tenant(harness, path):
     assert h.agent.configs == []
 
 
-@pytest.mark.parametrize("path", ["/chat", "/cos/chat"])
+@pytest.mark.parametrize("path", TEXT_PATHS)
 def test_internal_model_text_does_not_cross_public_boundary(harness, path):
     harness.agent.script = [
         {"event": "on_chat_model_stream", "tags": ["mvp:internal"],
@@ -85,8 +85,8 @@ def test_legacy_checkpoint_namespaces_remain_stable(harness):
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="PR4: COS does not yet resolve the active named conversation")
-def test_cos_follows_active_named_conversation(harness):
+def test_cos_follows_active_named_conversation(harness, monkeypatch):
+    monkeypatch.setenv("MVP_COS_ACTIVE_CONVERSATION", "1")
     h = harness
     h.server.coach_threads.touch(h.user, "c-named")
     post(h, "/chat")
@@ -96,7 +96,6 @@ def test_cos_follows_active_named_conversation(harness):
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="PR3: current generators emit DONE before persisting the assistant")
 @pytest.mark.parametrize("surface", ["chat", "cos", "onboarding"])
 def test_assistant_is_durable_at_success_marker(harness, surface):
     h = harness

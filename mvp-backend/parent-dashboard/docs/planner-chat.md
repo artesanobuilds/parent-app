@@ -53,3 +53,10 @@ Talk to it the way you'd brief a very organized friend.
   hands you the draft — you review and send it yourself.
 - **It doesn't register or pay for you.** It gets you to the right page with
   the right information and tracks what's left.
+
+## Continuing a selected conversation
+
+After the next backend rollout is enabled, text planning continues the conversation
+selected in **Coach**. Open Coach's clock icon to return to an older conversation,
+or use the pencil icon to start a new one. Existing planning history remains
+available; previous conversations are not combined. Voice calls stay separate.

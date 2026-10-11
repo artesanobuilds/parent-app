@@ -75,3 +75,7 @@ data/circle_messages.parquet
 data/invite_tokens.parquet
 # Circle requests (beta-v1 sprint 2) — pending consent state, user data.
 data/circle_requests.parquet
+# Harness ledger, command receipts, deletion fences are family state.
+data/agent_runs.parquet
+data/agent_operation_receipts.parquet
+data/agent_family_fences.parquet

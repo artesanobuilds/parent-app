@@ -336,7 +336,14 @@ def admin_link_legacy(body: RelinkRequest, _: None = Depends(_require_admin)):
 
 
 @router.post("/admin/users/{user_id}/reset")
-def admin_reset_user(user_id: str, _: None = Depends(_require_admin)):
+async def admin_reset_user(user_id: str, _: None = Depends(_require_admin)):
+    from app.agent_runtime.service import execution_service
+    from app.checkpointing import join_cleanup
+    async with execution_service.family_fence(user_id):
+        return await join_cleanup(_reset_family_data, user_id)
+
+
+def _reset_family_data(user_id: str):
     """Tester reset: wipe the family's data but KEEP the sign-in identity
     (auth_identities / user_accounts / refresh_tokens / auth_tokens) and
     legal_acceptances, so Miguel/Heather/Greg can re-run the redesigned
@@ -357,7 +364,10 @@ def admin_reset_user(user_id: str, _: None = Depends(_require_admin)):
     if not storage.user_exists(user_id):
         raise HTTPException(status_code=404, detail="unknown user_id")
 
-    result = storage.reset_family(user_id=user_id, actor="admin")
+    try:
+        result = storage.reset_family(user_id=user_id, actor="admin")
+    except PermissionError:
+        raise HTTPException(status_code=404, detail="unknown user_id") from None
     counts = result.get("counts", {})
     # Evict the in-memory family profile BEFORE the parquet re-export below —
     # profiling_service / the thread stores are process-local singletons that
@@ -367,7 +377,8 @@ def admin_reset_user(user_id: str, _: None = Depends(_require_admin)):
     _server.chat_memory.remove_user(user_id)
     _server.onboarding_memory.remove_user(user_id)
     # Durable LangGraph checkpoints: sweep every thread this family owns.
-    _threads_purged = _server.checkpointing.delete_user_threads(user_id)
+    _server.invalidate_family_agent_caches(user_id)
+    _threads_purged = _server.checkpointing.purge_family_checkpoints(storage, user_id)
     if _threads_purged:
         counts["agent_threads"] = _threads_purged
     # Photos live outside the DB entirely — sweep the family's blob prefix.
@@ -376,7 +387,7 @@ def admin_reset_user(user_id: str, _: None = Depends(_require_admin)):
     if _blobs_deleted:
         counts["blobs"] = _blobs_deleted
     try:
-        storage.export_all_parquet()
+        storage.refresh_family_snapshots(user_id)
     except Exception:
         # The DB rows are gone (the reset stands); a failed snapshot refresh
         # must be visible, not silent — the stale snapshot still holds the data.
@@ -393,7 +404,7 @@ def admin_reset_user(user_id: str, _: None = Depends(_require_admin)):
 
 
 @router.post("/admin/users/{user_id}/delete")
-def admin_delete_user(user_id: str, _: None = Depends(_require_admin)):
+async def admin_delete_user(user_id: str, _: None = Depends(_require_admin)):
     """Admin full delete: the existing DELETE /family/{user_id} cascade,
     invoked on a tester's behalf. The CMS cannot call that route directly —
     it requires the USER's bearer token, and /auth/issue-token refuses (403)
@@ -405,4 +416,4 @@ def admin_delete_user(user_id: str, _: None = Depends(_require_admin)):
 
     if not _server.storage_backend.user_exists(user_id):
         raise HTTPException(status_code=404, detail="unknown user_id")
-    return _server.delete_family(user_id, authenticated_user=user_id)
+    return await _server.delete_family(user_id, authenticated_user=user_id)

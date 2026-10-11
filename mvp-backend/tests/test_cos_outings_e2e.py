@@ -93,6 +93,10 @@ class _FakeChunk:
 
 
 class _OutingsAgent:
+    async def aget_state(self, config):
+        from types import SimpleNamespace
+        return SimpleNamespace(values={"messages": []})
+
     """astream_events invokes the real SuggestOutings tool and streams its reply,
     bracketed by tool_start/tool_end frames named 'SuggestOutings'."""
 

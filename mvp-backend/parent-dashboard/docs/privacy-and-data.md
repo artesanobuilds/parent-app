@@ -26,8 +26,10 @@ see exactly what you agreed to.
   Safety concerns lock the conversation and notify you immediately.
 - **Export and deletion are self-serve.** You can export your plan as a
   spreadsheet anytime. To delete everything, it's **Settings → Delete
-  account** in the iPhone app — your family's data is removed immediately,
-  including from backups. No email, no waiting.
+  account** in the iPhone app. Deletion stops new coach activity, lets any
+  current write finish, and removes your family's data and stored conversations.
+  Cleanup of local recovery snapshots is retried if storage is temporarily
+  unavailable; removed family data cannot resume new coach activity.
 
 Questions or concerns during the beta? Use **Report a problem** in the iPhone
 app's settings — it goes straight to the person building this.
