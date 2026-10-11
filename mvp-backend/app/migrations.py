@@ -357,6 +357,14 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
             PRIMARY KEY (user_id, thread_key, operation_id)
         );
     """),
+    (26, "background_jobs.attempt_fences", """
+        ALTER TABLE research_runs ADD COLUMN IF NOT EXISTS attempt_token TEXT;
+        ALTER TABLE research_runs ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMP;
+        ALTER TABLE research_runs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMP;
+        ALTER TABLE onboarding_warmup_runs ADD COLUMN IF NOT EXISTS attempt_token TEXT;
+        ALTER TABLE onboarding_warmup_runs ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMP;
+        ALTER TABLE onboarding_warmup_runs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMP;
+    """),
 ]
 
 

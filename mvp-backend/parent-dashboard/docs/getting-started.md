@@ -70,5 +70,10 @@ you can come back to any person later:
 
 Close the app mid-way and it resumes where you were.
 
+The final setup progress screen keeps moving if a personalization step takes too
+long. You can still reach **Home**, and a timed-out step cannot overwrite your
+setup later. Your saved family details remain available in **Settings → Your
+family**.
+
 **Adding a child** is on Home too — **+ Add another child**, under the tiles (or
 **Settings → Your family → + Add a kid**; they're the same thing).

@@ -17,6 +17,7 @@ coach is unaffected.
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import logging
 import os
@@ -471,11 +472,26 @@ def build_research_model() -> ChatOpenAI:
     )
 
 
-def build_research_agent(tools: List[Any]):
+def build_research_agent(tools: List[Any], job_context=None):
     """Construct the deepagents research agent with an explicit OpenAI model
     (deepagents would otherwise default to Anthropic, which we have no key for)."""
+    middleware = []
+    subagents = None
+    if job_context:
+        from app.jobs.middleware import JobDispatchMiddleware
+        middleware.append(JobDispatchMiddleware(job_context, RESEARCH_LLM_MAX_RETRIES, RESEARCH_LLM_TIMEOUT_S))
+        # The pinned DeepAgents default subagent does not inherit user
+        # middleware. Preserve its prompt/tools while explicitly guarding it.
+        from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
+        subagents = [{**GENERAL_PURPOSE_SUBAGENT, "middleware": middleware}]
+    model = build_research_model()
+    if job_context:
+        from app.jobs.middleware import bounded_model
+        model = bounded_model(model, job_context.remaining(RESEARCH_LLM_TIMEOUT_S))
     return create_deep_agent(
-        model=build_research_model(),
+        middleware=middleware,
+        subagents=subagents,
+        model=model,
         tools=tools,
         system_prompt=_SYSTEM_PROMPT,
     )
@@ -489,6 +505,7 @@ def discover_activities(
     progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
     run_id: Optional[str] = None,
     user_id: Optional[str] = None,
+    job_context=None,
 ) -> List[Dict[str, Any]]:
     """Run one discovery pass and return the list of structured candidate dicts.
 
@@ -514,7 +531,7 @@ def discover_activities(
     record_tool = _build_record_tool(
         collector, on_each=(reporter.note_found if reporter else None)
     )
-    agent = build_research_agent([tavily, record_tool])
+    agent = build_research_agent([tavily, record_tool], job_context) if job_context else build_research_agent([tavily, record_tool])
 
     if progress_cb:
         progress_cb({"phase": "researching", "candidates_found": 0})
@@ -530,14 +547,23 @@ def discover_activities(
         search_depth="advanced",
     )
     callbacks: List[BaseCallbackHandler] = [profiler, cost]
+    if job_context:
+        from app.jobs.middleware import JobDispatchGuard
+        callbacks.insert(0, JobDispatchGuard(job_context))
     if reporter:
         callbacks.append(reporter)
 
     t0 = time.monotonic()
-    agent.invoke(
-        {"messages": [{"role": "user", "content": _task_message(location, kids, params)}]},
-        config={"recursion_limit": RESEARCH_RECURSION_LIMIT, "callbacks": callbacks},
-    )
+    input_state = {"messages": [{"role": "user", "content": _task_message(location, kids, params)}]}
+    config = {"recursion_limit": RESEARCH_RECURSION_LIMIT, "callbacks": callbacks}
+    if job_context:
+        # Worker owns its thread/event loop. Cancellation joins native async
+        # provider I/O; total budget also bounds internal deepagents model work.
+        async def execute():
+            return await job_context.wait(agent.ainvoke(input_state, config=config))
+        asyncio.run(execute())
+    else:
+        agent.invoke(input_state, config=config)
     elapsed = time.monotonic() - t0
 
     # Curate: rank the full discovered pool and surface only the parent's top N.

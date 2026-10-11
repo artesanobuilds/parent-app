@@ -216,7 +216,5 @@ def cancel_run(run_id: str, user_id: str = Depends(current_user)):
     storage = _storage()
     run = _require_owned_run(storage, run_id, user_id)
     if run["status"] in ("queued", "running"):
-        storage.update_research_run(
-            run_id, status="canceled", progress={"phase": "canceled"}, finished=True
-        )
+        storage.cancel_research_run(run_id)
     return {"run_id": run_id, "status": "canceled"}

@@ -450,10 +450,11 @@ def test_warmup_stream_emits_progress_then_final():
                 "/onboarding/warmup", json={}, headers=auth
             ).json()["run_id"]
             # Drive it to terminal so the stream closes promptly.
-            server.storage_backend.claim_next_queued_warmup_run()
+            claimed = server.storage_backend.claim_next_queued_warmup_run()
+            assert claimed["id"] == run_id
             OnboardingWarmupWorker(
                 server.storage_backend, _all_ok()
-            ).process_run(server.storage_backend.get_warmup_run(run_id))
+            ).process_run(claimed)
 
             with client.stream(
                 "GET", f"/onboarding/warmup/{run_id}/stream", headers=auth
