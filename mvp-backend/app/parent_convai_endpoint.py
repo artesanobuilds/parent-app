@@ -112,6 +112,39 @@ async def parent_convai_chat_completions(
 
 async def _stream_response(user_id: str, thread_id: str, message: str,
                            silence_nudges: int = 0):
+    from contextlib import aclosing
+    from app.agent_runtime.context import RunContext
+    from app.agent_runtime.policies import shared_execution_enabled
+    from app.agent_runtime.service import owned_stream
+    from app.agent_runtime.sessions import resolve_parent_thread
+
+    shared = shared_execution_enabled("parent_voice")
+    if shared or silence_nudges:
+        async with aclosing(_stream_response_impl(user_id, thread_id, message,
+                            silence_nudges, shared=shared)) as events:
+            async for event in events:
+                yield event
+        return
+    context = RunContext(user_id, "parent_voice", resolve_parent_thread(user_id, "voice", thread_id))
+    async def legacy(_disconnected):
+        async with aclosing(_stream_response_impl(user_id, thread_id, message,
+                            silence_nudges, shared=False)) as events:
+            async for event in events:
+                yield event
+    try:
+        async with aclosing(owned_stream(context, legacy)) as events:
+            async for event in events:
+                yield event
+    except Exception:
+        logger.exception("[parent-convai] legacy admission/execution failed")
+        yield _openai_delta(
+            content="I hit a snag on my end — give me a second, then ask me again.",
+            chat_id=uuid.uuid4().hex[:12])
+        yield _openai_done()
+
+
+async def _stream_response_impl(user_id: str, thread_id: str, message: str,
+                                silence_nudges: int = 0, *, shared=False):
     turn_started = time.monotonic()
     chat_id = uuid.uuid4().hex[:12]
 
@@ -142,7 +175,7 @@ async def _stream_response(user_id: str, thread_id: str, message: str,
                             ttfb_ms=ms, tool_turn=0, outcome="silence")
         return
 
-    agent = get_agent(user_id)
+    agent = None if shared else get_agent(user_id)
     from app.cost_logging import CostLoggingCallbackHandler, log_perf, new_workflow_id
     # ONE id for the whole voice turn, shared by the cost handler and the perf
     # line so a turn's spend and its latency join on `workflow=`.
@@ -163,7 +196,8 @@ async def _stream_response(user_id: str, thread_id: str, message: str,
     # timeout abort) can leave a dangling tool call that would 400 every
     # request on this thread forever. See app/thread_repair.py.
     repair_started = time.monotonic()
-    await repair_thread(agent, config)
+    if not shared:
+        await repair_thread(agent, config)
     repair_ms = _ms(repair_started)
 
     # Turn timings. `model_ttft_ms` is when the model's first token reached US;
@@ -204,51 +238,73 @@ async def _stream_response(user_id: str, thread_id: str, message: str,
             ttfb_ms=ttfb_ms, tool_turn=tool_turn, outcome=outcome,
         )
 
+    async def graph_events():
+        from contextlib import aclosing
+        from app.agent_runtime.context import RunContext
+        from app.agent_runtime.events import normalize
+        from app.agent_runtime.service import execution_service
+
+        async def timed_repair(graph, run_config):
+            nonlocal repair_ms
+            started = time.monotonic()
+            await repair_thread(graph, run_config)
+            repair_ms = _ms(started)
+
+        if shared:
+            context = RunContext(user_id, "parent_voice", config["configurable"]["thread_id"],
+                                 run_id=voice_wf)
+            async with aclosing(execution_service.stream(
+                    agent, {"messages": [HumanMessage(content=message)]}, config, context,
+                    version="v2", repair=timed_repair,
+                    is_internal=agent_module.is_internal_event,
+                    is_retryable=is_dangling_tool_error,
+                    agent_factory=lambda: get_agent(user_id))) as events:
+                async for event in events:
+                    yield event
+        else:
+            async with aclosing(agent.astream_events(
+                    {"messages": [HumanMessage(content=message)]}, config=config,
+                    version="v2")) as events:
+                async for raw in events:
+                    if not agent_module.is_internal_event(raw):
+                        event = normalize(raw)
+                        if event is not None:
+                            yield event
+
     try:
-        for attempt in (1, 2):
+        for attempt in ((1,) if shared else (1, 2)):
             stripper = _LinkStripper()
             yielded = False
+            tool_started = False
             try:
                 # version="v2" is the cheaper event API — v1 builds a much heavier
                 # event payload per token, pure overhead on a voice hot path where
                 # every ms is audible. Our two filters are identical across versions.
-                async for event in agent.astream_events(
-                    {"messages": [HumanMessage(content=message)]},
-                    config=config,
-                    version="v2",
-                ):
-                    # A summarization pass inside the harness streams like any
-                    # other model call. Unfiltered it would be SPOKEN to the
-                    # parent — see app/agent.is_internal_event.
-                    if agent_module.is_internal_event(event):
-                        continue
-                    if event["event"] != "on_chat_model_stream":
-                        # A tool ran before the first spoken token — that turn's
-                        # latency belongs in its own bucket, not the plain-answer one.
-                        if event["event"] == "on_tool_start" and model_ttft_ms is None:
-                            tool_turn = 1
-                        continue
-                    content = event["data"]["chunk"].content
-                    # In v2 a chunk's content can be a LIST of content blocks (tool-call
-                    # deltas), not a str. Feeding that to the link stripper would blow up
-                    # mid-turn, so skip anything that isn't spoken text.
-                    if not content or not isinstance(content, str):
-                        continue
-                    if model_ttft_ms is None:
-                        model_ttft_ms = _ms(turn_started)  # before the link-stripper hold
-                    safe, tools = stripper.feed(content)
-                    if safe:
-                        yielded = True
-                        _mark_yield()
-                        yield _openai_delta(content=safe, chat_id=chat_id)
-                    for kind, cid in tools:
-                        # A retired mvp://community/ link is stripped from speech
-                        # (above) but fires nothing — there is no card to show.
-                        if kind != "library":
+                from contextlib import aclosing
+                async with aclosing(graph_events()) as events:
+                    async for event in events:
+                        if event.kind == "tool_start":
+                            tool_started = True
+                        if event.kind != "token":
+                            if event.kind == "tool_start" and model_ttft_ms is None:
+                                tool_turn = 1
                             continue
-                        yielded = True
-                        _mark_yield(content=False)
-                        yield _show_content_tool_delta(cid, chat_id)
+                        content = event.content
+                        if model_ttft_ms is None:
+                            model_ttft_ms = _ms(turn_started)  # before the link-stripper hold
+                        safe, tools = stripper.feed(content)
+                        if safe:
+                            yielded = True
+                            _mark_yield()
+                            yield _openai_delta(content=safe, chat_id=chat_id)
+                        for kind, cid in tools:
+                            # A retired mvp://community/ link is stripped from speech
+                            # (above) but fires nothing — there is no card to show.
+                            if kind != "library":
+                                continue
+                            yielded = True
+                            _mark_yield(content=False)
+                            yield _show_content_tool_delta(cid, chat_id)
 
                 tail = stripper.flush()
                 if tail:
@@ -263,7 +319,7 @@ async def _stream_response(user_id: str, thread_id: str, message: str,
                 # tool call after our pre-flight check): repair and retry once,
                 # but only if nothing streamed yet — a retry after spoken output
                 # would repeat the sentence to the parent.
-                if attempt == 1 and not yielded and is_dangling_tool_error(exc):
+                if not shared and attempt == 1 and not yielded and not tool_started and is_dangling_tool_error(exc):
                     logger.warning(
                         "[parent-convai] dangling tool call mid-run — repairing and "
                         "retrying user=%s thread=%s", user_id, thread_id,

@@ -454,6 +454,65 @@ def persist_state(user_id: str | None = None):
 
 
 async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGenerator[str, None]:
+    from contextlib import aclosing
+    from app.agent_runtime.context import RunContext
+    from app.agent_runtime.policies import shared_execution_enabled
+    from app.agent_runtime.service import execution_service, owned_stream
+    from app.agent_runtime.sessions import resolve_parent_thread
+
+    shared = shared_execution_enabled("chat")
+    conversation_id = coach_threads.active_conversation_id(user_id)
+    context = RunContext(user_id, "chat", resolve_parent_thread(
+        user_id, "chat", thread_id, conversation_id), conversation_id)
+    if not shared:
+        async def legacy(_disconnected):
+            async with aclosing(_generate_stream_legacy(
+                    message, thread_id, user_id, conversation_id=conversation_id)) as events:
+                async for event in events:
+                    yield event
+        try:
+            async with aclosing(owned_stream(context, legacy)) as events:
+                async for event in events:
+                    yield event
+        except Exception as exc:
+            logger.exception("[harness] legacy admission/execution failed")
+            yield encode_run_event(RunEvent("error", content="Something went wrong. Please try again."))
+        return
+
+    transcript_key = conversation_id or thread_id
+    config = {"configurable": {"thread_id": context.thread_key}, "callbacks": [
+        CostLoggingCallbackHandler(feature="coach", workflow=context.run_id,
+                                   session=transcript_key, user=user_id)]}
+    thread_messages = chat_memory.get_thread_messages(user_id, transcript_key)
+
+    def before(_context):
+        thread_messages.append({"role": "user", "content": message})
+        coach_threads.touch(user_id, conversation_id)
+
+    def finalize(_context, text):
+        if text:
+            thread_messages.append({"role": "assistant", "content": text})
+        persist_state(user_id)
+
+    try:
+        async with aclosing(execution_service.stream(
+                None, {"messages": [HumanMessage(content=message)]},
+                config, context, repair=thread_repair.repair_thread,
+                is_internal=agent_module.is_internal_event,
+                is_retryable=thread_repair.is_dangling_tool_error,
+                before=before, finalize=finalize, agent_factory=lambda: get_agent(user_id))) as events:
+            async for event in events:
+                if event.kind == "completed":
+                    yield "data: [DONE]\n\n"
+                else:
+                    yield encode_run_event(event)
+    except Exception:
+        logger.exception("[chat] shared stream error")
+        yield encode_run_event(RunEvent("error", content="Something went wrong. Please try again."))
+
+
+async def _generate_stream_legacy(message: str, thread_id: str, user_id: str,
+                                  conversation_id: str | None = None) -> AsyncGenerator[str, None]:
     """
     Streams events from the LangGraph agent.
     Format: SSE (Server-Sent Events)
@@ -467,7 +526,6 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
     # per-install `thread_id`, so a new conversation started on the phone is the
     # same conversation the dashboard continues. `None` = the pre-sprint-2
     # un-suffixed thread, so an in-flight beta chat stays continuous.
-    conversation_id = coach_threads.active_conversation_id(user_id)
     memory_key = agent_module.thread_key(
         user_id, "chat", thread_id, conversation_id=conversation_id
     )
@@ -493,6 +551,7 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
 
     for attempt in (1, 2):
         assistant_buffer = ""
+        tool_started = False
         try:
             # Stream events from the graph
             # "values" mode streams the full state at each step
@@ -504,6 +563,8 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
             ):
                 # We are interested in chat model stream events to stream tokens back to client
                 kind = event["event"]
+                if kind == "on_tool_start":
+                    tool_started = True
 
                 # The harness's own model calls (context summarization) surface
                 # as ordinary model-stream events. Showing them would print the
@@ -528,14 +589,14 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
                         logger.debug(f"[chat] tool_end name={event.get('name')} output={event.get('data', {}).get('output')}")
                     yield encode_run_event(RunEvent("tool_end", tool=event["name"]))
 
-            yield "data: [DONE]\n\n"
             if assistant_buffer:
                 thread_messages.append({"role": "assistant", "content": assistant_buffer})
             persist_state(user_id)
+            yield "data: [DONE]\n\n"
             return
 
         except Exception as e:
-            if attempt == 1 and not assistant_buffer and thread_repair.is_dangling_tool_error(e):
+            if attempt == 1 and not assistant_buffer and not tool_started and thread_repair.is_dangling_tool_error(e):
                 logger.warning(f"[chat] dangling tool call mid-run — repairing and retrying user_id={user_id} thread_id={thread_id}")
                 await thread_repair.repair_thread(agent, config)
                 continue

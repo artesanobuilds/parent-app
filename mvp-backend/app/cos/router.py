@@ -62,6 +62,61 @@ class CosChatRequest(BaseModel):
 
 
 async def _cos_chat_stream(user_id: str, thread_id: str, message: str):
+    from contextlib import aclosing
+    from app import agent as agent_module, thread_repair
+    from app.agent_runtime.context import RunContext
+    from app.agent_runtime.policies import shared_execution_enabled
+    from app.agent_runtime.service import execution_service, owned_stream
+    from app.agent_runtime.sessions import resolve_parent_thread
+    from app.cost_logging import CostLoggingCallbackHandler
+
+    shared = shared_execution_enabled("cos")
+    # PR4 separately changes named-conversation admission; default key stays exact.
+    context = RunContext(user_id, "cos", resolve_parent_thread(user_id, "cos", thread_id))
+    if not shared:
+        async def legacy(_disconnected):
+            async with aclosing(_cos_chat_stream_legacy(user_id, thread_id, message)) as events:
+                async for event in events:
+                    yield event
+        try:
+            async with aclosing(owned_stream(context, legacy)) as events:
+                async for event in events:
+                    yield event
+        except Exception as exc:
+            logger.exception("[harness] legacy admission/execution failed")
+            yield encode_run_event(RunEvent("error", content=str(exc)))
+        return
+
+    storage = _storage()
+    config = {"configurable": {"thread_id": context.thread_key}, "callbacks": [
+        CostLoggingCallbackHandler(feature="cos", workflow=context.run_id,
+                                   session=thread_id, user=user_id)]}
+
+    def before(_context):
+        storage.append_cos_message(user_id, thread_id=thread_id, role="user", content=message)
+
+    def finalize(_context, text):
+        if text:
+            storage.append_cos_message(user_id, thread_id=thread_id, role="assistant", content=text)
+
+    try:
+        async with aclosing(execution_service.stream(
+                None, {"messages": [HumanMessage(content=message)]},
+                config, context, repair=thread_repair.repair_thread,
+                is_internal=agent_module.is_internal_event,
+                is_retryable=thread_repair.is_dangling_tool_error,
+                before=before, finalize=finalize, agent_factory=lambda: get_cos_agent(user_id))) as events:
+            async for event in events:
+                if event.kind == "completed":
+                    yield "data: [DONE]\n\n"
+                else:
+                    yield encode_run_event(event)
+    except Exception as exc:
+        logger.exception("[cos] shared stream error")
+        yield encode_run_event(RunEvent("error", content=str(exc)))
+
+
+async def _cos_chat_stream_legacy(user_id: str, thread_id: str, message: str):
     """SSE generator mirroring app.server.generate_stream's envelope.
 
     Runs the MERGED parent agent on the merged per-parent text thread — the
@@ -92,12 +147,15 @@ async def _cos_chat_stream(user_id: str, thread_id: str, message: str):
 
     for attempt in (1, 2):
         assistant_buffer = ""
+        tool_started = False
         try:
             async for event in agent.astream_events(
                 {"messages": [HumanMessage(content=message)]},
                 config=config,
                 version="v1",
             ):
+                if event["event"] == "on_tool_start":
+                    tool_started = True
                 # Harness-internal model calls (summarization) must not be
                 # streamed to the client — see app/agent.is_internal_event.
                 if agent_module.is_internal_event(event):
@@ -113,16 +171,16 @@ async def _cos_chat_stream(user_id: str, thread_id: str, message: str):
                 elif kind == "on_tool_end":
                     yield encode_run_event(RunEvent("tool_end", tool=event["name"]))
 
-            yield "data: [DONE]\n\n"
             if assistant_buffer:
                 storage.append_cos_message(
                     user_id, thread_id=thread_id, role="assistant", content=assistant_buffer
                 )
+            yield "data: [DONE]\n\n"
             return
         except Exception as exc:
             # Poisoned mid-run: repair and retry once, but only if nothing has
             # streamed yet — a retry after partial output would repeat text.
-            if attempt == 1 and not assistant_buffer and thread_repair.is_dangling_tool_error(exc):
+            if attempt == 1 and not assistant_buffer and not tool_started and thread_repair.is_dangling_tool_error(exc):
                 logger.warning(
                     "[cos] dangling tool call mid-run — repairing and retrying "
                     "user=%s thread=%s", user_id, thread_id,
