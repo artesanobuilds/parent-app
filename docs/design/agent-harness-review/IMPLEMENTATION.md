@@ -28,7 +28,7 @@ Each PR is based on its predecessor. Merge in order and retarget the next PR to 
 | 3 | Durable effects, transcripts and deletion | [PR #4](https://github.com/artesanobuilds/parent-app/pull/4) |
 | 4 | Selected named-conversation routing | [PR #5](https://github.com/artesanobuilds/parent-app/pull/5) |
 | 5 | Bounded research and warmup jobs | [PR #6](https://github.com/artesanobuilds/parent-app/pull/6) |
-| 6 | Specialized policies, bounded caches and regression scenarios | [Review branch](https://github.com/artesanobuilds/parent-app/tree/refactor/harness-06-policies) |
+| 6 | Specialized policies, bounded caches and regression scenarios | [PR #7](https://github.com/artesanobuilds/parent-app/pull/7) |
 
 ## Switches and rollback
 
@@ -56,8 +56,14 @@ The durable command service and deletion fences remain active on fallback orches
 The complete backend suite passed **792 tests, 45 skipped** with shared runtime
 switches disabled and **792 tests, 45 skipped** with all six enabled. No expected
 failures remain. The **74 public contract cases** cover both modes. Five existing
-library/schema deprecation warnings remain. The final PR source tree was compared
-byte-for-byte with the combined validation tree before publication.
+library/schema deprecation warnings remain. Application and test files in the final PR stack were compared byte-for-byte
+with the combined validation tree before publication.
+
+The intermediate merge points also passed their full backend suites: PR #4
+(durability) **715 passed, 45 skipped**, with only the explicitly deferred routing
+case expected to fail; PR #5 (routing) **723 passed, 45 skipped**; PR #6 (jobs)
+**740 passed, 45 skipped**. Earlier contract/adaptor/execution evidence is recorded
+in each PR description.
 
 Cross-review reproduced and fixed two additional failures: a family cancellation
 could send parent voice a success terminator without finalized history, and a
