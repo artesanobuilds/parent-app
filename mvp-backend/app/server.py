@@ -465,7 +465,8 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
     from contextlib import aclosing
     from app.agent_runtime.context import RunContext
     from app.agent_runtime.policies import shared_execution_enabled
-    from app.agent_runtime.service import execution_service, owned_stream
+    from app.agent_runtime.service import execution_service, owned_stream, RunInterrupted
+    from app.agent_runtime.durability import scope_for, reconcile_receipts, append_transcript
     from app.agent_runtime.sessions import resolve_parent_thread
 
     shared = shared_execution_enabled("chat")
@@ -473,11 +474,21 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
     context = RunContext(user_id, "chat", resolve_parent_thread(
         user_id, "chat", thread_id, conversation_id), conversation_id)
     if not shared:
-        async def legacy(_disconnected):
-            async with aclosing(_generate_stream_legacy(
-                    message, thread_id, user_id, conversation_id=conversation_id)) as events:
-                async for event in events:
-                    yield event
+        async def legacy(disconnected):
+            terminal = None
+            with scope_for(storage_backend)(context):
+                async with aclosing(_generate_stream_legacy(
+                        message, thread_id, user_id, conversation_id=conversation_id,
+                        context=context, disconnected=disconnected)) as events:
+                    async for event in events:
+                        if event == "data: [DONE]\n\n":
+                            terminal = event
+                        else:
+                            yield event
+                if disconnected.is_set():
+                    raise RunInterrupted("Parent turn disconnected before completion")
+            if terminal is not None:
+                yield terminal
         try:
             async with aclosing(owned_stream(context, legacy)) as events:
                 async for event in events:
@@ -491,16 +502,15 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
     config = {"configurable": {"thread_id": context.thread_key}, "callbacks": [
         CostLoggingCallbackHandler(feature="coach", workflow=context.run_id,
                                    session=transcript_key, user=user_id)]}
-    thread_messages = chat_memory.get_thread_messages(user_id, transcript_key)
-
     def before(_context):
-        thread_messages.append({"role": "user", "content": message})
+        append_transcript(storage_backend, context, "chat_threads", transcript_key,
+                          "user", message, memory=chat_memory)
         coach_threads.touch(user_id, conversation_id)
 
     def finalize(_context, text):
         if text:
-            thread_messages.append({"role": "assistant", "content": text})
-        persist_state(user_id)
+            append_transcript(storage_backend, context, "chat_threads", transcript_key,
+                              "assistant", text, memory=chat_memory)
 
     try:
         async with aclosing(execution_service.stream(
@@ -508,7 +518,8 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
                 config, context, repair=thread_repair.repair_thread,
                 is_internal=agent_module.is_internal_event,
                 is_retryable=thread_repair.is_dangling_tool_error,
-                before=before, finalize=finalize, agent_factory=lambda: get_agent(user_id))) as events:
+                before=before, finalize=finalize, scope=scope_for(storage_backend),
+                reconcile=reconcile_receipts, agent_factory=lambda: get_agent(user_id))) as events:
             async for event in events:
                 if event.kind == "completed":
                     yield "data: [DONE]\n\n"
@@ -520,7 +531,7 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
 
 
 async def _generate_stream_legacy(message: str, thread_id: str, user_id: str,
-                                  conversation_id: str | None = None) -> AsyncGenerator[str, None]:
+                                  conversation_id: str | None = None, *, context, disconnected=None) -> AsyncGenerator[str, None]:
     """
     Streams events from the LangGraph agent.
     Format: SSE (Server-Sent Events)
@@ -546,8 +557,9 @@ async def _generate_stream_legacy(message: str, thread_id: str, user_id: str,
     )
     config = {"configurable": {"thread_id": memory_key}, "callbacks": [cost_cb]}
 
-    thread_messages = chat_memory.get_thread_messages(user_id, transcript_key)
-    thread_messages.append({"role": "user", "content": message})
+    from app.agent_runtime.durability import append_transcript, repair_with_receipts, ensure_connected
+    append_transcript(storage_backend, context, "chat_threads", transcript_key,
+                      "user", message, memory=chat_memory)
     # Record the turn so the conversation appears in the history list with a
     # real timestamp before it is ever closed/titled.
     coach_threads.touch(user_id, conversation_id)
@@ -555,12 +567,13 @@ async def _generate_stream_legacy(message: str, thread_id: str, user_id: str,
     # Self-heal a thread poisoned by a cancelled tool call before the turn
     # (see app/thread_repair.py — without this one interrupted turn breaks
     # the thread forever).
-    await thread_repair.repair_thread(agent, config)
+    await repair_with_receipts(context, agent, config, thread_repair.repair_thread)
 
     for attempt in (1, 2):
         assistant_buffer = ""
         tool_started = False
         try:
+            ensure_connected(disconnected)
             # Stream events from the graph
             # "values" mode streams the full state at each step
             # "updates" mode streams only the changes
@@ -597,72 +610,56 @@ async def _generate_stream_legacy(message: str, thread_id: str, user_id: str,
                         logger.debug(f"[chat] tool_end name={event.get('name')} output={event.get('data', {}).get('output')}")
                     yield encode_run_event(RunEvent("tool_end", tool=event["name"]))
 
+            ensure_connected(disconnected)
             if assistant_buffer:
-                thread_messages.append({"role": "assistant", "content": assistant_buffer})
-            persist_state(user_id)
+                append_transcript(storage_backend, context, "chat_threads", transcript_key,
+                                  "assistant", assistant_buffer, memory=chat_memory)
             yield "data: [DONE]\n\n"
             return
 
         except Exception as e:
             if attempt == 1 and not assistant_buffer and not tool_started and thread_repair.is_dangling_tool_error(e):
                 logger.warning(f"[chat] dangling tool call mid-run — repairing and retrying user_id={user_id} thread_id={thread_id}")
-                await thread_repair.repair_thread(agent, config)
+                await repair_with_receipts(context, agent, config, thread_repair.repair_thread)
                 continue
             logger.exception(f"[chat] stream error user_id={user_id} thread_id={thread_id}")
-            yield f"data: {json.dumps({'type': 'error', 'content': 'Something went wrong. Please try again.'})}\n\n"
-            return
+            raise
 
 
 async def generate_onboarding_stream(message: str, thread_id: str, user_id: str) -> AsyncGenerator[str, None]:
-    """
-    Streams events from the onboarding agent.
-    Format: SSE (Server-Sent Events)
-    """
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"[onboarding] start user_id={user_id} thread_id={thread_id} message={message[:200]}")
-    agent = get_onboarding_agent(user_id)
-    memory_key = f"onboarding:{user_id}:{thread_id}"
-    cost_cb = CostLoggingCallbackHandler(
-        feature="onboarding", workflow=new_workflow_id(), session=thread_id, user=user_id
-    )
-    config = {"configurable": {"thread_id": memory_key}, "callbacks": [cost_cb]}
+    from contextlib import aclosing
+    from app.agent_runtime.context import RunContext
+    from app.agent_runtime.service import execution_service
+    from app.agent_runtime.durability import scope_for, reconcile_receipts, append_transcript
 
-    thread_messages = onboarding_memory.get_thread_messages(user_id, thread_id)
-    thread_messages.append({"role": "user", "content": message})
-    assistant_buffer = ""
+    context = RunContext(user_id, "onboarding", f"onboarding:{user_id}:{thread_id}")
+    config = {"configurable": {"thread_id": context.thread_key}, "callbacks": [
+        CostLoggingCallbackHandler(feature="onboarding", workflow=context.run_id,
+                                   session=thread_id, user=user_id)]}
 
-    await thread_repair.repair_thread(agent, config)
+    def before(_context):
+        append_transcript(storage_backend, context, "onboarding_threads", thread_id,
+                          "user", message, memory=onboarding_memory)
+
+    def finalize(_context, text):
+        if text:
+            append_transcript(storage_backend, context, "onboarding_threads", thread_id,
+                              "assistant", text, memory=onboarding_memory)
 
     try:
-        async for event in agent.astream_events(
-            {"messages": [HumanMessage(content=message)]},
-            config=config,
-            version="v1"
-        ):
-            kind = event["event"]
-
-            if kind == "on_chat_model_stream":
-                content = event["data"]["chunk"].content
-                if content:
-                    assistant_buffer += content
-                    yield encode_run_event(RunEvent("token", content=content))
-            elif kind == "on_tool_start":
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"[onboarding] tool_start name={event.get('name')} input={event.get('data', {}).get('input')}")
-                yield encode_run_event(RunEvent("tool_start", tool=event["name"]))
-            elif kind == "on_tool_end":
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"[onboarding] tool_end name={event.get('name')} output={event.get('data', {}).get('output')}")
-                yield encode_run_event(RunEvent("tool_end", tool=event["name"]))
-
-        yield "data: [DONE]\n\n"
-        if assistant_buffer:
-            thread_messages.append({"role": "assistant", "content": assistant_buffer})
-        persist_state(user_id)
-
-    except Exception as e:
-        logger.exception(f"[onboarding] stream error user_id={user_id} thread_id={thread_id}")
-        yield f"data: {json.dumps({'type': 'error', 'content': 'Something went wrong. Please try again.'})}\n\n"
+        async with aclosing(execution_service.stream(
+                None, {"messages": [HumanMessage(content=message)]}, config, context,
+                repair=thread_repair.repair_thread, before=before, finalize=finalize,
+                scope=scope_for(storage_backend), reconcile=reconcile_receipts,
+                agent_factory=lambda: get_onboarding_agent(user_id))) as events:
+            async for event in events:
+                if event.kind == "completed":
+                    yield "data: [DONE]\n\n"
+                else:
+                    yield encode_run_event(event)
+    except Exception:
+        logger.exception("[onboarding] stream failed")
+        yield encode_run_event(RunEvent("error", content="Something went wrong. Please try again."))
 
 # ── Auth (closed-beta opaque tokens) ─────────────────────────────────
 

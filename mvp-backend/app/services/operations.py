@@ -73,6 +73,8 @@ def run_scope(storage, user_id: str, run_id: str, thread_key: str):
     except BaseException as exc:
         if type(exc).__name__ in {"CancelledError", "GeneratorExit"}:
             outcome = "cancelled"
+        elif type(exc).__name__ == "RunInterrupted":
+            outcome = "interrupted"
         raise
     finally:
         _run.reset(token)
