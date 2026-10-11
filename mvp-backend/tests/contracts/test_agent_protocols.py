@@ -67,7 +67,7 @@ def test_text_auth_validation_and_cross_tenant(harness, path):
     assert h.agent.configs == []
 
 
-@pytest.mark.parametrize("path", ["/chat", "/cos/chat"])
+@pytest.mark.parametrize("path", TEXT_PATHS)
 def test_internal_model_text_does_not_cross_public_boundary(harness, path):
     harness.agent.script = [
         {"event": "on_chat_model_stream", "tags": ["mvp:internal"],

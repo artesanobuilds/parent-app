@@ -30,6 +30,8 @@ Three things that are easy to get wrong here:
    if a surface streams this agent without repairing first.
 """
 import json
+from app.agent_runtime.cache import AgentCache
+
 import logging
 import os
 from pathlib import Path
@@ -379,7 +381,7 @@ def build_parent_tools(user_id: str) -> list:
     ]
 
 
-_agent_cache: Dict[str, Dict[str, Any]] = {}
+_agent_cache = AgentCache()
 
 def _saved_signal_context(user_name: str) -> str:
     """Revealed preference: what this parent actually SAVES (vs the goals they

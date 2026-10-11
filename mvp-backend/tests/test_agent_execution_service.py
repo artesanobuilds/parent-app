@@ -233,3 +233,13 @@ def test_repeated_task_cancellation_cannot_transfer_ownership_early():
             await task
         assert (await next_run)[-1].kind == 'completed'
     asyncio.run(run())
+
+
+def test_nested_graph_cannot_bypass_ownership_without_outer_workflow():
+    async def run():
+        graph = Graph(lambda _: [token('not allowed')])
+        with pytest.raises(RuntimeError, match='requires ownership'):
+            await collect(AgentExecutionService(), graph, RunContext('u', 'chat', 'u:parent'),
+                          acquire_ownership=False)
+        assert graph.calls == 0
+    asyncio.run(run())

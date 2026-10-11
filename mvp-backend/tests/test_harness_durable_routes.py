@@ -98,7 +98,7 @@ class ToolGraph:
 
 
 def install(monkeypatch, rig, graph, shared):
-    for surface in ['chat', 'cos', 'parent_voice']:
+    for surface in ['chat', 'cos', 'parent_voice', 'onboarding']:
         monkeypatch.setenv(f'MVP_SHARED_RUNTIME_{surface.upper()}', '1' if shared else '0')
     monkeypatch.setattr(rig.server, 'get_agent', lambda _: graph)
     monkeypatch.setattr(rig.server, 'get_onboarding_agent', lambda _: graph)

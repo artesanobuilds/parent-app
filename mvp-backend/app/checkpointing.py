@@ -126,6 +126,10 @@ class DurableCheckpointer(BaseCheckpointSaver[str]):
         # Applied when an inner saver is built, since the inner savers own the
         # serde that actually does the decoding.
         self._extra_allowlist: tuple[tuple[str, ...], ...] = ()
+        # Compiling a graph calls with_allowlist each time. Cache by schema,
+        # not by graph instance, so prompt/cache rebuilds do not open more DBs.
+        self._clone_root = self
+        self._schema_clones = {frozenset(): self}
         logger.info("[checkpointer] durable sqlite saver at %s", self.db_path)
 
     # ── inner savers ─────────────────────────────────────────────────────
@@ -191,10 +195,18 @@ class DurableCheckpointer(BaseCheckpointSaver[str]):
         graph schema, and WAL handles the concurrency).
         """
         extra = tuple(tuple(entry) for entry in extra_allowlist)
-        if not extra or set(extra) <= set(self._extra_allowlist):
+        effective = frozenset(self._extra_allowlist + extra)
+        if effective == frozenset(self._extra_allowlist):
             return self
-        clone = DurableCheckpointer(self.db_path)
-        clone._extra_allowlist = tuple(dict.fromkeys(self._extra_allowlist + extra))
+        root = self._clone_root
+        with root._lock:
+            clone = root._schema_clones.get(effective)
+            if clone is None:
+                clone = DurableCheckpointer(self.db_path)
+                clone._extra_allowlist = tuple(sorted(effective))
+                clone._clone_root = root
+                clone._schema_clones = root._schema_clones
+                root._schema_clones[effective] = clone
         return clone
 
     def get_next_version(self, current: str | None, channel: None) -> str:
@@ -305,26 +317,35 @@ class DurableCheckpointer(BaseCheckpointSaver[str]):
             loop_key = id(asyncio.get_running_loop())
         except RuntimeError:
             return
-        with self._lock:
-            saver = self._async_savers.pop(loop_key, None)
-        if saver is None:
-            return
-        try:
-            await saver.conn.close()
-        except Exception:
-            logger.warning("[checkpointer] async close failed", exc_info=True)
+        root = self._clone_root
+        with root._lock:
+            targets = list(root._schema_clones.values()) if self is root else [self]
+        for target in targets:
+            with target._lock:
+                saver = target._async_savers.pop(loop_key, None)
+            if saver is not None:
+                try:
+                    await saver.conn.close()
+                except Exception:
+                    logger.warning("[checkpointer] async close failed", exc_info=True)
 
     def close_sync(self) -> None:
-        """Close the sync connection. Separate from `aclose` because the two
-        halves hold independent connections (see the module docstring)."""
-        with self._lock:
-            saver, self._sync_saver = self._sync_saver, None
-        if saver is None:
-            return
-        try:
-            saver.conn.close()
-        except Exception:
-            logger.warning("[checkpointer] sync close failed", exc_info=True)
+        """Close this root and every schema clone, after in-flight runs drain.
+
+        Evicting a graph never closes its saver: another graph may still use the
+        same schema clone. Only application/test shutdown owns these resources.
+        """
+        root = self._clone_root
+        with root._lock:
+            targets = list(root._schema_clones.values()) if self is root else [self]
+        for target in targets:
+            with target._lock:
+                saver, target._sync_saver = target._sync_saver, None
+            if saver is not None:
+                try:
+                    saver.conn.close()
+                except Exception:
+                    logger.warning("[checkpointer] sync close failed", exc_info=True)
 
     def thread_ids(self) -> list[str]:
         """Thread IDs from checkpoints AND unfinished writes.

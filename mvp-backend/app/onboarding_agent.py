@@ -1,3 +1,5 @@
+from app.agent_runtime.cache import AgentCache
+
 import logging
 import json
 import os
@@ -145,7 +147,7 @@ def _make_child_tool(user_id: str):
     return FoundMoreAboutChild
 
 
-_onboarding_agent_cache: Dict[str, Any] = {}
+_onboarding_agent_cache = AgentCache()
 
 
 def get_onboarding_agent(user_name: str = "0"):

@@ -14,6 +14,8 @@ Architecture:
 
 from __future__ import annotations
 
+from app.agent_runtime.cache import AgentCache
+
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -53,7 +55,7 @@ KID_RUNTIME_MODEL = os.getenv("KID_RUNTIME_MODEL", "gpt-5.2")
 
 # Keyed by (user_id, kid_name); value carries content_hash so we invalidate
 # whenever anything that affects the runtime prompt has changed.
-_kid_agent_cache: Dict[str, Dict[str, Any]] = {}
+_kid_agent_cache = AgentCache()
 
 
 def _cache_key(user_id: str, kid_name: str) -> str:

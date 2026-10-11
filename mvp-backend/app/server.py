@@ -639,9 +639,13 @@ async def _generate_stream_legacy(message: str, thread_id: str, user_id: str,
 async def generate_onboarding_stream(message: str, thread_id: str, user_id: str) -> AsyncGenerator[str, None]:
     from contextlib import aclosing
     from app.agent_runtime.context import RunContext
-    from app.agent_runtime.service import execution_service
-    from app.agent_runtime.durability import scope_for, reconcile_receipts, append_transcript
+    from app.agent_runtime.service import execution_service, owned_stream
+    from app.agent_runtime.policies import shared_execution_enabled
+    from app.agent_runtime.events import normalize
+    from app.agent_runtime.durability import (scope_for, reconcile_receipts, append_transcript,
+                                               repair_with_receipts, ensure_connected)
 
+    shared = shared_execution_enabled("onboarding")
     context = RunContext(user_id, "onboarding", f"onboarding:{user_id}:{thread_id}")
     config = {"configurable": {"thread_id": context.thread_key}, "callbacks": [
         CostLoggingCallbackHandler(feature="onboarding", workflow=context.run_id,
@@ -656,12 +660,34 @@ async def generate_onboarding_stream(message: str, thread_id: str, user_id: str)
             append_transcript(storage_backend, context, "onboarding_threads", thread_id,
                               "assistant", text, memory=onboarding_memory)
 
+    async def legacy(disconnected):
+        with scope_for(storage_backend)(context):
+            before(context)
+            agent = get_onboarding_agent(user_id)
+            await repair_with_receipts(context, agent, config, thread_repair.repair_thread)
+            text = []
+            async with aclosing(agent.astream_events(
+                    {"messages": [HumanMessage(content=message)]}, config=config, version="v1")) as events:
+                async for raw in events:
+                    if agent_module.is_internal_event(raw):
+                        continue
+                    event = normalize(raw)
+                    if event is not None:
+                        if event.kind == "token":
+                            text.append(event.content)
+                        yield event
+            ensure_connected(disconnected)
+            finalize(context, "".join(text))
+        yield RunEvent("completed")
+
     try:
-        async with aclosing(execution_service.stream(
+        events = (execution_service.stream(
                 None, {"messages": [HumanMessage(content=message)]}, config, context,
                 repair=thread_repair.repair_thread, before=before, finalize=finalize,
                 scope=scope_for(storage_backend), reconcile=reconcile_receipts,
-                agent_factory=lambda: get_onboarding_agent(user_id))) as events:
+                agent_factory=lambda: get_onboarding_agent(user_id)) if shared
+                else owned_stream(context, legacy))
+        async with aclosing(events):
             async for event in events:
                 if event.kind == "completed":
                     yield "data: [DONE]\n\n"
