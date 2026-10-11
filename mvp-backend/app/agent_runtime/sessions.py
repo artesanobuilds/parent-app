@@ -41,3 +41,11 @@ def resolve_parent_thread(user_id, surface, thread_id, conversation_id=None):
 
 
 conversation_gates = ConversationGates()
+
+
+def resolve_parent_conversation(user_id, surface, coach_threads):
+    """Capture the selected conversation once before waiting for ownership."""
+    from app.agent_runtime.policies import cos_active_conversation_enabled
+    if surface == "chat" or (surface == "cos" and cos_active_conversation_enabled()):
+        return coach_threads.active_conversation_id(user_id)
+    return None

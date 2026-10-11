@@ -10,6 +10,14 @@ Every update, newest first — what changed and how to find it. Each entry says
 whether it is available now or prepared for an upcoming rollout. Features marked
 *app update* arrive on your phone through TestFlight.
 
+## October 10, 2026 — continue the selected coaching conversation
+
+**Available after the backend rollout is enabled; no app update required.**
+Text planning messages will continue the conversation selected in **Coach**,
+including a conversation reopened from the clock icon. Start a new conversation
+with the pencil icon when changing topics. Existing conversation history stays
+available; voice calls keep their separate history.
+
 ## October 10, 2026 — more reliable coaching and planning saves
 
 **Available with the next backend rollout; no app update required.** The coach
