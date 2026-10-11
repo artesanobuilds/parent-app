@@ -3464,26 +3464,116 @@ class DuckDBStorage(StorageBackend):
             )
             return {"run_id": run_id, "status": "queued", "deduped": False}
 
-    def claim_next_queued_run(self) -> Optional[Dict[str, Any]]:
-        """Atomically pick the oldest queued run, flip it to running, and return
-        it. Single UPDATE...RETURNING so two workers can't claim the same row."""
-        row = self._con.execute(
-            """
-            UPDATE research_runs
-               SET status = 'running', started_at = now(),
-                   progress_json = json_object('phase', 'starting')
-             WHERE id = (
-                 SELECT id FROM research_runs
-                  WHERE status = 'queued'
-                  ORDER BY created_at
-                  LIMIT 1
-             )
-            RETURNING id
-            """,
-        ).fetchone()
-        if row is None:
-            return None
-        return self.get_research_run(row[0])
+    @staticmethod
+    def _job_table(kind):
+        return {"research": "research_runs", "warmup": "onboarding_warmup_runs"}[kind]
+
+    def _claim_job_attempt(self, kind, budget_seconds):
+        import uuid
+        from datetime import datetime, timedelta, timezone
+        token = str(uuid.uuid4())
+        deadline = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=budget_seconds)
+        table = self._job_table(kind)
+        self.reap_expired_job_attempts(kind)
+        with self._con.transaction():
+            row = self._con.execute(
+                f"UPDATE {table} SET status='running', started_at=now(), "
+                "attempt_token=?, deadline_at=COALESCE(deadline_at, ?), heartbeat_at=now() "
+                f"WHERE id=(SELECT id FROM {table} WHERE status='queued' "
+                "AND (deadline_at IS NULL OR deadline_at > now()) ORDER BY created_at LIMIT 1) "
+                "RETURNING id, deadline_at", [token, deadline],
+            ).fetchone()
+            if not row:
+                return None
+            if kind == "research":
+                self.update_research_run(row[0], progress={"phase": "starting"})
+            run = self.get_research_run(row[0]) if kind == "research" else self.get_warmup_run(row[0])
+            # Private claim metadata never enters the public row serializers.
+            run.update(_attempt_token=token, _deadline_at=row[1].isoformat())
+            return run
+
+    def job_attempt_active(self, kind, run_id, token):
+        return bool(self._con.execute(
+            f"SELECT 1 FROM {self._job_table(kind)} WHERE id=? AND attempt_token=? "
+            "AND status='running' AND deadline_at > now()", [run_id, token],
+        ).fetchone())
+
+    @contextmanager
+    def job_write_guard(self, context):
+        # A lock, not an outer transaction: domain methods own their transactions.
+        with self._con._lock:
+            context.check()
+            yield
+
+    def update_job_progress(self, context, **fields):
+        with self.job_write_guard(context):
+            if context.kind == "research":
+                self.update_research_run(context.run_id, **fields)
+            else:
+                self.update_warmup_run(context.run_id, **fields)
+            self._con.execute(
+                f"UPDATE {self._job_table(context.kind)} SET heartbeat_at=now() WHERE id=?",
+                [context.run_id],
+            )
+
+    def finalize_job_attempt(self, context, **fields):
+        from app.jobs.context import JobStopped
+        try:
+            with self.job_write_guard(context):
+                if context.kind == "research":
+                    return self.finalize_run_if_running(context.run_id, **fields)
+                return self.finalize_warmup_run_if_running(context.run_id, **fields)
+        except JobStopped:
+            return False
+
+    def publish_research_attempt(self, context, user_id, candidates, progress):
+        from app.jobs.context import JobStopped
+        try:
+            with self.job_write_guard(context):
+                # Validation, candidate replacement and terminal state share one
+                # transaction. Readers/cancel cannot see a partial publication.
+                with self._con.transaction():
+                    self._insert_activity_candidates(context.run_id, user_id, candidates)
+                    context.check()
+                    return self.finalize_run_if_running(
+                        context.run_id, status="done", candidate_count=len(candidates),
+                        progress=progress,
+                    )
+        except JobStopped:
+            return False
+
+    def reap_expired_job_attempts(self, kind):
+        table = self._job_table(kind)
+        with self._con.transaction():
+            rows = self._con.execute(
+                f"SELECT id FROM {table} WHERE status IN ('running','queued') "
+                "AND deadline_at <= now()",
+            ).fetchall()
+            for (run_id,) in rows:
+                if kind == "warmup":
+                    run = self.get_warmup_run(run_id)
+                    steps = run['steps']
+                    for step in steps:
+                        if step.get('state') not in ('done', 'failed', 'skipped'):
+                            step.update(state='failed', error='job deadline exceeded')
+                    failed = [step['key'] for step in steps if step.get('state') == 'failed']
+                    result = dict(run.get('result') or {}, failed_steps=failed)
+                    self.update_warmup_run(run_id, status='done', steps=steps, result=result,
+                                           error='job deadline exceeded', finished=True)
+                else:
+                    self.update_research_run(run_id, status='failed',
+                        error='job deadline exceeded', progress={'phase': 'failed'}, finished=True)
+            return len(rows)
+
+    def claim_next_queued_run(self, budget_seconds: float = 600) -> Optional[Dict[str, Any]]:
+        return self._claim_job_attempt("research", budget_seconds)
+
+    def cancel_research_run(self, run_id):
+        return bool(self._con.execute(
+            "UPDATE research_runs SET status='canceled', finished_at=now(), "
+            "progress_json=json_object('phase', 'canceled') "
+            "WHERE id=? AND status IN ('queued', 'running') RETURNING id", [run_id],
+        ).fetchone())
 
     def update_research_run(
         self,
@@ -3553,7 +3643,7 @@ class DuckDBStorage(StorageBackend):
         rows = self._con.execute(
             """
             UPDATE research_runs
-               SET status = 'queued', started_at = NULL,
+               SET status = 'queued', started_at = NULL, attempt_token = NULL,
                    progress_json = json_object('phase', 'requeued_after_restart')
              WHERE status = 'running'
             RETURNING id
@@ -3737,25 +3827,8 @@ class DuckDBStorage(StorageBackend):
             run_id = self.create_warmup_run(user_id=user_id, steps=steps, context=context)
             return {"run_id": run_id, "status": "queued", "deduped": False}
 
-    def claim_next_queued_warmup_run(self) -> Optional[Dict[str, Any]]:
-        """Atomically pick the oldest queued run and flip it to running. Single
-        UPDATE...RETURNING so two workers can't claim the same row."""
-        row = self._con.execute(
-            """
-            UPDATE onboarding_warmup_runs
-               SET status = 'running', started_at = now()
-             WHERE id = (
-                 SELECT id FROM onboarding_warmup_runs
-                  WHERE status = 'queued'
-                  ORDER BY created_at
-                  LIMIT 1
-             )
-            RETURNING id
-            """,
-        ).fetchone()
-        if row is None:
-            return None
-        return self.get_warmup_run(row[0])
+    def claim_next_queued_warmup_run(self, budget_seconds: float = 120) -> Optional[Dict[str, Any]]:
+        return self._claim_job_attempt("warmup", budget_seconds)
 
     def update_warmup_run(
         self,
@@ -3823,7 +3896,7 @@ class DuckDBStorage(StorageBackend):
         rows = self._con.execute(
             """
             UPDATE onboarding_warmup_runs
-               SET status = 'queued', started_at = NULL
+               SET status = 'queued', started_at = NULL, attempt_token = NULL
              WHERE status = 'running'
             RETURNING id
             """,
@@ -3913,6 +3986,11 @@ class DuckDBStorage(StorageBackend):
         """Replace this run's candidates with `candidates` in one transaction.
         Delete-then-insert keeps a re-run (after a restart) idempotent. Returns
         the number inserted."""
+        with self._con.transaction():
+            self._insert_activity_candidates(run_id, user_id, candidates)
+        return len(candidates)
+
+    def _insert_activity_candidates(self, run_id, user_id, candidates):
         import uuid
         cols = (
             "id", "run_id", "user_id", "kid_name", "name", "provider", "category",
@@ -3922,26 +4000,24 @@ class DuckDBStorage(StorageBackend):
             "fit_reason", "raw_json",
         )
         placeholders = ", ".join(["?"] * len(cols))
-        with self._con.transaction() as con:
-            con.execute("DELETE FROM activity_candidates WHERE run_id = ?", [run_id])
-            for c in candidates:
-                con.execute(
-                    f"INSERT INTO activity_candidates ({', '.join(cols)}) VALUES ({placeholders})",
-                    [
-                        str(uuid.uuid4()), run_id, user_id,
-                        c.get("kid_name"), c.get("name") or "Untitled", c.get("provider"),
-                        c.get("category"), c.get("age_min"), c.get("age_max"),
-                        c.get("start_date"), c.get("end_date"), c.get("schedule_text"),
-                        c.get("price_text"), c.get("price_amount"), c.get("location_text"),
-                        c.get("city"), c.get("region"), c.get("distance_mi"),
-                        c.get("signup_url"), c.get("source_url"),
-                        json.dumps(c.get("contact") or {}, ensure_ascii=False) if c.get("contact") else None,
-                        c.get("fit_score"),
-                        c.get("fit_reason"),
-                        json.dumps(c.get("raw") or c, ensure_ascii=False),
-                    ],
-                )
-        return len(candidates)
+        self._con.execute("DELETE FROM activity_candidates WHERE run_id = ?", [run_id])
+        for c in candidates:
+            self._con.execute(
+                f"INSERT INTO activity_candidates ({', '.join(cols)}) VALUES ({placeholders})",
+                [
+                    str(uuid.uuid4()), run_id, user_id,
+                    c.get("kid_name"), c.get("name") or "Untitled", c.get("provider"),
+                    c.get("category"), c.get("age_min"), c.get("age_max"),
+                    c.get("start_date"), c.get("end_date"), c.get("schedule_text"),
+                    c.get("price_text"), c.get("price_amount"), c.get("location_text"),
+                    c.get("city"), c.get("region"), c.get("distance_mi"),
+                    c.get("signup_url"), c.get("source_url"),
+                    json.dumps(c.get("contact") or {}, ensure_ascii=False) if c.get("contact") else None,
+                    c.get("fit_score"),
+                    c.get("fit_reason"),
+                    json.dumps(c.get("raw") or c, ensure_ascii=False),
+                ],
+            )
 
     def get_candidate_category(self, candidate_id: str) -> Optional[str]:
         row = self._con.execute(
