@@ -6,9 +6,9 @@ order: 5
 
 # What's new
 
-Every update we ship, newest first — what changed and how to find it. Features marked
-*app update* arrive on your phone through TestFlight; everything else is live the moment
-it's listed here.
+Every update, newest first — what changed and how to find it. Each entry says
+whether it is available now or prepared for an upcoming rollout. Features marked
+*app update* arrive on your phone through TestFlight.
 
 ## October 10, 2026 — more reliable coaching and planning saves
 

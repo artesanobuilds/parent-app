@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 PATHS = {
+    "/family/{user_id}", "/admin/users/{user_id}/reset", "/admin/users/{user_id}/delete",
     "/chat", "/cos/chat", "/cos/messages", "/onboarding-chat", "/kid-chat",
     "/v1/chat/completions", "/v1/parent/chat/completions", "/coach/threads",
     "/coach/threads/{conversation_id}", "/profile", "/profile/seed",
