@@ -52,6 +52,20 @@ def storage_for(user_id: str):
 
 
 @contextmanager
+def publication_lock(storage):
+    """Keep legacy cache snapshots out of a durable commit/publication gap.
+
+    Use only for synchronous local work. The transaction must commit before
+    publishing cache data, so entering inside an existing transaction is an
+    error: its later rollback could otherwise leave a successful-looking cache.
+    """
+    with storage._con._lock:
+        if storage._con._transaction_depth:
+            raise RuntimeError("Cache publication requires an outermost transaction")
+        yield
+
+
+@contextmanager
 def run_scope(storage, user_id: str, run_id: str, thread_key: str):
     with storage.transaction():
         generation = storage.assert_family_writable(user_id)
@@ -179,11 +193,13 @@ def durable_tool(user_id: str):
                 return result
 
             def dispatch():
-                value = execute(user_id, call_id, fn.__name__, arguments, perform)
                 if fn.__name__ in {"LearnedAboutParent", "LearnedAboutChild", "FoundMoreAboutParent", "FoundMoreAboutChild"}:
                     from app.services.profiles import refresh_profile
-                    refresh_profile(user_id)
-                return value
+                    with publication_lock(storage_for(user_id)):
+                        value = execute(user_id, call_id, fn.__name__, arguments, perform)
+                        refresh_profile(user_id)
+                        return value
+                return execute(user_id, call_id, fn.__name__, arguments, perform)
 
             if current_run() is not None:
                 return dispatch()

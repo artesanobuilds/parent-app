@@ -3,7 +3,7 @@ import json
 from typing import Any, Dict, Optional, List
 from pydantic import BaseModel
 from app.profiling import ProfilingService, profiling_service
-from app.services.operations import current_run, storage_for
+from app.services.operations import current_run, storage_for, publication_lock
 
 class ParentUpdate(BaseModel):
     name: Optional[str] = None
@@ -98,9 +98,10 @@ def _update(user_id: str, payload: dict, child_name: str | None = None) -> dict:
 
 def refresh_profile(user_id: str) -> None:
     storage = storage_for(user_id)
-    with storage.transaction():
-        storage.assert_family_writable(user_id)
-        family = _load_family(storage, user_id)
+    with publication_lock(storage):
+        with storage.transaction():
+            storage.assert_family_writable(user_id)
+            family = _load_family(storage, user_id)
         if family is not None:
             profiling_service.replace_family_snapshot(user_id, family)
 

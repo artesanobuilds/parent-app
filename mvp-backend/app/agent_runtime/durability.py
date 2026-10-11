@@ -1,7 +1,7 @@
 """Durable transcript projections; adapters retain their existing wire contracts."""
 import json
 
-from app.services.operations import current_run, run_scope, reconcile_receipts
+from app.services.operations import current_run, run_scope, reconcile_receipts, publication_lock
 
 
 def scope_for(storage):
@@ -23,17 +23,18 @@ def append_transcript(storage, context, blob_name, thread_id, role, content, *, 
     internal projection with the same family deletion and snapshot retention as
     other user_data blobs; public history endpoints remain unchanged.
     """
-    with storage.transaction():
-        _assert_run(storage, context)
-        row = storage._con.execute(
-            "SELECT data FROM user_data WHERE user_id = ? AND name = ?",
-            [context.user_id, blob_name],
-        ).fetchone()
-        snapshot = json.loads(row[0]) if row else {}
-        snapshot.setdefault(thread_id, []).append({"role": role, "content": content})
-        storage.save_user_data(context.user_id, blob_name, snapshot)
-    if memory is not None:
-        memory.load_user_snapshot(context.user_id, snapshot)
+    with publication_lock(storage):
+        with storage.transaction():
+            _assert_run(storage, context)
+            row = storage._con.execute(
+                "SELECT data FROM user_data WHERE user_id = ? AND name = ?",
+                [context.user_id, blob_name],
+            ).fetchone()
+            snapshot = json.loads(row[0]) if row else {}
+            snapshot.setdefault(thread_id, []).append({"role": role, "content": content})
+            storage.save_user_data(context.user_id, blob_name, snapshot)
+        if memory is not None:
+            memory.load_user_snapshot(context.user_id, snapshot)
     # Retain the existing per-turn parquet refresh. Database commit is the
     # source of truth, including when a later snapshot export fails.
     storage.export_parquet()
