@@ -256,3 +256,57 @@ def test_bootstrap_orphan_cleanup_preserves_other_family_children(tmp_path):
             assert reopened._con.execute(f'SELECT {column} FROM {table}').fetchall() == [(expected,)]
     finally:
         reopened._con.close()
+
+
+@pytest.mark.parametrize("user_id", ["kid", "onboarding", "family:legacy"])
+def test_ambiguous_legacy_owner_never_purges_other_families(store, user_id):
+    threads = {
+        "neighbor:parent", "kid:neighbor:child:default",
+        "onboarding:neighbor:default", "family:parent",
+        f"{user_id}:default", f"kid:{user_id}:child:default",
+    }
+    for thread in threads:
+        seed_checkpoint(thread)
+    store.delete_family(user_id=user_id, actor="test")
+    with pytest.raises(ValueError, match="Ambiguous legacy"):
+        checkpointing.delete_user_threads(user_id, strict=True)
+    assert checkpointing.purge_family_checkpoints(store, user_id) == 0
+    assert set(checkpointing.checkpointer.thread_ids()) == threads
+    assert store.pending_checkpoint_purges()[0]["user_id"] == user_id
+
+
+def test_namespace_owner_matching_does_not_treat_namespace_as_family(store):
+    own = {"victim", "victim:parent", "victim:parent:c-id", "victim:default",
+           "onboarding:victim:default", "kid:victim:child:default"}
+    other = {"neighbor:parent", "onboarding:neighbor:victim", "kid:neighbor:victim:default",
+             "victim-neighbor:parent"}
+    for thread in own | other:
+        seed_checkpoint(thread)
+    assert checkpointing.delete_user_threads("victim", strict=True) == len(own)
+    assert set(checkpointing.checkpointer.thread_ids()) == other
+
+
+@pytest.mark.parametrize("source", ["account", "profile", "deleted-fence"])
+def test_registered_colon_owner_blocks_normal_prefix_purge(store, source):
+    if source == "account":
+        store.get_or_create_account("alice:legacy")
+    elif source == "profile":
+        store.save_user_data("alice:legacy", "profiles", {})
+    else:
+        store.delete_family(user_id="alice:legacy", actor="test")
+    threads = {"alice:parent", "alice:legacy:parent", "kid:alice:legacy:child:default"}
+    for thread in threads:
+        seed_checkpoint(thread)
+    store.delete_family(user_id="alice", actor="test")
+    assert checkpointing.purge_family_checkpoints(store, "alice") == 0
+    assert set(checkpointing.checkpointer.thread_ids()) == threads
+    assert any(row["user_id"] == "alice" for row in store.pending_checkpoint_purges())
+
+
+def test_registered_reserved_owner_blocks_ambiguous_namespaced_purge(store):
+    store.get_or_create_account("kid")
+    seed_checkpoint("kid:alice:child:default")  # could also be kid's parent voice thread
+    store.delete_family(user_id="alice", actor="test")
+    assert checkpointing.purge_family_checkpoints(store, "alice") == 0
+    assert checkpointing.checkpointer.thread_ids() == ["kid:alice:child:default"]
+    assert store.pending_checkpoint_purges()

@@ -344,25 +344,33 @@ class DurableCheckpointer(BaseCheckpointSaver[str]):
 checkpointer: DurableCheckpointer = DurableCheckpointer()
 
 
-def delete_user_threads(user_id: str, *, strict: bool = False) -> int:
-    """Drop every checkpoint belonging to one user. Returns threads deleted.
+def _checkpoint_owner(thread_id: str) -> str:
+    """Read the owner segment of the existing, unescaped thread namespaces."""
+    parts = thread_id.split(":")
+    if parts[0] in {"onboarding", "kid"} and len(parts) > 1:
+        return parts[1]
+    return parts[0]
 
-    Part of the consent screen's "delete history at any time" promise. Matches
-    every thread id this app mints for a family — the parent's text and voice
-    threads (`{user}:...`), the onboarding thread (`onboarding:{user}:...`) and
-    each kid's (`kid:{user}:{kid}:...`) — by user-id segment, so a new id
-    scheme can't silently start leaking. Compatibility callers get a best-effort
-    count; strict=True raises on failure or incomplete verification so lifecycle
-    cleanup can retain its durable retry obligation.
+
+def delete_user_threads(user_id: str, *, strict: bool = False) -> int:
+    """Delete verified family threads without treating a namespace as an owner.
+
+    Legacy thread keys do not escape user IDs or parent voice thread IDs. A
+    reserved or colon-containing user ID therefore has ambiguous ownership;
+    fail closed before any deletion, retaining the lifecycle retry obligation.
+    Such identities need independent ownership evidence before manual repair.
+    Compatibility callers still receive a best-effort count; strict callers
+    receive failures and must not mark the purge complete.
     """
-    prefixes = (f"{user_id}:", f"onboarding:{user_id}:", f"kid:{user_id}:")
     deleted = 0
     try:
+        if not user_id or ":" in user_id or user_id in {"kid", "onboarding"}:
+            raise ValueError("Ambiguous legacy checkpoint owner; independent ownership evidence required")
         for thread_id in checkpointer.thread_ids():
-            if thread_id.startswith(prefixes) or thread_id == user_id:
+            if _checkpoint_owner(thread_id) == user_id:
                 checkpointer.delete_thread(thread_id)
                 deleted += 1
-        if any(thread_id.startswith(prefixes) or thread_id == user_id
+        if any(_checkpoint_owner(thread_id) == user_id
                for thread_id in checkpointer.thread_ids()):
             raise RuntimeError("Checkpoint verification found remaining family threads")
     except Exception:
@@ -386,9 +394,24 @@ def purge_family_checkpoints(storage, user_id: str) -> int:
     if pending is None:
         return 0
     try:
-        count = delete_user_threads(user_id, strict=True)
-        storage.mark_checkpoint_purged(user_id, pending['generation'])
-        return count
+        # Freeze the durable identity inventory while verifying ownership and
+        # deleting SQLite rows. No async wait or provider work occurs here.
+        with storage.transaction():
+            known_users = {row[0] for row in storage._con.execute(
+                "SELECT user_id FROM user_data UNION SELECT user_id FROM user_accounts "
+                "UNION SELECT user_id FROM agent_family_fences"
+            ).fetchall()}
+            candidates = [thread for thread in checkpointer.thread_ids()
+                          if _checkpoint_owner(thread) == user_id]
+            for other in known_users - {user_id}:
+                prefixes = (f"{other}:", f"onboarding:{other}:", f"kid:{other}:")
+                if (other.startswith(user_id + ":") or user_id.startswith(other + ":")
+                        or any(thread == other or thread.startswith(prefixes)
+                               for thread in candidates)):
+                    raise ValueError("Overlapping legacy checkpoint owners; independent ownership evidence required")
+            count = delete_user_threads(user_id, strict=True)
+            storage.mark_checkpoint_purged(user_id, pending['generation'])
+            return count
     except Exception:
         logger.exception('[checkpointer] family purge remains pending for %s', user_id)
         return 0

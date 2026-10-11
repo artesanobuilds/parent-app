@@ -18,6 +18,25 @@ flag. The clear is conditional on the generation seen before cleanup. A failed
 or incomplete sweep remains pending and is retried at startup and every thirty
 seconds. No new HTTP response fields are introduced.
 
+Checkpoint ownership is parsed by namespace, never by a generic prefix:
+`onboarding:<owner>:...`, `kid:<owner>:...`, or `<owner>:...` for parent
+threads. Existing keys are unescaped. Reserved user IDs `kid` and `onboarding`,
+and IDs containing `:`, cannot be resolved safely: for example, a parent voice
+thread for user `kid` can have the same key as another family's kid thread.
+Cleanup refuses these identities before deleting any checkpoint, retains the
+pending flag, and blocks new scoped runs. Automatic retries cannot resolve
+this ambiguity; an operator needs independent ownership evidence and a
+reviewed repair before clearing the obligation. No checkpoint key or HTTP
+schema changes in this PR. Historical identities containing delimiters require
+ownership reconciliation before rollout. Lifecycle purge also checks the known
+identity inventory (`user_data`, `user_accounts`, and retained family fences)
+under the writer lock. A normal user such as `alice` cannot purge a registered
+`alice:legacy` user's keys; known reserved owners also block ambiguous
+namespaced candidates. IDs absent from every durable identity source cannot be
+reconstructed from unescaped keys alone and require historical ownership
+reconciliation. Compatibility direct-purge calls lack this inventory; lifecycle
+cleanup always uses the guarded `purge_family_checkpoints` entry point.
+
 Snapshot cleanup uses strict export, reopens every exported parquet, verifies
 absence of swept user rows, and verifies required parent/child joins. Only then
 does it clear `snapshot_purge_pending` and publish the updated fence snapshot.
