@@ -146,3 +146,11 @@ def test_family_fence_joins_kid_graph_before_checkpoint_purge(setup):
         checkpoint_writes.clear()
         execution_service.release_family('kid-family')
     asyncio.run(run())
+
+
+def test_nested_graph_counts_one_public_workflow(setup):
+    server, storage, *_ = setup
+    install(setup, [('Safe story.', [])])
+    before = server.telemetry.snapshot().get('harness.kid_text.completed', 0)
+    asyncio.run(frames(server))
+    assert server.telemetry.snapshot()['harness.kid_text.completed'] - before == 1

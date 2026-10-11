@@ -15,8 +15,9 @@ from dataclasses import dataclass
 from contextvars import ContextVar
 from typing import Any, AsyncIterator, Callable
 
-from app.agent_runtime.context import RunContext
+from app.agent_runtime.context import RunContext, bind_run
 from app.agent_runtime.events import RunEvent, normalize
+from app.agent_runtime.policies import policy_for
 from app.agent_runtime.sessions import conversation_gates
 from app import telemetry
 
@@ -107,11 +108,12 @@ async def owned_stream(context: RunContext, factory: Callable, *, wait_timeout=3
                     return
                 ownership_token = _owned_thread.set(context.thread_key)
                 try:
-                    async with aclosing(factory(disconnected)) as events:
-                        async for event in events:
-                            await publish(event)
-                            if close_on_disconnect and disconnected.is_set():
-                                break
+                    with bind_run(context):
+                        async with aclosing(factory(disconnected)) as events:
+                            async for event in events:
+                                await publish(event)
+                                if close_on_disconnect and disconnected.is_set():
+                                    break
                 finally:
                     _owned_thread.reset(ownership_token)
             outcome = "interrupted" if disconnected.is_set() else "completed"
@@ -120,10 +122,13 @@ async def owned_stream(context: RunContext, factory: Callable, *, wait_timeout=3
         except Exception as exc:
             await publish(_Failure(exc))
         finally:
-            telemetry.incr(f"harness.{context.surface}.{outcome}")
-            logger.info("[harness] run=%s surface=%s outcome=%s duration_ms=%d",
-                        context.run_id, context.surface, outcome,
-                        round((time.monotonic() - started) * 1000))
+            if acquire_ownership:
+                # Nested graph drains are part of the same safety workflow,
+                # not additional public runs. Count only the ownership holder.
+                telemetry.incr(f"harness.{context.surface}.{outcome}")
+                logger.info("[harness] run=%s surface=%s outcome=%s duration_ms=%d",
+                            context.run_id, context.surface, outcome,
+                            round((time.monotonic() - started) * 1000))
             await publish(end)
             if disconnected.is_set():
                 while not queue.empty():
@@ -208,6 +213,8 @@ class AgentExecutionService:
         Reconciliation runs before repair on each attempt. Finalization can fail;
         consumers then see an exception, never a successful stream exhaustion.
         """
+        policy = policy_for(context.surface)
+
         async def execute(disconnected):
             with scope(context) if scope else nullcontext():
                 await _call(before, context)
@@ -229,7 +236,8 @@ class AgentExecutionService:
                                 # internal event may still represent a business effect.
                                 if raw.get("event") == "on_tool_start":
                                     tool_started = True
-                                if is_internal and is_internal(raw):
+                                if ("mvp:internal" in (raw.get("tags") or ())
+                                        or (is_internal and is_internal(raw))):
                                     continue
                                 event = normalize(raw)
                                 if event is None:
@@ -243,7 +251,7 @@ class AgentExecutionService:
                         break
                     except Exception as exc:
                         # No text is insufficient: a tool may already have committed.
-                        if (attempt == 1 and not text and not tool_started
+                        if (policy.allow_repair_retry and attempt == 1 and not text and not tool_started
                                 and not disconnected.is_set()
                                 and is_retryable and is_retryable(exc)):
                             logger.warning("[harness] dangling tool call mid-run — repairing and retrying run=%s surface=%s",

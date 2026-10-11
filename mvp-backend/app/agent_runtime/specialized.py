@@ -2,6 +2,7 @@
 from contextlib import aclosing
 
 from app.agent_runtime.events import normalize
+from app.agent_runtime.policies import policy_for
 from app.agent_runtime.service import execution_service, owned_stream
 
 
@@ -13,6 +14,9 @@ async def graph_events(agent, inputs, config, context, *, shared, version, repai
     disconnect without releasing its conversation gate while a tool still runs.
     Kid policies never retry a model turn automatically.
     """
+    policy = policy_for(context.surface)
+    if not policy.output_requires_moderation:
+        raise ValueError("Specialized graph adapter requires an external moderation policy")
     from app.agent import is_internal_event
     if shared:
         async with aclosing(execution_service.stream(
