@@ -70,6 +70,8 @@ class _ThreadSafeConn:
     def __init__(self, con: "duckdb.DuckDBPyConnection"):
         self._con = con
         self._lock = threading.RLock()
+        self._transaction_depth = 0
+        self._rollback_only = False
 
     def execute(self, sql: str, params: Optional[list] = None) -> _BufferedResult:
         with self._lock:
@@ -91,13 +93,24 @@ class _ThreadSafeConn:
         execute() calls re-acquire it fine. Rolls back on any exception.
         """
         with self._lock:
-            self._con.execute("BEGIN TRANSACTION")
+            outer = self._transaction_depth == 0
+            if outer:
+                self._con.execute("BEGIN TRANSACTION")
+                self._rollback_only = False
+            self._transaction_depth += 1
             try:
                 yield self
-                self._con.execute("COMMIT")
-            except Exception:
-                self._con.execute("ROLLBACK")
+                if outer:
+                    if self._rollback_only:
+                        raise RuntimeError("Nested transaction failed; refusing partial commit")
+                    self._con.execute("COMMIT")
+            except BaseException:
+                self._rollback_only = True
+                if outer:
+                    self._con.execute("ROLLBACK")
                 raise
+            finally:
+                self._transaction_depth -= 1
 
     def close(self) -> None:
         with self._lock:
@@ -114,6 +127,8 @@ logger = logging.getLogger(__name__)
 # identity subset and legal_acceptances. One shared list means the two
 # cascades cannot drift when a new user-keyed table is added — add it HERE.
 FAMILY_CASCADE_TABLES: List[str] = [
+    "agent_operation_receipts",
+    "agent_runs",
     "kid_agent_crisis_locks",
     "kid_agent_configs",
     "kid_credentials",
@@ -1091,6 +1106,9 @@ class DuckDBStorage(StorageBackend):
     # snapshot filename. Used for both export (A2/A3) and bootstrap-merge (A2).
     # auth_tokens is safe to export — only sha256 hashes are stored at rest.
     BOOTSTRAP_TABLES = [
+        ("agent_family_fences", "agent_family_fences.parquet"),
+        ("agent_runs", "agent_runs.parquet"),
+        ("agent_operation_receipts", "agent_operation_receipts.parquet"),
         ("user_data", "mvp.parquet"),
         ("categories", "categories.parquet"),
         ("articles", "articles.parquet"),
@@ -1275,6 +1293,17 @@ class DuckDBStorage(StorageBackend):
                 # restart is "the last committed state").
                 logger.warning(f"[duckdb] bootstrap of {table} from {pq_name} skipped: {exc}")
 
+        # A crash after the deletion commit but before snapshot export leaves
+        # old parquet rows. The durable tombstone wins over those snapshots.
+        for (deleted_user,) in self._con.execute(
+            "SELECT user_id FROM agent_family_fences WHERE deleted = TRUE"
+        ).fetchall():
+            has_rows = any(self._con.execute(
+                f"SELECT 1 FROM {table} WHERE user_id = ? LIMIT 1", [deleted_user]
+            ).fetchone() for table in FAMILY_CASCADE_TABLES)
+            if has_rows:
+                self.delete_family(user_id=deleted_user, actor="snapshot-recovery")
+
         # Seed legal documents from repo markdown AFTER the bootstrap merge, so
         # a slug that already has a published row (restored from parquet, or
         # CMS-published) is never re-seeded — otherwise a redeploy would
@@ -1319,21 +1348,44 @@ class DuckDBStorage(StorageBackend):
 
     # ── StorageBackend interface ──────────────────────────────────────
 
+    def assert_family_writable(self, user_id: str, generation: int | None = None) -> int:
+        """Called while holding the transaction lock, before any harness write."""
+        row = self._con.execute(
+            "SELECT generation, deleted FROM agent_family_fences WHERE user_id = ?", [user_id]
+        ).fetchone()
+        current = row[0] if row else 0
+        if (row and row[1]) or (generation is not None and generation != current):
+            raise PermissionError("Family was deleted or reset during this run")
+        return current
+
+    def mark_checkpoint_purged(self, user_id: str) -> None:
+        self._con.execute(
+            "UPDATE agent_family_fences SET checkpoint_purge_pending = FALSE WHERE user_id = ?",
+            [user_id],
+        )
+
     def save_user_data(self, user_id: str, name: str, data: Dict[str, Any]) -> None:
         try:
             payload = json.dumps(data, ensure_ascii=False)
-            self._con.execute(
-                """
-                INSERT INTO user_data (user_id, name, data, updated_at)
-                VALUES (?, ?, ?, now())
-                ON CONFLICT (user_id, name)
-                DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at
-                """,
-                [user_id, name, payload],
-            )
+            with self._con.transaction():
+                from app.services.operations import current_run
+                run = current_run()
+                if run and run.user_id != user_id:
+                    raise PermissionError("Write tenant does not match authenticated run")
+                self.assert_family_writable(user_id, run.generation if run else None)
+                self._con.execute(
+                    """
+                    INSERT INTO user_data (user_id, name, data, updated_at)
+                    VALUES (?, ?, ?, now())
+                    ON CONFLICT (user_id, name)
+                    DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at
+                    """,
+                    [user_id, name, payload],
+                )
             logger.debug(f"[duckdb] saved {name} for user {user_id}")
         except Exception as exc:
             logger.error(f"[duckdb] failed to save {name} for user {user_id}: {exc}")
+            raise
 
     def load_user_data(self, user_id: str, name: str) -> Optional[Dict[str, Any]]:
         try:
@@ -2412,6 +2464,13 @@ class DuckDBStorage(StorageBackend):
         # auth_tokens still present). The proxy holds the connection lock for
         # the duration, so no other thread joins this transaction.
         with self._con.transaction():
+            self._con.execute(
+                "INSERT INTO agent_family_fences (user_id, generation, deleted, checkpoint_purge_pending) "
+                "VALUES (?, 1, ?, TRUE) ON CONFLICT (user_id) DO UPDATE SET "
+                "generation = agent_family_fences.generation + 1, deleted = excluded.deleted, "
+                "checkpoint_purge_pending = TRUE, updated_at = now()",
+                [user_id, action == "family_deleted"],
+            )
             # kid_messages joins via agent_id, so collect agent_ids first and
             # snapshot the pre-delete row count before running DELETEs.
             agent_ids = [r[0] for r in self._con.execute(
@@ -3259,21 +3318,23 @@ class DuckDBStorage(StorageBackend):
         """Insert a queued run and return its run_id."""
         import uuid
         run_id = str(uuid.uuid4())
-        self._con.execute(
-            """
-            INSERT INTO research_runs (
-                id, user_id, status, location_json, kids_json, params_json,
-                progress_json, candidate_count, created_at
-            ) VALUES (?, ?, 'queued', ?, ?, ?, ?, 0, now())
-            """,
-            [
-                run_id, user_id,
-                json.dumps(location, ensure_ascii=False),
-                json.dumps(kids, ensure_ascii=False),
-                json.dumps(params or {}, ensure_ascii=False),
-                json.dumps({"phase": "queued"}, ensure_ascii=False),
-            ],
-        )
+        with self._con.transaction():
+            self.assert_family_writable(user_id)
+            self._con.execute(
+                """
+                INSERT INTO research_runs (
+                    id, user_id, status, location_json, kids_json, params_json,
+                    progress_json, candidate_count, created_at
+                ) VALUES (?, ?, 'queued', ?, ?, ?, ?, 0, now())
+                """,
+                [
+                    run_id, user_id,
+                    json.dumps(location, ensure_ascii=False),
+                    json.dumps(kids, ensure_ascii=False),
+                    json.dumps(params or {}, ensure_ascii=False),
+                    json.dumps({"phase": "queued"}, ensure_ascii=False),
+                ],
+            )
         return run_id
 
     def enqueue_research_run(
@@ -3291,6 +3352,7 @@ class DuckDBStorage(StorageBackend):
         create a run. Closes the check-then-create TOCTOU on POST /research/runs.
         Returns {run_id, status, deduped}."""
         with self._con.transaction():
+            self.assert_family_writable(user_id)
             active = self.get_active_research_run(user_id)
             if active is not None:
                 # A run still `queued` hasn't been claimed by a worker yet — so
@@ -3545,18 +3607,20 @@ class DuckDBStorage(StorageBackend):
         """Insert a queued warm-up run and return its run_id."""
         import uuid
         run_id = str(uuid.uuid4())
-        self._con.execute(
-            """
-            INSERT INTO onboarding_warmup_runs (
-                id, user_id, status, steps_json, context_json, created_at
-            ) VALUES (?, ?, 'queued', ?, ?, now())
-            """,
-            [
-                run_id, user_id,
-                json.dumps(steps, ensure_ascii=False),
-                json.dumps(context or {}, ensure_ascii=False),
-            ],
-        )
+        with self._con.transaction():
+            self.assert_family_writable(user_id)
+            self._con.execute(
+                """
+                INSERT INTO onboarding_warmup_runs (
+                    id, user_id, status, steps_json, context_json, created_at
+                ) VALUES (?, ?, 'queued', ?, ?, now())
+                """,
+                [
+                    run_id, user_id,
+                    json.dumps(steps, ensure_ascii=False),
+                    json.dumps(context or {}, ensure_ascii=False),
+                ],
+            )
         return run_id
 
     def get_active_warmup_run(self, user_id: str) -> Optional[Dict[str, Any]]:
@@ -3581,6 +3645,7 @@ class DuckDBStorage(StorageBackend):
         check + insert share one transaction so two simultaneous submits can't
         both create. Returns {run_id, status, deduped}."""
         with self._con.transaction():
+            self.assert_family_writable(user_id)
             active = self.get_active_warmup_run(user_id)
             if active is not None:
                 return {"run_id": active["id"], "status": active["status"], "deduped": True}

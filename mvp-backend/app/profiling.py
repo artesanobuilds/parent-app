@@ -238,6 +238,13 @@ class ProfilingService:
         with self._lock:
             return {user: profile.snapshot() for user, profile in self._profiles.items()}
 
+    def replace_family_snapshot(self, user_id: str, snapshot: Dict[str, Any]) -> None:
+        """Refresh exactly one family after its durable command committed."""
+        fresh = ProfilingService()
+        fresh.load_snapshot({user_id: snapshot})
+        with self._lock:
+            self._profiles[user_id] = fresh._profiles[user_id]
+
     def load_snapshot(self, snapshot: Dict[str, Any]) -> None:
         """Replace in-memory profiles with a loaded snapshot."""
         with self._lock:

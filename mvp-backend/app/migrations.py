@@ -333,6 +333,27 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
     # Idempotent: only touches rows whose details_json has none of these keys.
     (24, "tracked_activities.backfill_candidate_details",
      lambda con: _backfill_tracked_activity_details(con)),
+    (25, "agent durable runs, operation receipts and family fences", """
+        CREATE TABLE IF NOT EXISTS agent_family_fences (
+            user_id TEXT PRIMARY KEY, generation BIGINT NOT NULL DEFAULT 0,
+            deleted BOOLEAN NOT NULL DEFAULT FALSE,
+            checkpoint_purge_pending BOOLEAN NOT NULL DEFAULT FALSE,
+            updated_at TIMESTAMPTZ DEFAULT now()
+        );
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            user_id TEXT NOT NULL, run_id TEXT NOT NULL, thread_key TEXT NOT NULL,
+            generation BIGINT NOT NULL, outcome TEXT NOT NULL DEFAULT 'running',
+            started_at TIMESTAMPTZ DEFAULT now(), finished_at TIMESTAMPTZ,
+            PRIMARY KEY (user_id, run_id)
+        );
+        CREATE TABLE IF NOT EXISTS agent_operation_receipts (
+            user_id TEXT NOT NULL, run_id TEXT NOT NULL, thread_key TEXT NOT NULL,
+            operation_id TEXT NOT NULL, command TEXT NOT NULL,
+            argument_digest TEXT NOT NULL, result_json JSON NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            PRIMARY KEY (user_id, thread_key, operation_id)
+        );
+    """),
 ]
 
 

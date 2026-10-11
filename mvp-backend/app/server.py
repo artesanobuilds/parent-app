@@ -439,15 +439,23 @@ def persist_state(user_id: str | None = None):
         # Include profile-only users
         user_ids |= set(profiling_service.export_snapshot().keys())
 
-    for uid in user_ids:
-        storage_backend.save_user_data(uid, "chat_threads", chat_memory.snapshot_user(uid))
-        storage_backend.save_user_data(uid, "onboarding_threads", onboarding_memory.snapshot_user(uid))
-
-    # Persist profiles for targeted users
     all_profiles = profiling_service.export_snapshot()
     for uid in user_ids:
-        if uid in all_profiles:
-            storage_backend.save_user_data(uid, "profiles", all_profiles[uid])
+        try:
+            with storage_backend.transaction():
+                storage_backend.assert_family_writable(uid)
+                storage_backend.save_user_data(uid, "chat_threads", chat_memory.snapshot_user(uid))
+                storage_backend.save_user_data(uid, "onboarding_threads", onboarding_memory.snapshot_user(uid))
+                if uid in all_profiles:
+                    storage_backend.save_user_data(uid, "profiles", all_profiles[uid])
+        except PermissionError:
+            if user_id is not None:
+                raise
+            # A read can lazily re-create an empty cache after deletion. Global
+            # shutdown snapshots discard that cache; they never resurrect it.
+            profiling_service.remove_family(uid)
+            chat_memory.remove_user(uid)
+            onboarding_memory.remove_user(uid)
 
     storage_backend.export_parquet()
     logger.debug(f"[storage] persisted state for users: {list(user_ids)}")
