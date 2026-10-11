@@ -477,10 +477,10 @@ async def generate_stream(message: str, thread_id: str, user_id: str) -> AsyncGe
     from app.agent_runtime.policies import shared_execution_enabled
     from app.agent_runtime.service import execution_service, owned_stream, RunInterrupted
     from app.agent_runtime.durability import scope_for, reconcile_receipts, append_transcript
-    from app.agent_runtime.sessions import resolve_parent_thread
+    from app.agent_runtime.sessions import resolve_parent_thread, resolve_parent_conversation
 
     shared = shared_execution_enabled("chat")
-    conversation_id = coach_threads.active_conversation_id(user_id)
+    conversation_id = resolve_parent_conversation(user_id, "chat", coach_threads)
     context = RunContext(user_id, "chat", resolve_parent_thread(
         user_id, "chat", thread_id, conversation_id), conversation_id)
     if not shared:

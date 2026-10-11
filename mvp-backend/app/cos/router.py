@@ -68,12 +68,14 @@ async def _cos_chat_stream(user_id: str, thread_id: str, message: str):
     from app.agent_runtime.policies import shared_execution_enabled
     from app.agent_runtime.service import execution_service, owned_stream, RunInterrupted
     from app.agent_runtime.durability import scope_for, reconcile_receipts, append_cos_transcript
-    from app.agent_runtime.sessions import resolve_parent_thread
+    from app.agent_runtime.sessions import resolve_parent_thread, resolve_parent_conversation
     from app.cost_logging import CostLoggingCallbackHandler
 
     shared = shared_execution_enabled("cos")
-    # PR4 separately changes named-conversation admission; default key stays exact.
-    context = RunContext(user_id, "cos", resolve_parent_thread(user_id, "cos", thread_id))
+    from app.server import coach_threads
+    conversation_id = resolve_parent_conversation(user_id, "cos", coach_threads)
+    context = RunContext(user_id, "cos", resolve_parent_thread(
+        user_id, "cos", thread_id, conversation_id), conversation_id)
     storage = _storage()
     if not shared:
         async def legacy(disconnected):
@@ -145,7 +147,7 @@ async def _cos_chat_stream_legacy(user_id: str, thread_id: str, message: str, *,
     append_cos_transcript(storage, context, thread_id, "user", message)
 
     agent = get_cos_agent(user_id)
-    memory_key = agent_module.thread_key(user_id, "cos", thread_id)
+    memory_key = context.thread_key
     from app.cost_logging import CostLoggingCallbackHandler, new_workflow_id
     cost_cb = CostLoggingCallbackHandler(
         feature="cos", workflow=new_workflow_id(), session=thread_id, user=user_id

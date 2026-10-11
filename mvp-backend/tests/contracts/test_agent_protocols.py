@@ -85,8 +85,8 @@ def test_legacy_checkpoint_namespaces_remain_stable(harness):
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="PR4: COS does not yet resolve the active named conversation")
-def test_cos_follows_active_named_conversation(harness):
+def test_cos_follows_active_named_conversation(harness, monkeypatch):
+    monkeypatch.setenv("MVP_COS_ACTIVE_CONVERSATION", "1")
     h = harness
     h.server.coach_threads.touch(h.user, "c-named")
     post(h, "/chat")
