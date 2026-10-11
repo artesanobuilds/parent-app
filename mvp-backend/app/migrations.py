@@ -338,8 +338,11 @@ MIGRATIONS: List[Tuple[int, str, MigrationBody]] = [
             user_id TEXT PRIMARY KEY, generation BIGINT NOT NULL DEFAULT 0,
             deleted BOOLEAN NOT NULL DEFAULT FALSE,
             checkpoint_purge_pending BOOLEAN NOT NULL DEFAULT FALSE,
+            snapshot_purge_pending BOOLEAN NOT NULL DEFAULT FALSE,
             updated_at TIMESTAMPTZ DEFAULT now()
         );
+        ALTER TABLE agent_family_fences ADD COLUMN IF NOT EXISTS snapshot_purge_pending
+            BOOLEAN DEFAULT FALSE;
         CREATE TABLE IF NOT EXISTS agent_runs (
             user_id TEXT NOT NULL, run_id TEXT NOT NULL, thread_key TEXT NOT NULL,
             generation BIGINT NOT NULL, outcome TEXT NOT NULL DEFAULT 'running',

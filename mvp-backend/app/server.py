@@ -1,5 +1,6 @@
 from app.agent_runtime.adapters.text import encode as encode_run_event
 from app.agent_runtime.events import RunEvent
+import asyncio
 import json
 import logging
 import os
@@ -81,6 +82,8 @@ async def lifespan(app: FastAPI):
     from app.agent_runtime.dependencies import RuntimeDependencies, bind
     bind(RuntimeDependencies(storage_backend, profiling_service, chat_memory,
                              onboarding_memory, coach_threads))
+    await checkpointing.retry_pending_checkpoint_purges(storage_backend)
+    purge_retries = asyncio.create_task(checkpointing.checkpoint_purge_retries(storage_backend))
     load_persisted_state()
     # Activity-research background worker. Sweep any run a prior restart left
     # 'running' back to 'queued' (re-runs are idempotent), then start the daemon.
@@ -120,6 +123,8 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("[warmup] worker failed to start")
     yield
+    purge_retries.cancel()
+    await asyncio.gather(purge_retries, return_exceptions=True)
     try:
         from app.research.worker import research_worker
         if research_worker is not None:
@@ -2447,7 +2452,23 @@ def kid_moderation_events(user_id: str, kid_name: Optional[str] = None,
 
 
 @app.delete("/family/{user_id}")
-def delete_family(user_id: str, authenticated_user: str = Depends(current_user)):
+async def delete_family(user_id: str, authenticated_user: str = Depends(current_user)):
+    authorize_user_match(authenticated=authenticated_user, claimed=user_id)
+    from app.agent_runtime.service import execution_service
+    # Close admission and join active/queued producers BEFORE either database
+    # is touched. No transaction may remain open while graph tools drain.
+    async with execution_service.family_fence(user_id):
+        return await checkpointing.join_cleanup(_delete_family_data, user_id, authenticated_user)
+
+
+def invalidate_family_agent_caches(user_id: str) -> None:
+    agent_module._agent_cache.pop(user_id, None)
+    from app import onboarding_agent
+    onboarding_agent._onboarding_agent_cache.pop(user_id, None)
+    kid_agent_service.invalidate_user(user_id)
+
+
+def _delete_family_data(user_id: str, authenticated_user: str):
     """
     Honor the consent screen's "delete history at any time" promise. Cascades
     across every kid-data table; writes one audit_events row recording the
@@ -2493,7 +2514,8 @@ def delete_family(user_id: str, authenticated_user: str = Depends(current_user))
     # Agent conversation checkpoints are durable now — sweep every thread this
     # family owns (parent text + voice, onboarding, each kid). Never raises;
     # the DB cascade above already stands.
-    _threads_purged = checkpointing.delete_user_threads(user_id)
+    invalidate_family_agent_caches(user_id)
+    _threads_purged = checkpointing.purge_family_checkpoints(storage_backend, user_id)
     if _threads_purged:
         counts["agent_threads"] = _threads_purged
     # Photos live outside the DB entirely — sweep the family's whole blob
@@ -2509,7 +2531,7 @@ def delete_family(user_id: str, authenticated_user: str = Depends(current_user))
         except Exception:
             logger.warning("[delete-family] PostHog person deletion failed (non-fatal)")
     try:
-        storage_backend.export_all_parquet()
+        storage_backend.refresh_family_snapshots(user_id)
     except Exception:
         # The DB rows are gone (the delete stands); a failed snapshot refresh
         # must be visible, not silent — the stale snapshot still holds PII.

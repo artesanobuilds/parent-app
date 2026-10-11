@@ -1293,16 +1293,26 @@ class DuckDBStorage(StorageBackend):
                 # restart is "the last committed state").
                 logger.warning(f"[duckdb] bootstrap of {table} from {pq_name} skipped: {exc}")
 
+        # A partial export can refresh a parent snapshot while leaving its
+        # old child snapshot. Clean only the known required joins, after every
+        # table has loaded, so those orphan records cannot resurrect.
+        self._remove_orphaned_family_children()
+
         # A crash after the deletion commit but before snapshot export leaves
         # old parquet rows. The durable tombstone wins over those snapshots.
-        for (deleted_user,) in self._con.execute(
-            "SELECT user_id FROM agent_family_fences WHERE deleted = TRUE"
+        for recovered_user, permanently_deleted, snapshot_pending in self._con.execute(
+            "SELECT user_id, deleted, snapshot_purge_pending FROM agent_family_fences "
+            "WHERE deleted = TRUE OR snapshot_purge_pending = TRUE"
         ).fetchall():
+            swept_tables = FAMILY_CASCADE_TABLES if permanently_deleted else [
+                table for table in FAMILY_CASCADE_TABLES if table not in FAMILY_RESET_SKIP_TABLES
+            ]
             has_rows = any(self._con.execute(
-                f"SELECT 1 FROM {table} WHERE user_id = ? LIMIT 1", [deleted_user]
-            ).fetchone() for table in FAMILY_CASCADE_TABLES)
-            if has_rows:
-                self.delete_family(user_id=deleted_user, actor="snapshot-recovery")
+                f"SELECT 1 FROM {table} WHERE user_id = ? LIMIT 1", [recovered_user]
+            ).fetchone() for table in swept_tables)
+            if snapshot_pending or has_rows:
+                cascade = self.delete_family if permanently_deleted else self.reset_family
+                cascade(user_id=recovered_user, actor="snapshot-recovery")
 
         # Seed legal documents from repo markdown AFTER the bootstrap merge, so
         # a slug that already has a published row (restored from parquet, or
@@ -1351,18 +1361,89 @@ class DuckDBStorage(StorageBackend):
     def assert_family_writable(self, user_id: str, generation: int | None = None) -> int:
         """Called while holding the transaction lock, before any harness write."""
         row = self._con.execute(
-            "SELECT generation, deleted FROM agent_family_fences WHERE user_id = ?", [user_id]
+            "SELECT generation, deleted, checkpoint_purge_pending, snapshot_purge_pending FROM agent_family_fences WHERE user_id = ?", [user_id]
         ).fetchone()
         current = row[0] if row else 0
-        if (row and row[1]) or (generation is not None and generation != current):
-            raise PermissionError("Family was deleted or reset during this run")
+        if (row and (row[1] or row[2] or row[3])) or (generation is not None and generation != current):
+            raise PermissionError("Family was deleted, reset, or is awaiting durable cleanup")
         return current
 
-    def mark_checkpoint_purged(self, user_id: str) -> None:
-        self._con.execute(
-            "UPDATE agent_family_fences SET checkpoint_purge_pending = FALSE WHERE user_id = ?",
-            [user_id],
-        )
+    _FAMILY_CHILD_JOINS = (
+        ("kid_messages", "agent_id", "kid_agent_configs"),
+        ("window_notifications", "window_id", "registration_windows"),
+        ("circle_messages", "conversation_id", "circle_conversations"),
+        ("circle_participants", "conversation_id", "circle_conversations"),
+    )
+
+    def _remove_orphaned_family_children(self) -> None:
+        with self._con.transaction():
+            for child, foreign_key, parent in self._FAMILY_CHILD_JOINS:
+                self._con.execute(
+                    f"DELETE FROM {child} WHERE {foreign_key} NOT IN (SELECT id FROM {parent})"
+                )
+
+    def pending_family_cleanups(self) -> List[Dict[str, Any]]:
+        return [dict(user_id=row[0], generation=row[1]) for row in self._con.execute(
+            "SELECT user_id, generation FROM agent_family_fences "
+            "WHERE checkpoint_purge_pending = TRUE OR snapshot_purge_pending = TRUE"
+        ).fetchall()]
+
+    def refresh_family_snapshots(self, user_id: str) -> None:
+        """Keep reset/deletion fenced until all snapshots are readable and clean.
+
+        Ordinary shutdown export is best-effort. A deletion obligation is not:
+        failure must survive restart and prevent stale parquet resurrection.
+        """
+        with self._con._lock:
+            fence = self._con.execute(
+                "SELECT generation, deleted, snapshot_purge_pending FROM agent_family_fences WHERE user_id=?",
+                [user_id],
+            ).fetchone()
+            if not fence or not fence[2]:
+                return
+            self.export_all_parquet(strict=True)
+            absent_tables = set(FAMILY_CASCADE_TABLES)
+            if not fence[1]:
+                absent_tables -= FAMILY_RESET_SKIP_TABLES
+            for table, filename in self.BOOTSTRAP_TABLES:
+                path = str(self.parquet_dir / filename)
+                # Re-open every exported file, including the joined/circle
+                # tables. For user-keyed swept tables also verify absence.
+                self._con.execute("SELECT count(*) FROM read_parquet(?)", [path]).fetchone()
+                if table in absent_tables and self._con.execute(
+                    "SELECT count(*) FROM read_parquet(?) WHERE user_id=?", [path, user_id]
+                ).fetchone()[0]:
+                    raise RuntimeError("Snapshot still contains removed family rows")
+            files = dict(self.BOOTSTRAP_TABLES)
+            for child, foreign_key, parent in self._FAMILY_CHILD_JOINS:
+                if self._con.execute(
+                    f"SELECT count(*) FROM read_parquet(?) WHERE {foreign_key} "
+                    "NOT IN (SELECT id FROM read_parquet(?))",
+                    [str(self.parquet_dir / files[child]), str(self.parquet_dir / files[parent])],
+                ).fetchone()[0]:
+                    raise RuntimeError("Snapshot contains orphaned family child rows")
+            with self._con.transaction():
+                self._con.execute(
+                    "UPDATE agent_family_fences SET snapshot_purge_pending=FALSE "
+                    "WHERE user_id=? AND generation=?", [user_id, fence[0]],
+                )
+                # Publish the cleared obligation only after clean data files.
+                # Failure rolls back the flag; new family writes stay blocked.
+                self._export_table_atomic("agent_family_fences", self.parquet_dir / "agent_family_fences.parquet")
+
+    def pending_checkpoint_purges(self) -> List[Dict[str, Any]]:
+        return [dict(user_id=row[0], generation=row[1]) for row in self._con.execute(
+            "SELECT user_id, generation FROM agent_family_fences "
+            "WHERE checkpoint_purge_pending = TRUE"
+        ).fetchall()]
+
+    def mark_checkpoint_purged(self, user_id: str, generation: int | None = None) -> bool:
+        query = "UPDATE agent_family_fences SET checkpoint_purge_pending = FALSE WHERE user_id = ?"
+        params = [user_id]
+        if generation is not None:
+            query += " AND generation = ?"
+            params.append(generation)
+        return bool(self._con.execute(query + " RETURNING user_id", params).fetchone())
 
     def save_user_data(self, user_id: str, name: str, data: Dict[str, Any]) -> None:
         try:
@@ -2464,11 +2545,15 @@ class DuckDBStorage(StorageBackend):
         # auth_tokens still present). The proxy holds the connection lock for
         # the duration, so no other thread joins this transaction.
         with self._con.transaction():
+            if action == "family.reset" and self._con.execute(
+                "SELECT 1 FROM agent_family_fences WHERE user_id=? AND deleted=TRUE", [user_id]
+            ).fetchone():
+                raise PermissionError("A deleted family cannot be reset")
             self._con.execute(
-                "INSERT INTO agent_family_fences (user_id, generation, deleted, checkpoint_purge_pending) "
-                "VALUES (?, 1, ?, TRUE) ON CONFLICT (user_id) DO UPDATE SET "
+                "INSERT INTO agent_family_fences (user_id, generation, deleted, checkpoint_purge_pending, snapshot_purge_pending) "
+                "VALUES (?, 1, ?, TRUE, TRUE) ON CONFLICT (user_id) DO UPDATE SET "
                 "generation = agent_family_fences.generation + 1, deleted = excluded.deleted, "
-                "checkpoint_purge_pending = TRUE, updated_at = now()",
+                "checkpoint_purge_pending = TRUE, snapshot_purge_pending = TRUE, updated_at = now()",
                 [user_id, action == "family_deleted"],
             )
             # kid_messages joins via agent_id, so collect agent_ids first and
@@ -5985,19 +6070,24 @@ class DuckDBStorage(StorageBackend):
             for r in rows
         ]
 
-    def export_all_parquet(self) -> None:
+    def export_all_parquet(self, *, strict: bool = False) -> None:
         """
         Export every table in BOOTSTRAP_TABLES atomically (A2). This is the
         full backup path — kid/consent/audit/auth tables included, so a volume
         rebuild can recover them. user_data uses its conventional mvp.parquet
         name. Failures on individual tables are logged but don't abort the rest.
+        strict=True raises after attempting every table if any export failed.
         """
+        failures = []
         for table, pq_name in self.BOOTSTRAP_TABLES:
             target = self.parquet_dir / pq_name
             try:
                 self._export_table_atomic(table, target)
             except Exception as exc:
                 logger.error(f"[duckdb] export of {table} → {pq_name} failed: {exc}")
+                failures.append(table)
+        if strict and failures:
+            raise OSError("Snapshot export failed for: " + ", ".join(failures))
 
     def ping(self) -> bool:
         """Cheap liveness probe for the health check (A6): confirms the DB is

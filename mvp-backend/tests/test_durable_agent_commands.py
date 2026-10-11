@@ -133,6 +133,8 @@ def test_reset_fences_old_run_but_accepts_new_onboarding(storage):
         storage.reset_family(user_id="alice", actor="admin")
         with pytest.raises(PermissionError):
             execute("alice", "late", "AddTodo", {}, lambda: None)
+    storage.mark_checkpoint_purged("alice")
+    storage.refresh_family_snapshots("alice")
     with run_scope(storage, "alice", "new", "thread"):
         execute("alice", "op", "AddTodo", {}, lambda: storage.add_todo("alice", title="New"))
     assert len(storage.list_todos("alice")) == 1
