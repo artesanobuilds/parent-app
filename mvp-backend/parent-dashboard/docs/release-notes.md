@@ -10,6 +10,15 @@ Every update, newest first — what changed and how to find it. Each entry says
 whether it is available now or prepared for an upcoming rollout. Features marked
 *app update* arrive on your phone through TestFlight.
 
+## October 10, 2026 — searches and setup recover more reliably
+
+**Available with the next backend rollout; no app update required.** Canceling
+an activity search prevents that attempt from publishing late results. Searches
+that run out of time finish with an error you can retry. Start searches from
+your existing **Coach** or activity-planning screen. During account setup, an
+unavailable preparation step no longer keeps every later step waiting; continue
+through the existing welcome flow as usual.
+
 ## October 10, 2026 — continue the selected coaching conversation
 
 **Available after the backend rollout is enabled; no app update required.**
