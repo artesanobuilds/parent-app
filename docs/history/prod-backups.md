@@ -131,3 +131,14 @@ locks that.
     - `8ee35ebdcc23b41758cdc5c3542ee5f1 articles.parquet`
     - `99e73584ea36c5ecbba6ea4264fb8da3 categories.parquet`
 
+
+## 2026-10-11T15:52:26.283Z
+
+- **Reason:** before harness PR #4, migration 25 and startup orphan cleanup. Deployed baseline `1c22e19d460e841100bfebb06de424db3d470eaf` (PR #3).
+- **Method:** Railway native copy-on-write snapshot of entire production `/app/data` volume; data stays on Railway. Includes DuckDB and WAL, SQLite checkpoints and sidecars, and table snapshots. No family records downloaded.
+- **Volume instance:** `1363a8c9-5b23-45ca-ab4e-1417e4d9a67d`.
+- **Backup ID:** `d39c36c7-ba7d-48bb-a53a-e74c0f23ceba`.
+- **Name:** `pre-harness-pr4-migration25-20261011`.
+- **Verification:** platform backup list returned matching ID/name/time, native backing snapshot identifier, 156 MB referenced; source volume READY. [Railway documents listed backups as available for restore](https://docs.railway.com/volumes/backups).
+- **Limits:** workflow-status API returned Not Authorized. No restore drill or content-level checksum performed; record is a platform-listed crash-consistent snapshot, not a restore-tested or application-quiesced backup. Databases remain separate transaction domains. No backup restore was attempted.
+- **Baseline:** 45 articles, 110 categories; all harness rollout flags unset/default off. Content backup and checksum manifest also recorded above.
