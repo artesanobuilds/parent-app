@@ -49,11 +49,16 @@ The explicit `--apply` request writes only these seven kid settings:
 | `retranscribe_on_turn_timeout` | `false` |
 | `soft_timeout_config.timeout_seconds` | 1 second |
 | `soft_timeout_config.message` | “Let me think.” |
-| `soft_timeout_config.additional_soft_timeout_messages` | “Hmm, let me see.”; “I'm thinking.” |
+| `soft_timeout_config.additional_soft_timeout_messages` | 7 short alternatives defined in the operator tool (8 phrases including the base message) |
 | `soft_timeout_config.randomize_fillers` | `true` |
 | `soft_timeout_config.use_llm_generated_message` | `false` |
 
-These are neutral, short static fillers without promises about response time.
+The pool contains 8 distinct short phrases, randomized by the provider. The live
+API rejects more than 7 additional messages (8 including the base message). Examples
+include “Hmm,” “Let's see,” and “Let me find the words.” Randomization does not
+guarantee no consecutive repeats; no session-level no-repeat control is enforced
+by this tool. Context-generated fillers remain disabled. These are neutral,
+short static fillers without promises about response time.
 They do not represent the backend's substantive answer. Seven seconds controls
 taking a turn after user silence; 1 second controls feedback while the model
 is working. Neither setting is the model's request deadline. The mapping and
@@ -72,7 +77,11 @@ with the July setup record's observed clamp to 3. The tool does not send that
 field or promise to preserve provider-normalized unsent fields. Apply and restore
 report its observed integer readback as `observed_filler_cap` (null when missing
 or unsupported), alongside the selected-value verification result. Actual filler
-frequency must still be checked by listening.
+frequency must still be checked by listening. When the pool was subsequently
+expanded to eight phrases, the provider normalized that cap to 8. The operator
+readback reports it; the one-second threshold and actual reply duration determine
+when feedback is needed. Neither this tool nor randomization guarantees only one
+filler per turn or prevents consecutive repeats.
 
 ## October 11 latency follow-up
 

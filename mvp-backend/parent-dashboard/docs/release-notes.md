@@ -10,6 +10,12 @@ Every update, newest first — what changed and how to find it. Each entry says
 whether it is available now or prepared for an upcoming rollout. Features marked
 *app update* arrive on your phone through TestFlight.
 
+## October 11, 2026 — more variety while your companion thinks
+
+**Live now; no app update required.** Start a fresh conversation from **Home →
+Hand to kid**. Thinking phrases now draw from 8 short options instead of three,
+with the same one-second timing. The random selection may still repeat a phrase.
+
 ## October 11, 2026 — earlier companion feedback
 
 **Live now; no app update required.** Start a fresh conversation from **Home →
