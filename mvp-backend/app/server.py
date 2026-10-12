@@ -2010,7 +2010,7 @@ async def _generate_kid_stream_impl(
     kid_wf = context.run_id
 
     # Pre-input gate
-    pre = moderation.moderate_input(
+    pre = await moderation.amoderate_input(
         user_id=user_id, kid_name=kid_name, agent_id=agent_id,
         age_band=age_band, text=message,
         cost_workflow=kid_wf, cost_user=user_id,
@@ -2062,7 +2062,7 @@ async def _generate_kid_stream_impl(
                 severity=pre.severity, category=pre.category,
                 action="blocked_input", excerpt=message,
             )
-            redirect = "Hmm, let's try a different question — your grown-up will see this chat."
+            redirect = moderation.moderation_redirect(pre)
             yield f"data: {json.dumps({'type': 'token', 'content': redirect})}\n\n"
             yield f"data: {json.dumps({'type': 'blocked', 'content': pre.category})}\n\n"
             yield "data: [DONE]\n\n"
@@ -2149,7 +2149,7 @@ async def _generate_kid_stream_impl(
                     if not content:
                         continue
                     assistant_buffer += content
-                    for safe in sm.feed(content):
+                    for safe in await sm.afeed(content):
                         yield f"data: {json.dumps({'type': 'token', 'content': safe})}\n\n"
                     if sm.state.value == "blocked":
                         # Lock/kill BEFORE the replacement reaches the kid (B-7).
@@ -2168,7 +2168,7 @@ async def _generate_kid_stream_impl(
 
         # End-of-stream flush. finalize() may flag late (under-threshold or
         # whole-output recheck) — handle that BEFORE [DONE].
-        for chunk in sm.finalize():
+        for chunk in await sm.afinalize():
             yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
 
         if sm.state.value == "blocked" and sm.block_reason:
@@ -2236,6 +2236,17 @@ def kid_agent_status(
     return {"enabled": bool(config.get("enabled")), "crisis_locked": locked}
 
 
+def _kid_voice_greeting(kid_name: str, config: Dict[str, Any]) -> str:
+    """A deterministic opener; only actual child turns count as a return visit."""
+    messages = storage_backend.get_kid_messages(
+        config["id"], thread_id="default", limit=200)
+    returning = any(message.get("role") == "user" for message in messages)
+    if returning:
+        return f"Hi again, {kid_name}. Want to keep talking, or try something new?"
+    name = (config.get("invariants") or {}).get("agent_display_name") or "your AI companion"
+    return f"Hi, {kid_name}. I'm {name}. What would you like to talk about?"
+
+
 @app.get("/voice/convai-token")
 async def voice_convai_token(
     kid_name: str,
@@ -2266,11 +2277,9 @@ async def voice_convai_token(
     if not elevenlabs_agent_id or not elevenlabs_api_key:
         raise HTTPException(status_code=503, detail="ConvAI not configured")
 
-    invariants = config.get("invariants") or {}
-    first_message = None
-    persona_examples = invariants.get("personaExamples") or invariants.get("persona_examples") or []
-    if persona_examples:
-        first_message = persona_examples[0]
+    first_message = _kid_voice_greeting(kid_name, config)
+    effective_prompt = kid_agent_service.build_effective_prompt(
+        user_id, kid_name, config, surface="voice")
 
     # Voice: intentionally NOT overridden here. By omitting the `tts.voice_id`
     # override we let ElevenLabs use the voice configured on the agent in the
@@ -2283,7 +2292,7 @@ async def voice_convai_token(
     # A "conversation" key in this dict is silently dropped — don't re-add it.
     override: Dict[str, Any] = {
         "agent": {
-            "prompt": {"prompt": config.get("system_prompt", "")},
+            "prompt": {"prompt": effective_prompt},
             "language": "en",
         },
     }
@@ -2310,19 +2319,8 @@ async def voice_convai_token(
 
         token = resp.json().get("token")
 
-    # Persist the greeting: ElevenLabs speaks first_message client-side, so it
-    # never flows through our Custom LLM and would otherwise be missing from
-    # transcripts/history. Guard against stacking — a reconnect (e.g. the
-    # mic-retry path mints a fresh token) must not append the greeting twice.
-    if first_message:
-        last = storage_backend.get_last_kid_message(agent_id, thread_id="default")
-        already_last = last is not None and last.get("role") == "assistant" \
-            and last.get("content") == first_message
-        if not already_last:
-            storage_backend.append_kid_message(
-                agent_id=agent_id, thread_id="default",
-                role="assistant", content=first_message,
-            )
+    # A token may be prefetched without a connection or microphone permission.
+    # Do not write a greeting to the transcript before it has been observed.
 
     # Cost: count voice sessions. ElevenLabs bills per CONVERSATION MINUTE — the
     # exact minutes live on the EL dashboard / post-call webhook, not here; this
@@ -2412,19 +2410,7 @@ async def voice_parent_convai_token(user_id: str = Depends(current_user)):
         raise HTTPException(status_code=503, detail="parent ConvAI not configured")
     _track("voice_session_started", user_id, {"surface": "parent"})
 
-    # Voice directive: the spoken output must be clean (no markdown/headers/lists),
-    # but the agent MUST keep emitting [Title](mvp://...) links — the Custom-LLM
-    # endpoint strips them from speech and turns them into on-screen cards.
-    voice_directive = (
-        "\n\nVOICE MODE: You are being spoken aloud to the parent. Reply in short, "
-        "natural spoken sentences — no markdown, no headers, no bullet lists, no "
-        "asterisks or bold. Keep weaving content recommendations as "
-        "[Title](mvp://library/{id}) exactly as instructed: the link text is "
-        "spoken naturally and the app shows the card."
-        " If you need to search or look something up, SAY one short sentence out "
-        "loud first — \"Let me look that up.\" — and then call the tool. Never go "
-        "silent while a tool runs: the parent hears dead air."
-    )
+    # Use the same voice policy as the actual backend answering graph.
     # client_events are NOT set here: they are AGENT-level ElevenLabs config
     # (set once per agent via the EL API/console — see
     # setup/voice-v2-elevenlabs-setup.md), and the iOS SDK only forwards the
@@ -2432,7 +2418,7 @@ async def voice_parent_convai_token(user_id: str = Depends(current_user)):
     # A "conversation" key in this dict is silently dropped — don't re-add it.
     override: Dict[str, Any] = {
         "agent": {
-            "prompt": {"prompt": build_system_prompt_for(user_id) + voice_directive},
+            "prompt": {"prompt": build_system_prompt_for(user_id, surface="voice")},
             "first_message": await _parent_voice_greeting(user_id),
             "language": "en",
         },

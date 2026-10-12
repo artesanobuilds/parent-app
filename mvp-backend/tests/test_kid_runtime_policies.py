@@ -38,6 +38,14 @@ def setup(monkeypatch, tmp_path, request):
         flagged=False, severity='low', category='ok', reason='offline', suggested_action='allow'))
     monkeypatch.setattr(moderation, 'classify_age_appropriate', lambda *args, **kwargs:
                         SimpleNamespace(age_appropriate=True))
+    async def async_clean(text):
+        return moderation.moderate_with_openai(text)
+
+    async def async_age(text, age_band, **kwargs):
+        return moderation.classify_age_appropriate(text, age_band, **kwargs)
+
+    monkeypatch.setattr(moderation, "amoderate_with_openai", async_clean)
+    monkeypatch.setattr(moderation, "aclassify_age_appropriate", async_age)
     monkeypatch.setattr(moderation, 'OUTPUT_CHUNK_BUFFER_CHARS', 0)
     yield server, storage, moderation, monkeypatch
     storage.close()

@@ -35,7 +35,6 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 
-from app.agent import get_agent
 from app import agent as agent_module
 # Reuse the kid endpoint's OpenAI-SSE helpers + the shared secret.
 from app.convai_endpoint import (
@@ -58,6 +57,11 @@ from app.agent_runtime.adapters.voice import (
     _LinkStripper, _is_plausible_link, _show_content_tool_delta,
     _MAX_LABEL, _HOLD_CAP, _LINK_RE, _LINK_TARGETS,
 )
+
+
+def get_agent(user_id: str):
+    """Use the trusted voice prompt in the graph that actually answers."""
+    return agent_module.get_agent(user_id, surface="voice")
 
 
 @router.post("/v1/parent/chat/completions")
