@@ -214,7 +214,7 @@ def test_disconnect_does_not_publish_assistant_history(rig, monkeypatch, surface
     assert rig.storage._con.execute('SELECT outcome FROM agent_runs').fetchone()[0] == 'interrupted'
 
 
-def test_shared_voice_family_fence_withholds_success_for_connected_consumer(rig, monkeypatch):
+def test_shared_voice_family_fence_withholds_success_for_connected_consumer(rig, monkeypatch, caplog):
     """Family cancellation ends the service iterator without a Completed event."""
     import asyncio
     from app.agent_runtime.service import execution_service
@@ -252,6 +252,11 @@ def test_shared_voice_family_fence_withholds_success_for_connected_consumer(rig,
     released = None
     response = asyncio.run(run())
     assert '[DONE]' not in response
-    assert 'snag on my end' in response
+    # Deliberate interruption is not an application failure or another spoken
+    # reply. In particular, deleting a family must not trigger retry advice.
+    assert 'snag on my end' not in response
+    assert ' Last' not in response
+    assert not any(record.levelname == 'ERROR' and record.name == 'app.parent_convai_endpoint'
+                   for record in caplog.records)
     assert [row['role'] for row in history(rig, 'parent_voice')] == ['user']
     assert rig.storage._con.execute('SELECT outcome FROM agent_runs').fetchone()[0] == 'interrupted'

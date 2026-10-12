@@ -1,9 +1,9 @@
 """Shared lifecycle around existing graphs, with no HTTP or storage dependency.
 
-Disconnect stops delivery, not a Python worker thread. A shielded producer drains
+Disconnect stops delivery, not a Python worker thread. A shielded producer joins
 its graph while retaining ownership; another turn cannot repair that checkpoint
-until outstanding synchronous tools finish. This intentionally does not promise
-hard cancellation or zero model spend after disconnect.
+until outstanding synchronous tools finish. Coach middleware can cancel model
+I/O at safe boundaries without canceling this producer or its running tools.
 """
 import asyncio
 import inspect
@@ -16,6 +16,7 @@ from contextvars import ContextVar
 from typing import Any, AsyncIterator, Callable
 
 from app.agent_runtime.context import RunContext, bind_run
+from app.agent_runtime.cancellation import bind_disconnect
 from app.agent_runtime.events import RunEvent, normalize
 from app.agent_runtime.policies import policy_for
 from app.agent_runtime.sessions import conversation_gates
@@ -98,17 +99,19 @@ async def owned_stream(context: RunContext, factory: Callable, *, wait_timeout=3
     async def produce():
         started = time.monotonic()
         outcome = "failed"
+        ownership_wait_ms = None
         try:
             gate = (conversation_gates.hold(context.thread_key, timeout=wait_timeout)
                     if acquire_ownership else nullcontext())
             async with gate:
+                ownership_wait_ms = round((time.monotonic() - started) * 1000)
                 # A canceled waiter must not start a turn after the prior owner exits.
                 if disconnected.is_set():
                     outcome = "interrupted"
                     return
                 ownership_token = _owned_thread.set(context.thread_key)
                 try:
-                    with bind_run(context):
+                    with bind_run(context), bind_disconnect(disconnected):
                         async with aclosing(factory(disconnected)) as events:
                             async for event in events:
                                 await publish(event)
@@ -126,9 +129,9 @@ async def owned_stream(context: RunContext, factory: Callable, *, wait_timeout=3
                 # Nested graph drains are part of the same safety workflow,
                 # not additional public runs. Count only the ownership holder.
                 telemetry.incr(f"harness.{context.surface}.{outcome}")
-                logger.info("[harness] run=%s surface=%s outcome=%s duration_ms=%d",
+                logger.info("[harness] run=%s surface=%s outcome=%s duration_ms=%d ownership_wait_ms=%s",
                             context.run_id, context.surface, outcome,
-                            round((time.monotonic() - started) * 1000))
+                            round((time.monotonic() - started) * 1000), ownership_wait_ms)
             await publish(end)
             if disconnected.is_set():
                 while not queue.empty():

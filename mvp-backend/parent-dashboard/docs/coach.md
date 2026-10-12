@@ -73,6 +73,12 @@ The waveform button starts a voice conversation with the same coach — useful
 when your hands are full, which is most of the time. Voice calls are their own
 thing and don't show up in the typed history list.
 
+Start a fresh voice call to use the latest turn settings. If a reply takes time,
+a short thinking phrase can begin after one second, chosen randomly from eight
+options. Repeats are still possible. When you interrupt, the
+coach stops generating the abandoned answer so your next turn can start sooner.
+An action already being saved is allowed to finish before the next turn begins.
+
 ## What it isn't
 
 The coach is an AI, and the app says so right under the input: it can make

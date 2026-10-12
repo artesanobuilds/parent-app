@@ -164,6 +164,8 @@ async def _stream_response(user_id: str, thread_id: str, message: str,
         async with aclosing(stream) as events:
             async for event in events:
                 yield event
+    except RunInterrupted:
+        logger.info("[parent-convai] voice turn interrupted run=%s", context.run_id)
     except Exception:
         logger.exception("[parent-convai] admission/execution failed")
         yield _openai_delta(
@@ -371,6 +373,10 @@ async def _stream_response_impl(user_id: str, thread_id: str, message: str,
                 return
 
             except Exception as exc:
+                from app.agent_runtime.service import RunInterrupted
+                if isinstance(exc, RunInterrupted):
+                    _emit_perf("interrupted")
+                    raise
                 # Poisoned mid-run (e.g. a concurrent voice request cancelled a
                 # tool call after our pre-flight check): repair and retry once,
                 # but only if nothing streamed yet — a retry after spoken output

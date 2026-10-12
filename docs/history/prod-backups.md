@@ -181,3 +181,11 @@ locks that.
 - Label: `pre-kid-filler-variety-20261012`; source volume `/app/data` READY.
 - Railway listed 159 MB referenced; no family data exported or downloaded.
 - Platform-listed snapshot; restoration has not been exercised.
+
+## 2026-10-12T01:09:41.555Z — coach voice cancellation release
+
+- Reason: pre-deploy snapshot for coach model cancellation and turn configuration; no schema changes.
+- Railway native volume backup: `93f8bf81-0964-42b8-aad6-96a1699651cd`.
+- Label: `pre-coach-voice-fix-20261012`; source volume `/app/data` READY.
+- Railway lists 161 MB referenced; no family data exported or downloaded.
+- Platform-listed snapshot; restoration has not been exercised.

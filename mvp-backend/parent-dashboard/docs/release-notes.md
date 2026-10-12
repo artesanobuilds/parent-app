@@ -10,6 +10,15 @@ Every update, newest first — what changed and how to find it. Each entry says
 whether it is available now or prepared for an upcoming rollout. Features marked
 *app update* arrive on your phone through TestFlight.
 
+## October 11, 2026 — smoother coach voice turns
+
+**Live now; no app update required.** Open **Coach → waveform button** and start
+a fresh call. Thinking phrases can begin after one second, with eight different
+options chosen randomly. Interrupted replies
+stop generating sooner, reducing the wait before your next turn; actions already
+being saved finish safely. The coach also waits for a confirmed turn before
+starting an answer, reducing canceled attempts.
+
 ## October 11, 2026 — more variety while your companion thinks
 
 **Live now; no app update required.** Start a fresh conversation from **Home →
