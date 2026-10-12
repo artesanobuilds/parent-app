@@ -495,3 +495,28 @@ The review is maintained in this Markdown source. The PDF is generated from the 
   ![Before: work can outlive requests and retained graphs accumulate. After: job attempts have explicit limits, caches evict entries and checkpoint connections are reused.](assets/refactor-05-bounded-resources.png)
 
 The figures are embedded PNGs for reliable README rendering, with matching editable SVGs in `assets/`. Reproduce this five-figure set with `python3 render_refactor_lessons.py` from this directory (`rsvg-convert` required). This implementation recap supplements the original design PDF.
+
+
+### Coach voice follow-up: cancellation boundaries (October 11, 2026)
+
+A production interruption exposed a latency tradeoff in whole-graph draining:
+replacement turns could wait behind model generation for a reply no longer being
+played. Coach voice now cancels and joins primary model I/O on disconnect, while
+retaining conversation ownership until already-dispatched tools and graph cleanup
+finish. A tool that reaches dispatch after disconnect returns a matching interrupted
+ToolMessage; throwing from that tool boundary could cancel an active sibling.
+The next model call is skipped. Expected interruptions are recorded as interrupted,
+not application errors, and lifecycle logs include `ownership_wait_ms`.
+
+This policy applies only to `parent_voice` and works with both legacy and shared
+execution flags. Text and kid policies keep their existing behavior. Internal
+summarization still drains if already running; it is outside the primary model
+wrapper and triggers only at the configured long-conversation threshold.
+
+The parent ElevenLabs agent uses a one-second soft timeout, eight random preset
+fillers, and disabled speculative turns. The filler threshold is measured by the
+provider and is not a one-second end-of-speech-to-audio guarantee. Random selection
+can repeat. The provider normalizes its soft-timeout cap to the pool size, so the
+pool does not enforce one filler per answer. `tools/parent_voice_config.py` inside
+`mvp-backend` inspects by default; explicit apply/restore modes require a private
+backup and verified readback. No mobile or REST/SSE contract changes are needed.

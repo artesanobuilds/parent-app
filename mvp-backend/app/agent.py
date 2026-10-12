@@ -31,6 +31,7 @@ Three things that are easy to get wrong here:
 """
 import json
 from app.agent_runtime.cache import AgentCache
+from app.agent_runtime.cancellation import VoiceCancellationMiddleware
 
 import logging
 import os
@@ -193,6 +194,7 @@ TOOL_CALLS_PER_RUN = int(os.getenv("MVP_TOOL_CALLS_PER_RUN", "40"))
 def build_middleware() -> list:
     """The agent harness. See the module docstring for what was rejected."""
     return [
+        VoiceCancellationMiddleware(),
         # Order matters: PII scrubs the incoming turn BEFORE anything else sees
         # it, so a card never reaches the model, the checkpoint, or the
         # summarizer's input.
