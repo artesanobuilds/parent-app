@@ -47,7 +47,7 @@ The explicit `--apply` request writes only these seven kid settings:
 | --- | --- |
 | `turn_timeout` | 7 seconds |
 | `retranscribe_on_turn_timeout` | `false` |
-| `soft_timeout_config.timeout_seconds` | 2.5 seconds |
+| `soft_timeout_config.timeout_seconds` | 1 second |
 | `soft_timeout_config.message` | “Let me think.” |
 | `soft_timeout_config.additional_soft_timeout_messages` | “Hmm, let me see.”; “I'm thinking.” |
 | `soft_timeout_config.randomize_fillers` | `true` |
@@ -55,7 +55,7 @@ The explicit `--apply` request writes only these seven kid settings:
 
 These are neutral, short static fillers without promises about response time.
 They do not represent the backend's substantive answer. Seven seconds controls
-taking a turn after user silence; 2.5 seconds controls feedback while the model
+taking a turn after user silence; 1 second controls feedback while the model
 is working. Neither setting is the model's request deadline. The mapping and
 filler behavior are described in ElevenLabs' [conversation-flow documentation](https://elevenlabs.io/docs/eleven-agents/customization/conversation-flow);
 updates use its [agent PATCH API](https://elevenlabs.io/docs/api-reference/agents/update).
@@ -73,6 +73,29 @@ field or promise to preserve provider-normalized unsent fields. Apply and restor
 report its observed integer readback as `observed_filler_cap` (null when missing
 or unsupported), alongside the selected-value verification result. Actual filler
 frequency must still be checked by listening.
+
+## October 11 latency follow-up
+
+The provider-only adjustment lowers the static filler threshold from 2.5 to
+1 second. It changes feedback during a wait; it does not make the substantive
+answer faster. A fresh voice connection is needed to use the new configuration.
+All safety gates, turn eagerness, silence timeout, parent settings, and TTS remain
+unchanged. Preserve the earlier tool revision when restoring its earlier backup:
+backups are bound to the target values of the tool version that created them.
+
+The recent production timing review found that streaming was already active and
+first tokens were forwarded immediately. Provider first-audio timing was longer
+than backend first-content timing; some short replies waited for a speakable chunk.
+The input gate combines a moderation API call and a GPT-5.2 age classifier in
+parallel, before answer generation. A final output gate delays stream completion.
+Existing request-to-first-token metrics include input moderation, so they cannot
+by themselves isolate the model's generation latency. Do not remove checks or
+claim a latency improvement from a configuration readback.
+
+Next diagnostic: measure input moderation, each remote check, graph-to-first-token,
+last-token-to-stream-completion, and provider first-audio separately using synthetic
+turns. Benchmark a smaller classifier against a labeled safety corpus before any
+model change; keep crisis routing, parent boundaries, and failure behavior fixed.
 
 ## Operator sequence
 

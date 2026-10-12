@@ -25,7 +25,7 @@ PREFIX = "conversation_config.turn."
 TARGET = {
     PREFIX + "turn_timeout": 7.0,
     PREFIX + "retranscribe_on_turn_timeout": False,
-    PREFIX + "soft_timeout_config.timeout_seconds": 2.5,
+    PREFIX + "soft_timeout_config.timeout_seconds": 1.0,
     PREFIX + "soft_timeout_config.message": "Let me think.",
     PREFIX + "soft_timeout_config.additional_soft_timeout_messages": ["Hmm, let me see.", "I'm thinking."],
     PREFIX + "soft_timeout_config.randomize_fillers": True,

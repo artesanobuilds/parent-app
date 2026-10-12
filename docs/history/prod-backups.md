@@ -162,3 +162,13 @@ locks that.
 - Baseline: 45 articles, 110 categories, health HTTP 200.
 - This is a platform-listed crash-consistent volume snapshot, not a completed restore drill.
 - Separate ElevenLabs selected-settings backup saved privately before the verified filler/turn update; no credentials or provider payload are committed.
+
+
+## 2026-10-12T00:28:33.030Z — one-second kid filler documentation rollout
+
+- Reason: pre-deploy snapshot for the provider configuration tooling and public
+  documentation follow-up. No runtime policy, schema, or migration changes.
+- Railway native volume backup: `8164a4b6-e863-4fc7-a8a3-0b128f85a15f`.
+- Label: `pre-kid-filler-one-second-20261012`; source volume `/app/data` READY.
+- Railway listed 159 MB referenced. No family data downloaded or exported.
+- Platform-listed snapshot; restoration has not been exercised.

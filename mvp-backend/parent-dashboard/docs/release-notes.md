@@ -10,6 +10,13 @@ Every update, newest first — what changed and how to find it. Each entry says
 whether it is available now or prepared for an upcoming rollout. Features marked
 *app update* arrive on your phone through TestFlight.
 
+## October 11, 2026 — earlier companion feedback
+
+**Live now; no app update required.** Start a fresh conversation from **Home →
+Hand to kid**. When a reply takes time, the companion can begin a short thinking
+phrase after one second instead of 2.5 seconds. This reduces silent waiting;
+the answer still passes through the same safety checks.
+
 ## October 11, 2026 — smoother companion conversations
 
 **Live with this backend rollout; no app update required.** From **Home → Hand
