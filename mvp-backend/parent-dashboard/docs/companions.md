@@ -63,3 +63,9 @@ companion asks you to try again rather than treating the question as wrongdoing.
 
 **Hand to kid** opens the child's own companion. It does not share your private
 coaching conversation or automatically tell the companion what you were discussing.
+
+### Earlier feedback while waiting
+
+Start a fresh **Home → Hand to kid** conversation to use the latest voice settings.
+If the answer takes time, a short thinking phrase can begin after one second.
+The answer itself may take longer; safety checks still apply.
