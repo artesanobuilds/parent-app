@@ -473,3 +473,24 @@ text box straight to the SDK `Conversation` for exactly this.
 ## Sources
 - [Integrate your own model (Custom LLM)](https://elevenlabs.io/docs/agents-platform/customization/llm/custom-llm)
 - [Overrides](https://elevenlabs.io/docs/eleven-agents/customization/personalization/overrides)
+
+
+### Backend parity follow-up — October 11, 2026
+
+Voice instructions now live in the actual backend answering graph for both
+surfaces; an ElevenLabs prompt override alone cannot control that graph. Kid
+runtime prompts are assembled from the current profile and saved approved
+invariants without re-synthesizing parental boundaries. Token prefetch no longer
+creates a transcript entry for a greeting that might never play.
+
+Use `mvp-backend/tools/kid_voice_config.py` to compare, apply, verify, or restore
+the narrowly scoped kid turn settings. The target is a 2.5-second static soft
+filler with short neutral alternatives, 7 seconds before a silence turn, and no
+retranscription on that timeout. This does not change the speech model or voice.
+The older July table above is historical; the tool's live readback is the source
+of truth. A new voice connection is required after changing agent settings.
+
+Do not automatically copy the parent's speech model or remove moderation to
+improve timings. Compare speech models in a device listening test, and measure
+first substantive output separately from the filler. See
+[the parity review](../docs/design/kid-voice-parity.md).

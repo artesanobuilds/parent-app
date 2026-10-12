@@ -10,6 +10,15 @@ Every update, newest first — what changed and how to find it. Each entry says
 whether it is available now or prepared for an upcoming rollout. Features marked
 *app update* arrive on your phone through TestFlight.
 
+## October 11, 2026 — smoother companion conversations
+
+**Live with this backend rollout; no app update required.** From **Home → Hand
+to kid**, open an enabled companion as usual. Spoken replies now consistently
+use short, natural sentences, and companions use your child's current profile
+while keeping the boundaries you approved. Returning children get a returning
+welcome. Safety checks run without blocking other conversations, and temporary
+service problems get a clearer retry message.
+
 ## October 10, 2026 — searches and setup recover more reliably
 
 **Available with the next backend rollout; no app update required.** Canceling

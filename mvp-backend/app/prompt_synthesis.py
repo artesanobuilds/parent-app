@@ -288,6 +288,7 @@ def build_system_prompt(
     *,
     kid_profile: Dict[str, Any],
     invariants: Dict[str, Any],
+    voice_mode: Optional[bool] = None,
 ) -> str:
     """
     Pure function. Same inputs -> same output. This is the safety surface.
@@ -310,7 +311,8 @@ def build_system_prompt(
         or invariants.get("voice_examples")  # legacy stored configs
         or []
     )
-    voice_mode = bool(invariants.get("voice_mode"))
+    if voice_mode is None:
+        voice_mode = bool(invariants.get("voice_mode"))
 
     enabled_tool_lines = [f"- {name}" for name, on in tools_enabled.items() if on]
     enabled_tools_section = (
@@ -332,14 +334,8 @@ def build_system_prompt(
         "\n".join(f'- "{v}"' for v in persona_examples) if persona_examples else "- (none)"
     )
 
-    voice_mode_suffix = (
-        "\n\n## Voice mode\n"
-        "Your reply will be spoken aloud. Keep sentences short (≤15 words). "
-        "No markdown formatting, no asterisks, no parentheticals. "
-        "Use commas and periods for rhythm."
-        if voice_mode
-        else ""
-    )
+    from app.voice_policy import KID_VOICE_POLICY
+    voice_mode_suffix = KID_VOICE_POLICY if voice_mode else ""
 
     prompt = f"""{_soul_kid_content}
 
@@ -352,7 +348,10 @@ Your name is **{display_name}**. You belong to **{kid_name}**.
 ## Who {kid_name} is
 - Age: {age if age is not None else "unknown"} (band: {age_band})
 - Interests: {interests}
-- {interests_summary}
+- Earlier approved description: {interests_summary}
+
+The current age and interests above take precedence over older descriptive
+details. Keep every grown-up-approved goal and boundary in force.
 
 ## Who you are (personality, written by {kid_name}'s grown-up)
 {personality}

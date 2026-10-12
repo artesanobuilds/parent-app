@@ -36,8 +36,9 @@ games, encouragement — tuned to the brief you wrote and your kid's age.
 
 ## The safety layer (always on)
 
-Every message in a kid chat — in both directions — passes through moderation
-before it's shown:
+Incoming messages are checked before the companion answers. Responses are
+checked while they stream and again when complete; a late check may stop a
+response after some words have already appeared or been spoken:
 
 - **Gentle redirects.** Off-track topics get a soft, age-appropriate redirect
   rather than engagement.
@@ -54,3 +55,11 @@ before it's shown:
 
 Companions can also talk. The same safety layer applies to voice
 conversations, word for word.
+
+Spoken replies use short, natural sentences. The companion uses your child's
+current profile and keeps the topics and boundaries you approved. Returning
+children receive a welcome back. If a safety-check service is unavailable, the
+companion asks you to try again rather than treating the question as wrongdoing.
+
+**Hand to kid** opens the child's own companion. It does not share your private
+coaching conversation or automatically tell the companion what you were discussing.

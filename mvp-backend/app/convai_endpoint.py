@@ -301,7 +301,7 @@ async def _stream_response_impl(user_id: str, kid_name: str, thread_id: str, mes
             ttfb_ms=ttfb_ms, tool_turn=tool_turn, outcome=outcome,
         )
 
-    agent, config = kid_agent_service.get_kid_agent(user_id, kid_name)
+    agent, config = kid_agent_service.get_kid_agent(user_id, kid_name, surface="voice")
     if not config.get("enabled"):
         _mark_yield()
         yield _openai_delta(content="I'm not ready to chat yet — your grown-up needs to set me up first.", chat_id=chat_id)
@@ -347,7 +347,7 @@ async def _stream_response_impl(user_id: str, kid_name: str, thread_id: str, mes
     kid_profile = (family.get("children") or {}).get(kid_name) or {}
     age_band = _kid_age_band(kid_profile.get("age"))
 
-    pre = moderation.moderate_input(
+    pre = await moderation.amoderate_input(
         user_id=user_id, kid_name=kid_name, agent_id=agent_id,
         age_band=age_band, text=message,
         cost_workflow=voice_wf, cost_user=user_id,
@@ -389,7 +389,7 @@ async def _stream_response_impl(user_id: str, kid_name: str, thread_id: str, mes
             _emit_perf("blocked")
             return
         else:
-            redirect = "Hmm, let's try a different question — your grown-up will see this chat."
+            redirect = moderation.moderation_redirect(pre)
             storage.log_moderation_event(
                 user_id=user_id, kid_name=kid_name, severity=pre.severity,
                 category=pre.category, action="blocked_input",
@@ -422,6 +422,7 @@ async def _stream_response_impl(user_id: str, kid_name: str, thread_id: str, mes
         cost_workflow=voice_wf, cost_user=user_id,
     )
     assistant_buffer = ""
+    emitted_chunks = []  # Only text handed to the voice adapter, never pending checks.
     block_handled = False
     # Barge-in aborts the HTTP request, which throws GeneratorExit into this
     # generator mid-loop — so the post-loop append below never runs and the kid's
@@ -489,7 +490,10 @@ async def _stream_response_impl(user_id: str, kid_name: str, thread_id: str, mes
                     if model_ttft_ms is None:
                         model_ttft_ms = _ms(turn_started)  # before moderation buffering
                     assistant_buffer += content
-                    for safe in sm.feed(content):
+                    for safe in await sm.afeed(content):
+                        if disconnected.is_set():
+                            return
+                        emitted_chunks.append(safe)
                         _mark_yield()
                         yield _openai_delta(content=safe, chat_id=chat_id)
                     if sm.state.value == "blocked":
@@ -503,7 +507,10 @@ async def _stream_response_impl(user_id: str, kid_name: str, thread_id: str, mes
         if disconnected.is_set():
             return
 
-        for chunk in sm.finalize():
+        for chunk in await sm.afinalize():
+            if disconnected.is_set():
+                return
+            emitted_chunks.append(chunk)
             _mark_yield()
             yield _openai_delta(content=chunk, chat_id=chat_id)
 
@@ -544,19 +551,19 @@ async def _stream_response_impl(user_id: str, kid_name: str, thread_id: str, mes
         # Interrupted-turn durability. A barge-in (or any client abort) closes this
         # generator, so neither branch above ran — yet the kid HEARD part of the
         # reply and the parent will look for it in the transcript. Persist what we
-        # actually generated, preferring the moderator's assembled/safe text over
-        # the raw buffer so nothing unreviewed lands in durable history.
+        # actually yielded. An async check may be cancelled with candidate text
+        # still pending; neither that candidate nor the raw model buffer is heard.
         #
         # Deliberately minimal: a synchronous storage append and nothing else. No
         # crisis side effects (lock / push / end_call) fire here — those stay in
         # _apply_block_side_effects on the live path, because a cancelled request
         # is not the place to lock an agent or wake a parent's phone. A blocked
         # turn writes nothing: the replacement message was never spoken.
-        if not persisted and assistant_buffer and sm.state.value != "blocked":
+        if not persisted and emitted_chunks and sm.state.value != "blocked":
             try:
                 storage.append_kid_message(
                     agent_id=agent_id, thread_id=thread_id, role="assistant",
-                    content=sm.assembled_output or assistant_buffer,
+                    content="".join(emitted_chunks),
                     message_id=str(uuid.uuid4()),
                 )
             except Exception:  # noqa: BLE001 — best-effort; never mask the real exit

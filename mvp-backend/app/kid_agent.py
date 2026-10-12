@@ -2,11 +2,11 @@
 Kid runtime agent. Built per (user_id, kid_name) from the saved KidAgentConfig.
 
 Architecture:
-- KidAgentConfig (in DuckDB) is the source of truth for what tools are wired,
-  what's blocked, what the personality is. The system_prompt embedded in that
-  config is what the LLM actually sees.
-- Cache key is the config's content_hash, so any drift in config / kid profile /
-  parent profile / soul_kid.md / synthesis version invalidates the cache.
+- Saved invariants remain the parent-approved source for personality, boundaries,
+  goals and tools. Runtime reads rebuild the deterministic prompt from those
+  invariants, the current child profile, the current soul and the surface policy.
+- Effective input fingerprints invalidate cached graphs without re-synthesizing
+  or writing the reviewed configuration.
 - Defaults to gpt-5.2 today. The plan calls for Haiku 4.5 for cost/latency;
   swapping requires adding `langchain-anthropic` to requirements and using
   ChatAnthropic here. Tracked in roadmap.
@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from app.agent_runtime.cache import AgentCache
 
+import hashlib
+import json
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -29,9 +31,6 @@ from app.profiling import profiling_service
 from app.prompt_synthesis import (
     SynthesisResult,
     build_system_prompt,
-    compute_content_hash,
-    SYNTHESIS_VERSION,
-    _soul_kid_content,
     synthesize,
 )
 
@@ -53,8 +52,8 @@ KID_RUNTIME_MODEL = os.getenv("KID_RUNTIME_MODEL", "gpt-5.2")
 
 # ── Cache ────────────────────────────────────────────────────────────
 
-# Keyed by (user_id, kid_name); value carries content_hash so we invalidate
-# whenever anything that affects the runtime prompt has changed.
+# Keyed by (user_id, kid_name); value carries the effective input fingerprint.
+# Switching text/voice replaces this slot; tenant invalidation stays unchanged.
 _kid_agent_cache = AgentCache()
 
 
@@ -87,7 +86,29 @@ def _wire_tools(invariants: Dict[str, Any]) -> List[Any]:
 # ── Public API ───────────────────────────────────────────────────────
 
 
-def get_kid_agent(user_id: str, kid_name: str):
+def _effective_prompt_inputs(user_id: str, kid_name: str, config: Dict[str, Any],
+                             surface: str):
+    from app.voice_policy import is_voice_surface
+    voice = is_voice_surface(surface)
+    family = profiling_service.get_family_profile(user_id) or {}
+    kid_profile = (family.get("children") or {}).get(kid_name) or {"name": kid_name}
+    prompt = build_system_prompt(
+        kid_profile=kid_profile, invariants=config.get("invariants") or {},
+        # Keep legacy text-mode configurations intact; a voice request always
+        # activates spoken guidance regardless of their saved voice_mode bit.
+        voice_mode=True if voice else None,
+    )
+    return prompt, kid_profile
+
+
+def build_effective_prompt(user_id: str, kid_name: str, config: Dict[str, Any],
+                           *, surface: str = "text") -> str:
+    """Read current context without changing the parent's reviewed configuration."""
+    prompt, _ = _effective_prompt_inputs(user_id, kid_name, config, surface)
+    return prompt
+
+
+def get_kid_agent(user_id: str, kid_name: str, *, surface: str = "text"):
     """
     Return a cached LangGraph agent for this kid. Lazily synthesizes a default
     config (via prompt_synthesis.synthesize) if one doesn't exist yet — that's
@@ -105,23 +126,30 @@ def get_kid_agent(user_id: str, kid_name: str):
         # Marked enabled=False so the parent must review before a kid can talk to it.
         config = _bootstrap_default_config(user_id, kid_name, storage)
 
+    prompt, kid_profile = _effective_prompt_inputs(user_id, kid_name, config, surface)
+    # Hash the effective prompt as well as inputs: soul/policy changes and
+    # profile changes invalidate an unchanged stored configuration hash.
+    fingerprint = hashlib.sha256(json.dumps({
+        "profile": kid_profile, "invariants": config.get("invariants") or {},
+        "prompt": prompt, "surface": surface, "model": KID_RUNTIME_MODEL,
+    }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     cached = _kid_agent_cache.get(_cache_key(user_id, kid_name))
-    if cached and cached.get("content_hash") == config["content_hash"]:
+    if cached and cached.get("content_hash") == fingerprint:
         return cached["agent"], config
 
     agent_executor = create_agent(
         model=ChatOpenAI(model=KID_RUNTIME_MODEL, stream_usage=True),
         tools=_wire_tools(config["invariants"]),
         checkpointer=_kid_checkpointer,
-        system_prompt=config["system_prompt"],
+        system_prompt=prompt,
     )
     _kid_agent_cache[_cache_key(user_id, kid_name)] = {
         "agent": agent_executor,
-        "content_hash": config["content_hash"],
+        "content_hash": fingerprint,
     }
     logger.info(
         "[kid_agent] built agent for user=%s kid=%s v%d hash=%s",
-        user_id, kid_name, config["version"], config["content_hash"],
+        user_id, kid_name, config["version"], fingerprint,
     )
     return agent_executor, config
 

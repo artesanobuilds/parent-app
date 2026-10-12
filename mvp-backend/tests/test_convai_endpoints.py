@@ -103,6 +103,15 @@ def hermetic(monkeypatch):
 
     monkeypatch.setattr(moderation, "moderate_with_openai", _clean)
     monkeypatch.setattr(moderation, "classify_age_appropriate", _age_ok)
+    async def async_clean(text):
+        return moderation.moderate_with_openai(text)
+
+    async def async_age(text, age_band, **kwargs):
+        return moderation.classify_age_appropriate(text, age_band, **kwargs)
+
+    monkeypatch.setattr(moderation, "amoderate_with_openai", async_clean)
+    monkeypatch.setattr(moderation, "aclassify_age_appropriate", async_age)
+
     # A dev .env may set the Slack webhook; a crisis test must not page anyone.
     monkeypatch.setattr(telemetry, "SLACK_WEBHOOK_URL", "", raising=False)
 
@@ -177,7 +186,7 @@ def _kid_config(agent_id: str, *, enabled: bool = True) -> Dict[str, Any]:
 
 def _install_kid_agent(monkeypatch, agent: Any, config: Dict[str, Any]) -> None:
     monkeypatch.setattr(
-        kid_agent_service, "get_kid_agent", lambda user_id, kid_name: (agent, config)
+        kid_agent_service, "get_kid_agent", lambda user_id, kid_name, **kwargs: (agent, config)
     )
 
 
@@ -567,7 +576,7 @@ def test_kid_blocked_input_redirects_without_locking(client, secret, monkeypatch
         headers={"Authorization": f"Bearer {secret}"},
     )
     payloads = _payloads(res.text)
-    assert "let's try a different question" in _spoken(payloads)
+    assert "I can't help with that part" in _spoken(payloads)
     assert _tool_deltas(payloads) == []
     assert server.storage_backend.is_kid_agent_crisis_locked(agent_id) is None
     assert agent.attempts == 0
@@ -609,14 +618,14 @@ def test_kid_blocked_output_swaps_in_replacement_and_ends_call(
     spoken = _spoken(payloads)
 
     assert "banana" not in spoken, "flagged text must stop at the gate"
-    assert "let's try a different question" in spoken
+    assert "I can't help with that part" in spoken
     assert _tool_names(payloads) == ["end_call"]
     assert _tool_deltas(payloads)[0]["choices"][0]["finish_reason"] == "tool_calls"
 
     msgs = server.storage_backend.get_kid_messages(agent_id, "th-blocked-out")
     assistant = [m for m in msgs if m["role"] == "assistant"]
     assert len(assistant) == 1
-    assert "let's try a different question" in assistant[0]["content"]
+    assert "I can't help with that part" in assistant[0]["content"]
     assert assistant[0]["parent_flagged"] is True
     assert server.storage_backend.is_kid_agent_crisis_locked(agent_id) is None
 
@@ -1249,7 +1258,7 @@ def test_kid_silence_nudge_skips_agent_moderation_and_transcript(
 
     def _boom(*a, **k):
         raise AssertionError("moderation must not run on a silence nudge")
-    monkeypatch.setattr(moderation, "moderate_input", _boom)
+    monkeypatch.setattr(moderation, "amoderate_input", _boom)
 
     msgs = [
         {"role": "user", "content": "hi"},
@@ -1373,3 +1382,40 @@ def test_parent_token_route_is_bound_to_the_authed_endpoint(client, monkeypatch)
         assert "not configured" in res.text
     finally:
         server.app.dependency_overrides.pop(real_dep, None)
+
+
+@pytest.mark.parametrize("buffer_chars", [0, 8])
+def test_cancel_during_output_check_persists_only_yielded_prefix(
+    client, secret, monkeypatch, hermetic, buffer_chars,
+):
+    import asyncio
+    agent_id = f"agent-kid-pending-check-{buffer_chars}"
+    thread = f"pending-check-{buffer_chars}"
+    monkeypatch.setattr(moderation, "OUTPUT_CHUNK_BUFFER_CHARS", buffer_chars)
+    monkeypatch.setattr(moderation, "OUTPUT_RECHECK_EVERY_CHARS", 8)
+    _install_kid_agent(monkeypatch, _FakeAgent(["Hello ", "pending candidate"]), _kid_config(agent_id))
+
+    async def drive():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        async def pending(self, text):
+            entered.set()
+            await release.wait()
+            return moderation.ModerationResult(False, "low", "ok", "test", "allow")
+        monkeypatch.setattr(moderation.StreamingModerator, "_agate_text", pending)
+        generator = convai._stream_response("u-pending-check", "Ada", thread, "hi")
+        async def consume():
+            async for _ in generator:
+                pass
+        task = asyncio.create_task(consume())
+        await asyncio.wait_for(entered.wait(), 2)
+        task.cancel()
+        await asyncio.sleep(0)  # Let the owner record disconnection before the gate finishes.
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await generator.aclose()
+    anyio.run(drive)
+    assistant = [m['content'] for m in server.storage_backend.get_kid_messages(agent_id, thread)
+                 if m['role'] == 'assistant']
+    assert assistant == (["Hello "] if buffer_chars == 0 else [])

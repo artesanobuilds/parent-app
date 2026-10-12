@@ -453,12 +453,21 @@ def _dynamic_context(user_name: str) -> Dict[str, Optional[str]]:
     }
 
 
-def get_agent(user_name: str = "0"):
+def get_agent(user_name: str = "0", *, surface: str = "text"):
     """Return the cached merged parent agent personalized to this parent."""
+    from app.voice_policy import is_voice_surface, PARENT_VOICE_POLICY
+    voice = is_voice_surface(surface)
     context = _dynamic_context(user_name)
+    # One tenant slot keeps existing cache invalidation APIs valid. Surface
+    # switches rebuild the graph rather than reusing a text prompt for speech.
+    context = {**context, "surface": surface}
+    prompt = _build_system_prompt(
+        user_name, profile_context=context["profile"],
+        household_context=context["household"], for_you_context=context["for_you"],
+    ) + (PARENT_VOICE_POLICY if voice else "")
 
     cached = _agent_cache.get(user_name)
-    if cached and cached.get("context") == context:
+    if cached and cached.get("context") == context and cached.get("prompt") == prompt:
         return cached["agent"]
 
     agent_executor = create_agent(
@@ -466,30 +475,28 @@ def get_agent(user_name: str = "0"):
         tools=build_parent_tools(user_name),
         checkpointer=checkpointer,
         middleware=build_middleware(),
-        system_prompt=_build_system_prompt(
-            user_name,
-            profile_context=context["profile"],
-            household_context=context["household"],
-            for_you_context=context["for_you"],
-        ),
+        system_prompt=prompt,
     )
     _agent_cache[user_name] = {
         "agent": agent_executor,
         "context": context,
+        "prompt": prompt,
         # Back-compat: callers/tests that inspected the old cache shape.
         "profile": context["profile"],
     }
     return agent_executor
 
 
-def build_system_prompt_for(user_name: str = "0") -> str:
+def build_system_prompt_for(user_name: str = "0", *, surface: str = "text") -> str:
     """Public: assemble the merged agent's per-user system prompt. Used by the
     ConvAI token endpoint to override the dashboard agent's prompt per
     connection, mirroring get_agent's assembly."""
+    from app.voice_policy import is_voice_surface, PARENT_VOICE_POLICY
+    voice = is_voice_surface(surface)
     context = _dynamic_context(user_name)
     return _build_system_prompt(
         user_name,
         profile_context=context["profile"],
         household_context=context["household"],
         for_you_context=context["for_you"],
-    )
+    ) + (PARENT_VOICE_POLICY if voice else "")

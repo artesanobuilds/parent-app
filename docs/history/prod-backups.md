@@ -151,3 +151,14 @@ locks that.
 - **Name:** `pre-harness-pr6-migration26-20261011`.
 - **Verification:** matching fresh platform backup-list record, 156 MB referenced, source volume READY. Same crash-consistency and untested-restore limits as the earlier snapshot; workflow-status API inaccessible to this login.
 - **Baseline:** 45 articles / 110 categories, persistent synthetic profile survived the prior two restarts; all live harness OpenAPI schemas unchanged; rollout flags remain default off.
+
+## 2026-10-12 00:11 UTC — before kid voice backend parity release
+
+- Scope: Railway native snapshot of the existing `/app/data` volume; no user data downloaded.
+- Backup: `b8677519-2d01-4fa1-9047-655352836b0e`, created `2026-10-12T00:11:41.725Z`.
+- Label: `pre-kid-voice-parity-20261012T0014Z` (label only; creation timestamp above is authoritative).
+- Pre-release source: `e6578ca`; no schema migration in this release.
+- Platform lists the snapshot at 159 MB referenced; source volume state `READY`.
+- Baseline: 45 articles, 110 categories, health HTTP 200.
+- This is a platform-listed crash-consistent volume snapshot, not a completed restore drill.
+- Separate ElevenLabs selected-settings backup saved privately before the verified filler/turn update; no credentials or provider payload are committed.
