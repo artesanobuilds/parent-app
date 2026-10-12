@@ -27,7 +27,15 @@ TARGET = {
     PREFIX + "retranscribe_on_turn_timeout": False,
     PREFIX + "soft_timeout_config.timeout_seconds": 1.0,
     PREFIX + "soft_timeout_config.message": "Let me think.",
-    PREFIX + "soft_timeout_config.additional_soft_timeout_messages": ["Hmm, let me see.", "I'm thinking."],
+    PREFIX + "soft_timeout_config.additional_soft_timeout_messages": [
+        "Hmm.",
+        "Let's see.",
+        "I'm thinking.",
+        "Hmm, let me see.",
+        "Okay, let's see.",
+        "Let me find the words.",
+        "Let me put that into words.",
+    ],
     PREFIX + "soft_timeout_config.randomize_fillers": True,
     PREFIX + "soft_timeout_config.use_llm_generated_message": False,
 }

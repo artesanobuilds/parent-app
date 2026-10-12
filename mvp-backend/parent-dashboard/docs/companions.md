@@ -68,4 +68,5 @@ coaching conversation or automatically tell the companion what you were discussi
 
 Start a fresh **Home → Hand to kid** conversation to use the latest voice settings.
 If the answer takes time, a short thinking phrase can begin after one second.
+The voice randomly chooses among 8 short phrases; occasional repeats are possible.
 The answer itself may take longer; safety checks still apply.

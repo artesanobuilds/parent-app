@@ -485,7 +485,7 @@ creates a transcript entry for a greeting that might never play.
 
 Use `mvp-backend/tools/kid_voice_config.py` to compare, apply, verify, or restore
 the narrowly scoped kid turn settings. The target is a 1-second static soft
-filler with short neutral alternatives, 7 seconds before a silence turn, and no
+filler with 8 randomized short neutral phrases, 7 seconds before a silence turn, and no
 retranscription on that timeout. This does not change the speech model or voice.
 The older July table above is historical; the tool's live readback is the source
 of truth. A new voice connection is required after changing agent settings.

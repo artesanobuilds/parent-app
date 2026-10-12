@@ -172,3 +172,12 @@ locks that.
 - Label: `pre-kid-filler-one-second-20261012`; source volume `/app/data` READY.
 - Railway listed 159 MB referenced. No family data downloaded or exported.
 - Platform-listed snapshot; restoration has not been exercised.
+
+
+## 2026-10-12T00:35:32.859Z — kid filler variety documentation rollout
+
+- Reason: pre-deploy snapshot for provider configuration tooling and public docs; no runtime or schema changes.
+- Railway native volume backup: `1fdeb483-02f1-482a-9816-46dd4d55b0f0`.
+- Label: `pre-kid-filler-variety-20261012`; source volume `/app/data` READY.
+- Railway listed 159 MB referenced; no family data exported or downloaded.
+- Platform-listed snapshot; restoration has not been exercised.
