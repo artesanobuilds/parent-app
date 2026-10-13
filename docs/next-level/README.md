@@ -2,7 +2,7 @@
 
 A local exploration, not a production rollout. Branch `next-level` from `5e5caca`; original live-product checkout untouched.
 
-Start with [strategy.md](strategy.md). Inspect [the prototype](../../experiments/next-level/README.md), then [verification.md](verification.md) for passed versus unrun checks and limitations.
+Start with the illustrated **[strategy PDF](next-level-strategy.pdf)** or **[editable print HTML](strategy-print.html)**, then [strategy.md](strategy.md). Inspect [the prototype](../../experiments/next-level/README.md), then [verification.md](verification.md) for passed versus unrun checks and limitations.
 
 - [code-audit.md](code-audit.md): current profile/onboarding, mutation, tenant and retention evidence; source references; synthetic probe.
 - [ux-review.md](ux-review.md): three product shapes and profile-versus-summary-versus-generic-memory tests.
@@ -14,7 +14,9 @@ Start with [strategy.md](strategy.md). Inspect [the prototype](../../experiments
 
 Rendered screenshots: [conversation desktop](screenshots/01-conversation-desktop.png), [experiment outcome](screenshots/02-experiment-outcome-desktop.png), [understanding desktop](screenshots/03-understanding-desktop.png), [sharing desktop](screenshots/04-share-preview-desktop.png), [conversation mobile](screenshots/05-conversation-mobile.png), [understanding mobile](screenshots/06-understanding-mobile.png), [sharing mobile](screenshots/07-share-preview-mobile.png).
 
-External research is owned by the parent research team. Place final current-market/science/auth/integration brief in `external-research.md` and the reusable child-profile research prompt in `child-understanding-research-prompt.md` when transferred. Those deliverables are not fabricated or duplicated here. Current strategies cite supplied research as preliminary rather than independently verified.
+Final research is saved under [research/README.md](research/README.md), including the **[full copyable research prompt](research/parent_profile_deep_research_prompt.md)**. Six source documents retain all qualifications and links. [Source hashes](research/source-manifest.json) pin the local copies. [Render checks](render-verification.json) record page/image/overflow checks.
+
+Rebuild the editable document with `python3 docs/next-level/build-strategy.py`, then render using `node docs/next-level/render-strategy.cjs` (host Chrome and playwright-core path, configurable via `NEXT_LEVEL_PLAYWRIGHT`). No remote fonts or images are used. The complete ZIP is a download bundle beside the worktree at `../next-level-deliverables.zip`, outside the Git tree to avoid duplicating all generated assets; its verified path is recorded at final delivery.
 
 No push, merge, deploy, secrets, production migrations/data changes, real child/health record transmission or active connector. Local prototype uses no accounts or model calls. Scope is parent-led; independent child use is deferred pending value and safety evidence.
 

@@ -4,6 +4,24 @@
 
 Working name: Next Level (branch title, not cleared consumer brand). Possible brand directions for later clearance: a relationship-centered name, a noticing/journal metaphor, or a quietly capable companion. Do not reuse former brand/design/editorial assets commercially until ownership is settled.
 
+## Final research synthesis — repository delivery
+
+The six authored research sources are preserved in [research/](research/README.md). Their differing audience/retention/pilot proposals remain visible as alternatives, not a combined clinical protocol. The illustrated [PDF](next-level-strategy.pdf) and [editable print HTML](strategy-print.html) summarize the final direction.
+
+**Start with a short reviewed child brief and tiny editor, using curiosity-led conversational capture.** Test incremental value in the parent's existing assistant before a standalone coach or inference graph. Positive moments, interests, strengths and parent-attributed child perspective lead; behavior support is one use. Parent control means stewardship, not ownership of a child's identity. A full profile must beat a simple reviewed summary on supported usefulness and effort.
+
+Current supplied market research identifies Hatley as a close MCP/context/outcome competitor ($19/month Intelligence offer), with indi/Nurturli and general agents overlapping. Prices and product claims are not traction or efficacy. SIWC is documented, but paid/provider-hosted commercial access remains a selected-partner trial; identity, usage and connector permissions are distinct. Plan usage consumes existing eligible allowance; no ChatGPT memory import. Preview excludes native audio/transcription, hosted file search/MCP and persistent server-side conversation state. API fallback is conditional on appropriate provider data controls; neither `store:false` nor SIWC proves approved ZDR for child personal data.
+
+Science supports responsive relationships and some evaluated structured parenting interventions. It does not validate this app's conversational child-neuroscience scores. Parent confirmation validates a faithful account, not a psychological inference. Preserve contradictions, unknowns and source context; do not turn developmental monitoring into screening or diagnosis.
+
+Integration is credible through documented tools, not arbitrary access to a consumer agent's memory. Start with manual minimal export. OpenAI plugin PHI/distribution restrictions and Muse sensitive-secondary-inference limits require exact policy review; approval and downstream erasure are not guaranteed. Keep health, family-conflict and raw-history material out of the initial packet.
+
+Use one parent-led product and a no-own-device path. Co-use/offline first; bounded child turns and separate installations later only if they improve a useful next interaction and pass distinct consent/role/session gates. Device possession is not identity or permission. The current phone handoff is not adequate isolation.
+
+Discovery cohort proposal: ages 5–8, one language/jurisdiction, selected for reach and scope—not an established efficacy segment. Begin with 12–15 adult interviews and synthetic tasks, then 30 varied benchmark cases expanding toward 100 multi-session safety histories. Predeclare full-profile versus summary versus generic-memory comparisons. A 15–20-family four-week paid discovery pilot and a later 40–60-household comparative feasibility study are different options; select one approved protocol rather than mixing results. Any real-data pilot waits for rights, expert/privacy review and provider child-data eligibility. These samples do not establish clinical efficacy.
+
+Name shortlist for testing: Small Clues (adjacent My Little Cues consideration), Parentheld, Tendstory. Public collision searches are not trademark/domain clearance. Keep Next Level as the branch/working title. Do not reuse former partnership assets commercially before rights review.
+
 ## What exists versus what is proposed
 
 Current code carries a merged parent coach/planner agent, profile mutation tools, anonymous onboarding extraction, name-keyed child JSON profiles and durable checkpoints. `agent.py:275–290` explicitly directs silent learning without revealing tracking. `profiling.py:112–129` stores temperament, learning profile and neurodiversity as optional free text; that is a schema, not scientific validity. Latest base is 5e5caca with October execution service/voice fixes. September context statements about no remote and last August deploy are stale.
@@ -72,6 +90,6 @@ Former partnership asset rights/content authorship; consumer brand clearance; sc
 
 ## External research handoff
 
-The parent research team owns final current-market, science, auth and integration verification. Incoming verified sources/policy limits should be copied into `external-research.md` before build decisions. A reusable deep-research prompt on whether a learned child profile creates incremental parent value belongs in `child-understanding-research-prompt.md`; it is being prepared independently. Do not treat this memo’s competitor summaries as product-quality verification.
+Final authored research is preserved in `research/`. The reusable prompt is `research/parent_profile_deep_research_prompt.md`. Treat competitor descriptions as marketing claims, and distinguish source-reported documentation from tested product quality.
 
 Preliminary official source routes supplied by parent research: [OpenAI SIWC quickstart](https://developers.openai.com/siwc/quickstart), [local open-source token sharing](https://developers.openai.com/siwc/token-sharing-open-source), [Hatley](https://hatley.ai), [Common Sense age 0–8 media study](https://www.commonsensemedia.org/research/the-common-sense-census-media-use-by-kids-zero-to-eight-2025). These links are handoff pointers, not independently verified in this local implementation task. Integration policy research flags PHI and sensitive inference limits; verify each platform policy before even synthetic connector development, and keep health/neurodevelopmental notes excluded.

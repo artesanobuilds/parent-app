@@ -1,0 +1,47 @@
+{
+  "provenance": "Six authored reports transferred as text from parent research thread; saved without substantive edits. Hashes pin the local copies, not independent external-source verification.",
+  "files": [
+    {
+      "file": "parent_chatgpt_auth_research.md",
+      "bytes": 13447,
+      "sha256": "27e94b711a562dcf8be5b503466eebb40ed7cb899bfa641799f57f7e994287a4",
+      "headings": 13,
+      "sourceLinks": 24
+    },
+    {
+      "file": "parent_child_modalities.md",
+      "bytes": 27949,
+      "sha256": "e4b572318f9d74edc770627fbc94b562645e5101a6d175dbf4128cedc14040fb",
+      "headings": 28,
+      "sourceLinks": 22
+    },
+    {
+      "file": "parent_market_research.md",
+      "bytes": 30393,
+      "sha256": "bb760f113589977c5c029a658af4c47ba38da574aaf601a5b3ff043aa85595ed",
+      "headings": 24,
+      "sourceLinks": 39
+    },
+    {
+      "file": "parent_positioning_names.md",
+      "bytes": 20233,
+      "sha256": "26edd929d9c58d95ae948c1975f48b7821cc356142437153b15b3c64606be3b1",
+      "headings": 11,
+      "sourceLinks": 11
+    },
+    {
+      "file": "parent_profile_deep_research_prompt.md",
+      "bytes": 23340,
+      "sha256": "d2a11d7dc5a301e6539e033bebfc675a95718162a46cba57be242d667e79f0c2",
+      "headings": 15,
+      "sourceLinks": 17
+    },
+    {
+      "file": "parent_profile_strategy.md",
+      "bytes": 34382,
+      "sha256": "584daaff5e90a87033365b21c81f31df2803dc07837cfe8771fbdb6049b1f07b",
+      "headings": 25,
+      "sourceLinks": 22
+    }
+  ]
+}
