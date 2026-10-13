@@ -1,5 +1,7 @@
 # Next Level deliverables
 
+**Recommended current version: [iteration 2, parent adaptation](iteration-2/README.md).** Start with its [7-page illustrated PDF](iteration-2/iteration-2-strategy.pdf), [strategy](iteration-2/strategy.md) and [updated research prompt](iteration-2/research-prompt-addendum.md). The original iteration-1 research, prototype and PDF below remain preserved.
+
 A local exploration, not a production rollout. Branch `next-level` from `5e5caca`; original live-product checkout untouched.
 
 Start with the illustrated **[strategy PDF](next-level-strategy.pdf)** or **[editable print HTML](strategy-print.html)**, then [strategy.md](strategy.md). Inspect [the prototype](../../experiments/next-level/README.md), then [verification.md](verification.md) for passed versus unrun checks and limitations.

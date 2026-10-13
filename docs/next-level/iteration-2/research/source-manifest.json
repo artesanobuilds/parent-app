@@ -1,0 +1,23 @@
+{
+  "provenance": "Three full authored research documents received from parent research thread on 13 October 2026; retained without substantive edits. Hashes identify local source snapshots, not independent verification of external citations.",
+  "files": [
+    {
+      "file": "parent_iteration2_alliance_evidence.md",
+      "bytes": 35385,
+      "sha256": "57a99abeb10b86acc873ac5fa2267c0e3aef664bd0b28dbde55f22d31cf153df",
+      "sourceLinks": 34
+    },
+    {
+      "file": "parent_iteration2_competitors.md",
+      "bytes": 18548,
+      "sha256": "df83555199a7f735902a56146041b72cc807031d9495e59af370d3497b5bdd27",
+      "sourceLinks": 33
+    },
+    {
+      "file": "parent_iteration2_good_inside.md",
+      "bytes": 19579,
+      "sha256": "e0493ce42cd0d57574c6b8c2e1b8bc76f12e0c5eb2954e189511ee10a70c3c49",
+      "sourceLinks": 15
+    }
+  ]
+}
