@@ -1,0 +1,956 @@
+{
+  "sourceRepository": "https://github.com/artesanobuilds/parent-app",
+  "sourceCommit": "8a875ff020ebde78f111eb85303ced37ae7a7840",
+  "archivedAt": "2026-10-27",
+  "method": "Byte-for-byte copies of selected tracked research, strategy, pitch and synthetic experiment files. Hashes establish copy integrity, not independent source verification. No runtime data, credentials, snapshots or private child records imported.",
+  "files": [
+    {
+      "source": "docs/GTM/2026-09-26-independent-research-brief.md",
+      "archive": "archive/repository/docs/GTM/2026-09-26-independent-research-brief.md",
+      "bytes": 78745,
+      "sha256": "a7b3c84262d6be35afa2cd7976a03240c4e8f2c8533c1f72f16df17618085efd"
+    },
+    {
+      "source": "docs/GTM/2026-09-26-pivot-assessment.md",
+      "archive": "archive/repository/docs/GTM/2026-09-26-pivot-assessment.md",
+      "bytes": 43938,
+      "sha256": "06f22198c27104b8fe9671b91531366398681934b7b11209beeaeb1da3f2ecbd"
+    },
+    {
+      "source": "docs/GTM/2026-09-27-artist-led-research-addendum.md",
+      "archive": "archive/repository/docs/GTM/2026-09-27-artist-led-research-addendum.md",
+      "bytes": 6066,
+      "sha256": "a4fd98e8719838048a34564766e95852ef7e66eaad34aca94b9effb183347b47"
+    },
+    {
+      "source": "docs/GTM/MVP-Ground-Zero.docx",
+      "archive": "archive/repository/docs/GTM/MVP-Ground-Zero.docx",
+      "bytes": 61265,
+      "sha256": "646bc85ba24b524414503639c911dadbd8f383d5d8deb2084a319a701c74c7da"
+    },
+    {
+      "source": "docs/GTM/README.md",
+      "archive": "archive/repository/docs/GTM/README.md",
+      "bytes": 2434,
+      "sha256": "2f2dd7b9ec6ab1e1eeefa730434c38b8755ab4a162b9bf3123af43ec64e3e7b9"
+    },
+    {
+      "source": "docs/GTM/ground-zero-critic-feedback.md",
+      "archive": "archive/repository/docs/GTM/ground-zero-critic-feedback.md",
+      "bytes": 3521,
+      "sha256": "ccff241a76e1fa567d956c00669fbba235d4f19d515472e8a28caa267ed7f04d"
+    },
+    {
+      "source": "docs/GTM/ground-zero.py",
+      "archive": "archive/repository/docs/GTM/ground-zero.py",
+      "bytes": 77538,
+      "sha256": "8cad54f369340797862b08aced2b57a8fc226872135f20895f33fc55728eaa43"
+    },
+    {
+      "source": "docs/GTM/gtm-research-expansion.md",
+      "archive": "archive/repository/docs/GTM/gtm-research-expansion.md",
+      "bytes": 25887,
+      "sha256": "fce98fc022be8ed3bde89b2e24eea35f6dcfae17a8a8377978adc3e279a38b72"
+    },
+    {
+      "source": "docs/GTM/gtm-research.md",
+      "archive": "archive/repository/docs/GTM/gtm-research.md",
+      "bytes": 43226,
+      "sha256": "aef88b881b269290927c8f91dabeef4e37d5c8374b76e9e25ea2fbb3187a3eb0"
+    },
+    {
+      "source": "docs/GTM/gtm-strategy.md",
+      "archive": "archive/repository/docs/GTM/gtm-strategy.md",
+      "bytes": 15218,
+      "sha256": "7b06c64a26791d424f96d2685f1f58eca19b6a55de0677af63c295747c77d7dc"
+    },
+    {
+      "source": "docs/GTM/mvp-idea-roast.md",
+      "archive": "archive/repository/docs/GTM/mvp-idea-roast.md",
+      "bytes": 46231,
+      "sha256": "ac5903b1dbf29eb8c526c7e43229f6c9a2b7431b038ea90b441319dca438ca8f"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/BRIEF.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/BRIEF.md",
+      "bytes": 28049,
+      "sha256": "b1275a3d662070822e6c771541003399152d6d9a08e399db0c37a5e9b0b8bd04"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/DESKTOP-RESEARCH-PROMPT.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/DESKTOP-RESEARCH-PROMPT.md",
+      "bytes": 12911,
+      "sha256": "19c0fea2f0d11d0df4e3084719cd73b05c8f21101ea08ac9c9c70120586a235a"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/build/_body.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/build/_body.md",
+      "bytes": 114515,
+      "sha256": "98e88b6c7d382e6d0a396903cfea03498ede085f39014a7b2c669d049d0034ca"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/build/assemble.py",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/build/assemble.py",
+      "bytes": 8446,
+      "sha256": "9104b9b07df0be365aac4ee91cb567de2940dbcbb4503e597146d899d98c700a"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/build/charts.json",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/build/charts.json",
+      "bytes": 57517,
+      "sha256": "46f0d4f6f9dc68774cdc49b7c13dbd68dba16d066ebd17b5beedac1c4ea28417"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/build/charts.py",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/build/charts.py",
+      "bytes": 14178,
+      "sha256": "0059bff00c2eda145ea472c62e75d6d58ad72a5be772e7387c974e47a54d5e70"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/build/diagrams.json",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/build/diagrams.json",
+      "bytes": 21738,
+      "sha256": "9fba91ad69815a173915c917ad617ea3273548fc3481592d553da59d2aa292b9"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/build/diagrams.py",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/build/diagrams.py",
+      "bytes": 9868,
+      "sha256": "0714111fd096aaf92d9e595bd8b2639d7586c4e24f51d412e12773786b1277ea"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/build/svg.py",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/build/svg.py",
+      "bytes": 8791,
+      "sha256": "f3399b077582021c8919b870b7d042b36979443dfa01f03047ab01f3e24d71b8"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/README.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/README.md",
+      "bytes": 17909,
+      "sha256": "5dfcff0eb1baf67c618aefd6b1a146a234d1d4a55ca8b3198763119979911a7f"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/activity_supply_by_metro.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/activity_supply_by_metro.csv",
+      "bytes": 87341,
+      "sha256": "3fc36cc76a9348fa9fb2a327759ff632c1cc38167c280fa22093cfec2dd196e8"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/app_complexity_benchmark.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/app_complexity_benchmark.csv",
+      "bytes": 17364,
+      "sha256": "ad836ed9d80b98b169d61032aa871cd6fa7ea5af09d8a994a86ce197dbc89125"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/camp_forward_search.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/camp_forward_search.csv",
+      "bytes": 28895,
+      "sha256": "9ab08dc9dace14524d8a38b4788088f2195a66c04e4f650ea35f8a526e47d3a7"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/channel_by_cohort.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/channel_by_cohort.csv",
+      "bytes": 1345,
+      "sha256": "8110d532d5e6e4f6ddd8a4c3f3f0d1a5c724e09f358a454880a70312425ec802"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/cohort_population.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/cohort_population.csv",
+      "bytes": 2901,
+      "sha256": "b462687963b5703d5c6d3f6a88389dc50bec7c4469f11c750c9a56a3f49ba83c"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/competitor_landscape.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/competitor_landscape.csv",
+      "bytes": 28202,
+      "sha256": "c113c275125203589e2a334e93faa1d2551b34af81cbd6c2b31ceda406d4414a"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/email_options_scoring.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/email_options_scoring.csv",
+      "bytes": 8923,
+      "sha256": "faf7de518a01dd06befe278c09b60e0f6da5e82dd2dc6fe486abe876572edc61"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/job_quadrants.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/job_quadrants.csv",
+      "bytes": 10660,
+      "sha256": "ad17bebaab35480f3418413fa9c5346c21e5671aa5446b8c428bb9de31b4d04b"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/killed_statistics.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/killed_statistics.csv",
+      "bytes": 64049,
+      "sha256": "95f74ed5c6901dfe8da8c08a595258743a7773fbce90f9634e5e9c72a6af73e5"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/obligations_per_year.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/obligations_per_year.csv",
+      "bytes": 6354,
+      "sha256": "68478df77693211d82a38bea71736622c49236066bddfa67c6694d4d57888361"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/planning_labor_by_employment.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/planning_labor_by_employment.csv",
+      "bytes": 8895,
+      "sha256": "bf0c7cb831ffee6b1f0afd0f3069b7e368ee93bcc265c017bebade404b45bf35"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/resonance_ranking.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/resonance_ranking.csv",
+      "bytes": 2323,
+      "sha256": "710e338f9be044e907b39007714d3171c5b939157366194a07f6172dcf86ad7a"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/seasonality_month_x_task.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/seasonality_month_x_task.csv",
+      "bytes": 29562,
+      "sha256": "ad8ab18b30637ee3383c2347d9bac473e4356f43d55b4b4fb75898d5b0c1f610"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/data/voice_adoption_by_cohort.csv",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/data/voice_adoption_by_cohort.csv",
+      "bytes": 13993,
+      "sha256": "c7fe3d225731de246890f8dfdfcb96bd1e04440119efdca3305ee1ea5c4d0008"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/M1-organizers.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/M1-organizers.md",
+      "bytes": 44900,
+      "sha256": "716a8240440825972a3630a306c6d6349cada266fc971d8aa303599dd67a8bf9"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/M2-ai-assistants.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/M2-ai-assistants.md",
+      "bytes": 39248,
+      "sha256": "a64c71398ee7d7f6ac4ba0cddd9d7842aa8e690a52d837daf24560e37968ac61"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/M3-discovery.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/M3-discovery.md",
+      "bytes": 28242,
+      "sha256": "01e2343aef2427288fbab715e63cdb6ad2132d8225733c59ed2aaddec11e0177"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/M4-coparenting.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/M4-coparenting.md",
+      "bytes": 24420,
+      "sha256": "31a6bdacff1b29a12e4723389be805c558113b877ba1fd6451838edd1d178caf"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/M5-verbatim-corpus.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/M5-verbatim-corpus.md",
+      "bytes": 79697,
+      "sha256": "fc04be009f80a7e4a2ed86908cc30aa6544ae37be82fae6145cd3baefb5fb1b2"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/P1-population.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/P1-population.md",
+      "bytes": 23369,
+      "sha256": "e5524c9f7973284da914674786aa92a4ca1291c5ee1e6ee83611184e1c7a78b8"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/P10-generations.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/P10-generations.md",
+      "bytes": 28144,
+      "sha256": "05e7fd37c54834ef51a174b184c97ab8fa2b1fa16c6f1ed9792c78e1877fa69d"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/P11-ai-parenting.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/P11-ai-parenting.md",
+      "bytes": 29511,
+      "sha256": "872bb58c08643daecd09a1639f162be17887519a42742562b43d92ee75ad8856"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/P12-aggregation-email.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/P12-aggregation-email.md",
+      "bytes": 64947,
+      "sha256": "2bc1ecdf9c6cf067c7963b6bfd2ae2edbf72281bd89baf3a216308d01232f3ca"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/P2-who-plans.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/P2-who-plans.md",
+      "bytes": 30821,
+      "sha256": "8c360d84c1d33aa38c7f356aa7032cfd144fc08526f46a79f9f7b9c588b6efc4"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/P3-camps.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/P3-camps.md",
+      "bytes": 24813,
+      "sha256": "67a38880cc1eb7eb7823f8b5692ac144f76afe6ef707e378b1eb1cea883ff74e"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/P4-extracurriculars.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/P4-extracurriculars.md",
+      "bytes": 38581,
+      "sha256": "430f9c1139da7edbd5a9eac76a7538647f8ba62bf0107de20f7971fc58756f8e"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/P5-appointments.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/P5-appointments.md",
+      "bytes": 25734,
+      "sha256": "a606d5a32315bab33e305e30364aa10039a09ab74a31349fd5c59f0f0cce4a6c"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/P5b-appointments-gaps.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/P5b-appointments-gaps.md",
+      "bytes": 27967,
+      "sha256": "a3036cf2925fc49f291722e17b2162750ad2c0288d24b03dde23ab72c0ee2c44"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/P6-trips-weekends.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/P6-trips-weekends.md",
+      "bytes": 24555,
+      "sha256": "a280dbac5e3f9796867a9fb879cd5b3d0cedb67e19db96846216a815ce1bb608"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/P7-seasonality.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/P7-seasonality.md",
+      "bytes": 26183,
+      "sha256": "6804aae1ab1e6220e2b2410a5131cdaa2130514dbf214d2a3364dbdc1b030b88"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/P8-modality.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/P8-modality.md",
+      "bytes": 28640,
+      "sha256": "363143a484558b8ebddd562957245a02172e6e071d8003fa3ea9ababbf0fce02"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/P9-complexity.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/P9-complexity.md",
+      "bytes": 25791,
+      "sha256": "918cfcd12714ad1072fdb47040415b3c0f06a704758e29e12b045f661dc16b5f"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/S0-workflow-model.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/S0-workflow-model.md",
+      "bytes": 54925,
+      "sha256": "5d073c8024b5103b1e2b0daeaada7305ce69ac7c60c0d8c202f00a412c60f6b9"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/S1-email-decision-memo.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/S1-email-decision-memo.md",
+      "bytes": 57637,
+      "sha256": "ad2399963385799a0c63ef6845b450aa79b5bec42816484aad2eb28c8093ebd0"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/S2-feature-fit-verdict.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/S2-feature-fit-verdict.md",
+      "bytes": 104470,
+      "sha256": "78226013d0f50918e13c32bb75eba2e214e6778395b829fa54c75306099ebbab"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/S3-modality-prescription.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/S3-modality-prescription.md",
+      "bytes": 36088,
+      "sha256": "a920b00c2f6d962996c3b7839eec9aee89015b9e4d3d00111fe4846f4fee25b4"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/S4-redteam.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/S4-redteam.md",
+      "bytes": 40710,
+      "sha256": "b1bd6e6e96701dfc8d375c56f7bd9c160cbe0bfb08950d5a6f435bff46539a52"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/V1-verification-population.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/V1-verification-population.md",
+      "bytes": 27927,
+      "sha256": "470ca3be67ed851afa356b2ef5dab74054eb79030d8b6fc592025ee283d1c150"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/V2-verification-tasks.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/V2-verification-tasks.md",
+      "bytes": 24005,
+      "sha256": "15b6b786229836851155cfd66ad2c92f26767186526ed37171c01d7825d5f9f9"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/V3-verification-seasonality-modality.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/V3-verification-seasonality-modality.md",
+      "bytes": 51305,
+      "sha256": "c19484377380c9c73e6817890f53ed65bfe1fb0531445de83fd4ebc5c35ac8c5"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/V4-verification-complexity.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/V4-verification-complexity.md",
+      "bytes": 32999,
+      "sha256": "026980a0cd2ad61bde4cad6f09c286a7b9fd243486a3474f3713bfc89b8aef41"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/V5-verification-competitive.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/V5-verification-competitive.md",
+      "bytes": 47384,
+      "sha256": "3c0ad3bae85e7cb341cce3ce69e8976d4e64dea84a37336c3b72bbb30ee22feb"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/V6-laundering-and-p12.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/V6-laundering-and-p12.md",
+      "bytes": 108498,
+      "sha256": "687beb538488146f5ff478801e8d81d02827e4e0541863e32ab20a1fcd3488a5"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/raw/V7-killlist-final.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/raw/V7-killlist-final.md",
+      "bytes": 44838,
+      "sha256": "609fd98dfb4b52bdf8b3539b040d66f2bd632fcc14f1e18860baa6adc024359e"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/report.html",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/report.html",
+      "bytes": 209977,
+      "sha256": "6b77555b243bcaaf4c202e38abb4506a00d4bbad9e0d2d5b21d9cfe836e8fc85"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/report.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/report.md",
+      "bytes": 114125,
+      "sha256": "1b428c7d1e50849e7ee1ae786653f03f71a5fcb8d50aeebc63e0b54867ee02ca"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/report.pdf",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/report.pdf",
+      "bytes": 2279337,
+      "sha256": "3ebf4a4481ba18c8365f6cb3fca4c644351c98d1ab49ac3fededc6981a102cb8"
+    },
+    {
+      "source": "docs/GTM/research/2026-08-parent-planning-behavior/sources.md",
+      "archive": "archive/repository/docs/GTM/research/2026-08-parent-planning-behavior/sources.md",
+      "bytes": 76152,
+      "sha256": "bedd19a76f9f852a542e3f182bb13c97ff6491372c57baddbfc7eee450cbe537"
+    },
+    {
+      "source": "docs/adr/0001-next-level-exploration.md",
+      "archive": "archive/repository/docs/adr/0001-next-level-exploration.md",
+      "bytes": 2162,
+      "sha256": "ea7667f7805baf810689ca7baf6e348d0078d70260c672b33c7f425fd119a09e"
+    },
+    {
+      "source": "docs/adr/0002-parent-adaptation-reflection.md",
+      "archive": "archive/repository/docs/adr/0002-parent-adaptation-reflection.md",
+      "bytes": 1757,
+      "sha256": "04cfbac9ac4ef997b2fec473bc669e905a786e935b5e69a98bb3fc3ac0827360"
+    },
+    {
+      "source": "docs/handoff-pivot-to-parent-agent.md",
+      "archive": "archive/repository/docs/handoff-pivot-to-parent-agent.md",
+      "bytes": 5631,
+      "sha256": "cc3cab2bbace2cef499c3ae18649005b228cc70a386c65d2fd17ac95b505135a"
+    },
+    {
+      "source": "docs/next-level/README.md",
+      "archive": "archive/repository/docs/next-level/README.md",
+      "bytes": 3756,
+      "sha256": "0ece0f40dd014b89869571ef75428fb966c0672f61c815656edae3b9eb8cec0e"
+    },
+    {
+      "source": "docs/next-level/architecture.md",
+      "archive": "archive/repository/docs/next-level/architecture.md",
+      "bytes": 2567,
+      "sha256": "e9ca21fed38c80eac9a8488024fe07b384f4bc52dbd54fccaca6ebdc258f9354"
+    },
+    {
+      "source": "docs/next-level/bb-workers.md",
+      "archive": "archive/repository/docs/next-level/bb-workers.md",
+      "bytes": 1933,
+      "sha256": "76a1d51ea43ee05eb86e337032831077e2e43d870606b1de0d51aedc8a7addcc"
+    },
+    {
+      "source": "docs/next-level/build-strategy.py",
+      "archive": "archive/repository/docs/next-level/build-strategy.py",
+      "bytes": 23912,
+      "sha256": "e738f64cbb119787108eb47f1fc7aca10940e111ef24a770f33edfe2a974988c"
+    },
+    {
+      "source": "docs/next-level/child-handoff.md",
+      "archive": "archive/repository/docs/next-level/child-handoff.md",
+      "bytes": 27253,
+      "sha256": "43bbf2672bfea947dd40acd932d88a8646b16273bc7caf4be69e3fb860d49f08"
+    },
+    {
+      "source": "docs/next-level/code-audit.md",
+      "archive": "archive/repository/docs/next-level/code-audit.md",
+      "bytes": 32894,
+      "sha256": "1ceed4cdff71b80f594d35cc20a8ce776649a1409a117f8b1616c5487ac71fb5"
+    },
+    {
+      "source": "docs/next-level/diagrams/architecture.png",
+      "archive": "archive/repository/docs/next-level/diagrams/architecture.png",
+      "bytes": 51280,
+      "sha256": "0032103d882df95501facb37ef570cb156431304db95b98e673146cdec28df41"
+    },
+    {
+      "source": "docs/next-level/diagrams/architecture.svg",
+      "archive": "archive/repository/docs/next-level/diagrams/architecture.svg",
+      "bytes": 2250,
+      "sha256": "205ae2f518da98a14cecc0989489b00bb635f23e83cf17b125f297632334f3c5"
+    },
+    {
+      "source": "docs/next-level/diagrams/ux-loop.png",
+      "archive": "archive/repository/docs/next-level/diagrams/ux-loop.png",
+      "bytes": 47575,
+      "sha256": "0d75c8b3d76a9fad219b0153573416c292f34573b0b581039853377589660a46"
+    },
+    {
+      "source": "docs/next-level/diagrams/ux-loop.svg",
+      "archive": "archive/repository/docs/next-level/diagrams/ux-loop.svg",
+      "bytes": 2236,
+      "sha256": "7c000a212fd1d58431ea527bcc4b90fef5e72c6791fe1913e49a4145c515918f"
+    },
+    {
+      "source": "docs/next-level/iteration-2/README.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/README.md",
+      "bytes": 3104,
+      "sha256": "b25cd5dfad7fb3289aecc435e2016b72ed113647472f974fc335854ff2dd5f2c"
+    },
+    {
+      "source": "docs/next-level/iteration-2/adversarial-cases.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/adversarial-cases.md",
+      "bytes": 3178,
+      "sha256": "fb1d50a9a5d792b9ee85c9b641d4ef3b0c149676c68b66b66adaedf887ac8fbc"
+    },
+    {
+      "source": "docs/next-level/iteration-2/bb-workers.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/bb-workers.md",
+      "bytes": 1358,
+      "sha256": "9e9ff3e84ce70c6a39123dd61e82e9a2897da959958a7f5cd834b7f72ced8cb9"
+    },
+    {
+      "source": "docs/next-level/iteration-2/browser-verification.json",
+      "archive": "archive/repository/docs/next-level/iteration-2/browser-verification.json",
+      "bytes": 558,
+      "sha256": "7cf64d169541a56efa8f09f6662d52913afc7aa4496f99ab0e47e85dce00f1eb"
+    },
+    {
+      "source": "docs/next-level/iteration-2/build-print.py",
+      "archive": "archive/repository/docs/next-level/iteration-2/build-print.py",
+      "bytes": 12642,
+      "sha256": "edf35e6c49ae8c95fa8bbfb6d5f6d54334792f9a98bd8dfe8c9b7658a2c02206"
+    },
+    {
+      "source": "docs/next-level/iteration-2/child-participation.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/child-participation.md",
+      "bytes": 48368,
+      "sha256": "b7f0adcfec8aece54c09ddc486739a768046192f0fb6f3b3f3a3c3e08a32ef1a"
+    },
+    {
+      "source": "docs/next-level/iteration-2/code-audit.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/code-audit.md",
+      "bytes": 54282,
+      "sha256": "f548de2866870effeeee9b75a5f4a41891a2e42bd90ef9a9e7ba27b36d9ed7e4"
+    },
+    {
+      "source": "docs/next-level/iteration-2/diagrams/parent-practice-loop.svg",
+      "archive": "archive/repository/docs/next-level/iteration-2/diagrams/parent-practice-loop.svg",
+      "bytes": 2473,
+      "sha256": "34ad8eb24bcff074824c9f6dd1d162c9c8be234bfbfe07596b5281a654c9b014"
+    },
+    {
+      "source": "docs/next-level/iteration-2/diagrams/privacy-boundary.svg",
+      "archive": "archive/repository/docs/next-level/iteration-2/diagrams/privacy-boundary.svg",
+      "bytes": 1959,
+      "sha256": "6b89ded3426b9b6c020b091c3904622b982f7fac1f970e3600dce601cefeb7ce"
+    },
+    {
+      "source": "docs/next-level/iteration-2/examples.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/examples.md",
+      "bytes": 3103,
+      "sha256": "ee017c66cc2914496b0f45287b06629073e4bf51ace77e31d703d64b7542ead8"
+    },
+    {
+      "source": "docs/next-level/iteration-2/iteration-2-strategy.pdf",
+      "archive": "archive/repository/docs/next-level/iteration-2/iteration-2-strategy.pdf",
+      "bytes": 796054,
+      "sha256": "abed1d8c3da2607cb49f076e5fe8a4eaa64b7a2b1c1d12486b4b3f366bd53f0b"
+    },
+    {
+      "source": "docs/next-level/iteration-2/profile-safety.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/profile-safety.md",
+      "bytes": 61026,
+      "sha256": "1839ba6a4fbec604d7b756d8e840eee4900f01c2c6e54d6d00e5c8eeb6e71939"
+    },
+    {
+      "source": "docs/next-level/iteration-2/render-print.cjs",
+      "archive": "archive/repository/docs/next-level/iteration-2/render-print.cjs",
+      "bytes": 1977,
+      "sha256": "9a89140d1bc0b85d9883693229c39389ecfe5852547d99b4c7e01878b49b088d"
+    },
+    {
+      "source": "docs/next-level/iteration-2/render-verification.json",
+      "archive": "archive/repository/docs/next-level/iteration-2/render-verification.json",
+      "bytes": 363,
+      "sha256": "fda0887cefdd36965efaa19cf0cc551e4d072a73a874b1d54ecb72e59509bdf1"
+    },
+    {
+      "source": "docs/next-level/iteration-2/research-prompt-addendum.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/research-prompt-addendum.md",
+      "bytes": 3553,
+      "sha256": "868bc8a8969c244bd1addf55edd64444c0ad11cd3ac1adc3b529151f1426f651"
+    },
+    {
+      "source": "docs/next-level/iteration-2/research/parent_iteration2_alliance_evidence.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/research/parent_iteration2_alliance_evidence.md",
+      "bytes": 35385,
+      "sha256": "57a99abeb10b86acc873ac5fa2267c0e3aef664bd0b28dbde55f22d31cf153df"
+    },
+    {
+      "source": "docs/next-level/iteration-2/research/parent_iteration2_competitors.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/research/parent_iteration2_competitors.md",
+      "bytes": 18548,
+      "sha256": "df83555199a7f735902a56146041b72cc807031d9495e59af370d3497b5bdd27"
+    },
+    {
+      "source": "docs/next-level/iteration-2/research/parent_iteration2_good_inside.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/research/parent_iteration2_good_inside.md",
+      "bytes": 19579,
+      "sha256": "e0493ce42cd0d57574c6b8c2e1b8bc76f12e0c5eb2954e189511ee10a70c3c49"
+    },
+    {
+      "source": "docs/next-level/iteration-2/research/source-manifest.json",
+      "archive": "archive/repository/docs/next-level/iteration-2/research/source-manifest.json",
+      "bytes": 848,
+      "sha256": "f3f09a6bbd1ffec49656f24964e0e3279d9886e002fa1c51728a6830ed977853"
+    },
+    {
+      "source": "docs/next-level/iteration-2/screenshots/01-parent-adaptation-desktop.png",
+      "archive": "archive/repository/docs/next-level/iteration-2/screenshots/01-parent-adaptation-desktop.png",
+      "bytes": 151146,
+      "sha256": "973ec279710035bf2c2738ff3e8e1908e65c21d86562a12a6f6a8c2a05079b45"
+    },
+    {
+      "source": "docs/next-level/iteration-2/screenshots/02-no-score-reflection-desktop.png",
+      "archive": "archive/repository/docs/next-level/iteration-2/screenshots/02-no-score-reflection-desktop.png",
+      "bytes": 216083,
+      "sha256": "e6e927f87cab6ba6698b94f4069d3e9671c021a8585fa74db4cdc2256eee2923"
+    },
+    {
+      "source": "docs/next-level/iteration-2/screenshots/03-private-context-boundary-desktop.png",
+      "archive": "archive/repository/docs/next-level/iteration-2/screenshots/03-private-context-boundary-desktop.png",
+      "bytes": 157272,
+      "sha256": "94cb1e5bbb355dbbeadeb17a23c90ed710df9d9742d73cae0db1464d1318777a"
+    },
+    {
+      "source": "docs/next-level/iteration-2/screenshots/04-repair-mobile.png",
+      "archive": "archive/repository/docs/next-level/iteration-2/screenshots/04-repair-mobile.png",
+      "bytes": 169994,
+      "sha256": "697d9d33b6913ff3fb666885581986d0ab0be304ff1d39eb161716787fdd8bf6"
+    },
+    {
+      "source": "docs/next-level/iteration-2/screenshots/05-reflection-mobile.png",
+      "archive": "archive/repository/docs/next-level/iteration-2/screenshots/05-reflection-mobile.png",
+      "bytes": 196799,
+      "sha256": "06947af4cf40cbe2c6097f21a3b2e65b12d1208eefe5975468c76e85a6443114"
+    },
+    {
+      "source": "docs/next-level/iteration-2/strategy-print.html",
+      "archive": "archive/repository/docs/next-level/iteration-2/strategy-print.html",
+      "bytes": 13853,
+      "sha256": "e1d1545dfc4746e27f1a3fca80cd3a81a76c9a2dc5bf7ccd9a5c783a9c50cee0"
+    },
+    {
+      "source": "docs/next-level/iteration-2/strategy.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/strategy.md",
+      "bytes": 11979,
+      "sha256": "92f0f7dd5cabcb0ba9085c0b8b47f1165ca3162d204927e7a0731777bebc05d5"
+    },
+    {
+      "source": "docs/next-level/iteration-2/ux-review.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/ux-review.md",
+      "bytes": 71094,
+      "sha256": "8024b2cdb7490177efdf35c13c3f15ecb6ce680fecd9b9905763c9748679854e"
+    },
+    {
+      "source": "docs/next-level/iteration-2/verification.md",
+      "archive": "archive/repository/docs/next-level/iteration-2/verification.md",
+      "bytes": 2825,
+      "sha256": "cfc4929ecf8baa88d61e800080e087b4a8d1192bc78746603c627ab7a5187906"
+    },
+    {
+      "source": "docs/next-level/next-level-strategy.pdf",
+      "archive": "archive/repository/docs/next-level/next-level-strategy.pdf",
+      "bytes": 1299115,
+      "sha256": "e0e0d4c479648c1451fa179519890a6c0d86a00917843591b28c418b3ee4e83b"
+    },
+    {
+      "source": "docs/next-level/profile-safety.md",
+      "archive": "archive/repository/docs/next-level/profile-safety.md",
+      "bytes": 25872,
+      "sha256": "036ac5cdca94e471bc315d6c2738d34ccdecd440c42126aee6811aeb8f0b5abd"
+    },
+    {
+      "source": "docs/next-level/render-strategy.cjs",
+      "archive": "archive/repository/docs/next-level/render-strategy.cjs",
+      "bytes": 1966,
+      "sha256": "f60ab7de96bd0de0780b2b13d3fd7b22ccbfb287e403e34ddc378651f11e9081"
+    },
+    {
+      "source": "docs/next-level/render-verification.json",
+      "archive": "archive/repository/docs/next-level/render-verification.json",
+      "bytes": 401,
+      "sha256": "142fa62cce3253b14eacc9f665f63ba566ce7bb14955716d979fe447f73d3311"
+    },
+    {
+      "source": "docs/next-level/research/README.md",
+      "archive": "archive/repository/docs/next-level/research/README.md",
+      "bytes": 1481,
+      "sha256": "4370310f1c91549c54eae628ed3c2bd92882649a19a17570e3d7ef2bc96b4a57"
+    },
+    {
+      "source": "docs/next-level/research/parent_chatgpt_auth_research.md",
+      "archive": "archive/repository/docs/next-level/research/parent_chatgpt_auth_research.md",
+      "bytes": 13447,
+      "sha256": "27e94b711a562dcf8be5b503466eebb40ed7cb899bfa641799f57f7e994287a4"
+    },
+    {
+      "source": "docs/next-level/research/parent_child_modalities.md",
+      "archive": "archive/repository/docs/next-level/research/parent_child_modalities.md",
+      "bytes": 27949,
+      "sha256": "e4b572318f9d74edc770627fbc94b562645e5101a6d175dbf4128cedc14040fb"
+    },
+    {
+      "source": "docs/next-level/research/parent_market_research.md",
+      "archive": "archive/repository/docs/next-level/research/parent_market_research.md",
+      "bytes": 30393,
+      "sha256": "bb760f113589977c5c029a658af4c47ba38da574aaf601a5b3ff043aa85595ed"
+    },
+    {
+      "source": "docs/next-level/research/parent_positioning_names.md",
+      "archive": "archive/repository/docs/next-level/research/parent_positioning_names.md",
+      "bytes": 20233,
+      "sha256": "26edd929d9c58d95ae948c1975f48b7821cc356142437153b15b3c64606be3b1"
+    },
+    {
+      "source": "docs/next-level/research/parent_profile_deep_research_prompt.md",
+      "archive": "archive/repository/docs/next-level/research/parent_profile_deep_research_prompt.md",
+      "bytes": 23340,
+      "sha256": "d2a11d7dc5a301e6539e033bebfc675a95718162a46cba57be242d667e79f0c2"
+    },
+    {
+      "source": "docs/next-level/research/parent_profile_strategy.md",
+      "archive": "archive/repository/docs/next-level/research/parent_profile_strategy.md",
+      "bytes": 34382,
+      "sha256": "584daaff5e90a87033365b21c81f31df2803dc07837cfe8771fbdb6049b1f07b"
+    },
+    {
+      "source": "docs/next-level/research/source-manifest.json",
+      "archive": "archive/repository/docs/next-level/research/source-manifest.json",
+      "bytes": 1488,
+      "sha256": "a927e114940832cd28dd4c4f93df8142002a60faf0ed5752a51673383456362f"
+    },
+    {
+      "source": "docs/next-level/screenshots/01-conversation-desktop.png",
+      "archive": "archive/repository/docs/next-level/screenshots/01-conversation-desktop.png",
+      "bytes": 122092,
+      "sha256": "5ef67d02e7bbc2eabda1f8cde3387307287ddef409d8ddf832ebcdf34e9328b6"
+    },
+    {
+      "source": "docs/next-level/screenshots/02-experiment-outcome-desktop.png",
+      "archive": "archive/repository/docs/next-level/screenshots/02-experiment-outcome-desktop.png",
+      "bytes": 211526,
+      "sha256": "d6ec30beed1fe63f4670065ce565d1d88534d2dc1cd512a16b07d7cd01474799"
+    },
+    {
+      "source": "docs/next-level/screenshots/03-understanding-desktop.png",
+      "archive": "archive/repository/docs/next-level/screenshots/03-understanding-desktop.png",
+      "bytes": 129156,
+      "sha256": "269e7eade5003ccf9c711b31be2e52f20946f4582d1e65bd300ce7d5376e29c8"
+    },
+    {
+      "source": "docs/next-level/screenshots/04-share-preview-desktop.png",
+      "archive": "archive/repository/docs/next-level/screenshots/04-share-preview-desktop.png",
+      "bytes": 159630,
+      "sha256": "853de55fb1c583f5801cbf918e5fb9639978265416ee541d84294743b6cfea87"
+    },
+    {
+      "source": "docs/next-level/screenshots/05-conversation-mobile.png",
+      "archive": "archive/repository/docs/next-level/screenshots/05-conversation-mobile.png",
+      "bytes": 97436,
+      "sha256": "37894050d62e035212ba761b4527ee055006ebf5ef5d47358bedf1e004fc1412"
+    },
+    {
+      "source": "docs/next-level/screenshots/06-understanding-mobile.png",
+      "archive": "archive/repository/docs/next-level/screenshots/06-understanding-mobile.png",
+      "bytes": 127593,
+      "sha256": "59a25eae9f317c5824ea76aa533d7c9184536eccbcb02d1ddf774f34002c3a77"
+    },
+    {
+      "source": "docs/next-level/screenshots/07-share-preview-mobile.png",
+      "archive": "archive/repository/docs/next-level/screenshots/07-share-preview-mobile.png",
+      "bytes": 135514,
+      "sha256": "e62b21d40ac9ff4cb1bc9c22b0933d71eb62c16f6e8a34e809f5ab52bf12e472"
+    },
+    {
+      "source": "docs/next-level/strategy-print.html",
+      "archive": "archive/repository/docs/next-level/strategy-print.html",
+      "bytes": 26192,
+      "sha256": "a3c44bcbe37b5101c6c3a43ef4e661a87043bbb3a50d70488be3039a7c9bc7a6"
+    },
+    {
+      "source": "docs/next-level/strategy.md",
+      "archive": "archive/repository/docs/next-level/strategy.md",
+      "bytes": 15498,
+      "sha256": "7b5b561833a1adf3774c8632413ad6fe933d373636ef74132ce35499d38afc78"
+    },
+    {
+      "source": "docs/next-level/ux-review.md",
+      "archive": "archive/repository/docs/next-level/ux-review.md",
+      "bytes": 45034,
+      "sha256": "8f4c17aff2f3475bd0e6b2df141c638fac544bfcdcbcdbcbc57fae8978d32b4e"
+    },
+    {
+      "source": "docs/next-level/verification.md",
+      "archive": "archive/repository/docs/next-level/verification.md",
+      "bytes": 4785,
+      "sha256": "1c9ee77487fa4c128f3b28024e7ef2ac4015ae4af728b5e9f4839463f5acedb2"
+    },
+    {
+      "source": "docs/parent-app-context.md",
+      "archive": "archive/repository/docs/parent-app-context.md",
+      "bytes": 37781,
+      "sha256": "6857269dfb587f93f0ccded40faab563e2f1ce2eb0481208332618f4b484198e"
+    },
+    {
+      "source": "docs/roadmap.md",
+      "archive": "archive/repository/docs/roadmap.md",
+      "bytes": 61883,
+      "sha256": "a593ce3d0cfa76c15b9fe2fab022b5857992f72fd550032b973f0ee081cab679"
+    },
+    {
+      "source": "docs/system-architecture.md",
+      "archive": "archive/repository/docs/system-architecture.md",
+      "bytes": 16344,
+      "sha256": "73999376d0a424f9240253864b14cff627c513bb170f41dc575780a8c7588855"
+    },
+    {
+      "source": "experiments/next-level-iteration-2/README.md",
+      "archive": "archive/repository/experiments/next-level-iteration-2/README.md",
+      "bytes": 2432,
+      "sha256": "cdc5ae8fd0dac32aac950510dc95e7c1011e61b263290ad965fccb047d65aa4f"
+    },
+    {
+      "source": "experiments/next-level-iteration-2/app.mjs",
+      "archive": "archive/repository/experiments/next-level-iteration-2/app.mjs",
+      "bytes": 6860,
+      "sha256": "35a6cff4767304321d4c3e2ba746c953898f57ab5e32a6ba923bb1748225d09e"
+    },
+    {
+      "source": "experiments/next-level-iteration-2/browser-check.cjs",
+      "archive": "archive/repository/experiments/next-level-iteration-2/browser-check.cjs",
+      "bytes": 5387,
+      "sha256": "114664f0e2c7a91c4ab97a4604854f3d56d9d6aa8c8f32df7ef034165eba693a"
+    },
+    {
+      "source": "experiments/next-level-iteration-2/index.html",
+      "archive": "archive/repository/experiments/next-level-iteration-2/index.html",
+      "bytes": 3931,
+      "sha256": "df5e35f1fa994f55fcb082c777b2d384dc6289bfcfcb849c40426e53989ef181"
+    },
+    {
+      "source": "experiments/next-level-iteration-2/model.mjs",
+      "archive": "archive/repository/experiments/next-level-iteration-2/model.mjs",
+      "bytes": 7754,
+      "sha256": "808c46eb49bd2e9c27d343e3b1845c91b877d34704e8c90f74e0b12c15a84281"
+    },
+    {
+      "source": "experiments/next-level-iteration-2/model.test.mjs",
+      "archive": "archive/repository/experiments/next-level-iteration-2/model.test.mjs",
+      "bytes": 4370,
+      "sha256": "85f97b25cc2b3a66df6592611f1051d60898da4bd6b29ad0546e97fd36f75f5c"
+    },
+    {
+      "source": "experiments/next-level-iteration-2/style.css",
+      "archive": "archive/repository/experiments/next-level-iteration-2/style.css",
+      "bytes": 3623,
+      "sha256": "7813184b05a42499fd39be0cd509e1b7979684cc8acfb303014d9a474a7bfef6"
+    },
+    {
+      "source": "experiments/next-level/README.md",
+      "archive": "archive/repository/experiments/next-level/README.md",
+      "bytes": 2388,
+      "sha256": "13af7b819dace159616a198fc82bf79debfe180bf24cb1013b31e990c0b63088"
+    },
+    {
+      "source": "experiments/next-level/app.mjs",
+      "archive": "archive/repository/experiments/next-level/app.mjs",
+      "bytes": 8726,
+      "sha256": "77b41a0f0f434fd13d452eb38ff5603eed5ad26fe4eb930865fbe8278cb6e786"
+    },
+    {
+      "source": "experiments/next-level/browser-check.cjs",
+      "archive": "archive/repository/experiments/next-level/browser-check.cjs",
+      "bytes": 4149,
+      "sha256": "b19a8aaf2883b1a443b85040ee2113835f69d791c5989d4b7a92d1dea6879025"
+    },
+    {
+      "source": "experiments/next-level/index.html",
+      "archive": "archive/repository/experiments/next-level/index.html",
+      "bytes": 4268,
+      "sha256": "682691058a5caf1e53ceb187d1266bc89b2969ccf63e4a57849b4f0bc984267a"
+    },
+    {
+      "source": "experiments/next-level/model.mjs",
+      "archive": "archive/repository/experiments/next-level/model.mjs",
+      "bytes": 4142,
+      "sha256": "27f9a88706e35f84b4d226bc4b5b770d12b47a889ad254d91748e7be7b13965a"
+    },
+    {
+      "source": "experiments/next-level/model.test.mjs",
+      "archive": "archive/repository/experiments/next-level/model.test.mjs",
+      "bytes": 2787,
+      "sha256": "04d7aa6de350e5f73c8cb2e6b11d422f598e1f998516e84ad49c3b72eba6815f"
+    },
+    {
+      "source": "experiments/next-level/style.css",
+      "archive": "archive/repository/experiments/next-level/style.css",
+      "bytes": 5136,
+      "sha256": "30a74ad114973fd1ee44c0d535be70024447fffe916e1151a0f3dfa7dfb60737"
+    },
+    {
+      "source": "pitch/MVP-Investor-Deck.pdf",
+      "archive": "archive/repository/pitch/MVP-Investor-Deck.pdf",
+      "bytes": 295026,
+      "sha256": "411a3fdf52406a7b14849a95bf294bda69c0c92ede97ced50767bc204563979a"
+    },
+    {
+      "source": "pitch/MVP-Investor-Deck.pptx",
+      "archive": "archive/repository/pitch/MVP-Investor-Deck.pptx",
+      "bytes": 84796,
+      "sha256": "2c70a6aee243bee7df89c1c23f2ac7e8191eb0cc0431fe96b63460fb224c3870"
+    },
+    {
+      "source": "pitch/README.md",
+      "archive": "archive/repository/pitch/README.md",
+      "bytes": 2086,
+      "sha256": "e0d79c57f086488391fb9b2c1a6ba58b30d3383a5267d88f95a300ec4a1acad8"
+    },
+    {
+      "source": "pitch/build_deck.py",
+      "archive": "archive/repository/pitch/build_deck.py",
+      "bytes": 33412,
+      "sha256": "727c265d36edf7b6c62912ad965f59b4757df993e827fd8c01e93ae17a0a0a5b"
+    },
+    {
+      "source": "pitch/critics.md",
+      "archive": "archive/repository/pitch/critics.md",
+      "bytes": 5565,
+      "sha256": "fceeb2648a02b1d385d11166088c43ecdeacedb88009ad8d4bf5a4925701c0d0"
+    },
+    {
+      "source": "pitch/evidence.md",
+      "archive": "archive/repository/pitch/evidence.md",
+      "bytes": 6412,
+      "sha256": "6d55fee00aa4284399b328df8092069c36ab7004f56b361215ee9e475dd9cc63"
+    },
+    {
+      "source": "pitch/midjourney-prompts.md",
+      "archive": "archive/repository/pitch/midjourney-prompts.md",
+      "bytes": 3499,
+      "sha256": "cf4c7b99c36639d19a4b6290e289677f43938a94e19205a3130cafa09abe0e46"
+    },
+    {
+      "source": "pitch/narrative.md",
+      "archive": "archive/repository/pitch/narrative.md",
+      "bytes": 19786,
+      "sha256": "d68c235f397f106c512ff2d2a8cb9db8b28ae7d8489af44413eb0c79d053376d"
+    }
+  ]
+}

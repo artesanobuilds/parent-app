@@ -1,0 +1,10 @@
+# Foundation verification · 27 October 2026
+
+- The original main checkout and Next Level worktree were clean before this work. Research source: `8a875ff020ebde78f111eb85303ced37ae7a7840`.
+- Isolated branch `onda/foundation-20261027` uses that research commit as its base. Only `Onda/` is included in the foundation commit. Existing source files and deployment configuration are unchanged.
+- All 158 archived files match original bytes and their SHA-256 manifest entries. Every relative link in new authored documentation and the archive inventory resolves. Historical archive links retain original wording; operational cross-links may require the original source tree.
+- Existing `node --test experiments/next-level-iteration-2/model.test.mjs`: **16 passed, 0 failed**. These tests establish synthetic prototype rules only. Production backend, web and iOS builds were not rerun for a documentation-only addition.
+- Git whitespace check passed. GitHub authenticated account: `artesanobuilds`; local Git email: `334685666+artesanobuilds@users.noreply.github.com`. Remote identity verified as `https://github.com/artesanobuilds/parent-app.git`.
+- No tracked GitHub workflow exists at this source commit. Railway configuration declares Docker build and health checks but does not prove account-side deployment triggers. No deployment CLI, provider mutation, default-branch update, store operation, billing/DNS change, data export/deletion or notice was performed. Provider-side auto-deploy settings remain unverified; this work uses a dedicated non-default docs branch.
+- BB project `proj_n8nzqmjtxd` renamed in place from Parent Agent to Onda, with default local source unchanged. New thread `thr_mz53zgxnts` created using the existing Codex provider and instructed to acknowledge/wait without writing.
+- New naming report remains pending. Visual board metadata and transfer limitation are recorded in [design/README.md](design/README.md).
