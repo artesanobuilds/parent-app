@@ -4,6 +4,8 @@ Start with the [product brief](product-brief.md), [accepted new-product decision
 
 ## Research reading order
 
+Newly received: [Onda naming recommendation, complete report and prelaunch gates](research/naming/README.md).
+
 1. [Iteration 2: parent adaptation](archive/repository/docs/next-level/iteration-2/README.md), its [strategy](archive/repository/docs/next-level/iteration-2/strategy.md), [illustrated PDF](archive/repository/docs/next-level/iteration-2/iteration-2-strategy.pdf) and [research sources](archive/repository/docs/next-level/iteration-2/research/source-manifest.json).
 2. [Iteration 1: reviewed child understanding](archive/repository/docs/next-level/README.md) and [six-report research index](archive/repository/docs/next-level/research/README.md), including market, modalities, profile strategy, positioning/names and ChatGPT authorization research.
 3. [September pivot assessment](archive/repository/docs/GTM/2026-09-26-pivot-assessment.md), [independent research brief](archive/repository/docs/GTM/2026-09-26-independent-research-brief.md) and [artist-led addendum](archive/repository/docs/GTM/2026-09-27-artist-led-research-addendum.md).
@@ -31,4 +33,4 @@ See [foundation verification](verification.md) and the [exploratory visual board
 
 ## Pending
 
-The newly mentioned naming report is **pending receipt**; [intake instructions](intake/README.md) define its import point. Three separate visual directions are recorded in the design note; the original image remains in Library because local transfer failed. No takedown, deployment, billing/DNS change, data deletion or notices have been performed.
+The newly mentioned naming report is **received and archived** as a complete authorized text copy; [naming provenance and gates](research/naming/README.md) distinguish its recommendations from verified facts. Three separate visual directions are recorded in the design note; the original image remains in Library because local transfer failed. No takedown, deployment, billing/DNS change, data deletion or notices have been performed.

@@ -6,6 +6,6 @@ Explore expressive typography, warm saturated accents, playful geometry, dynamic
 
 The visual identity must be distinctly different from Soulfire's muted, meditative green landscape style. Avoid inheriting that landscape vocabulary or adopting the archived Hearth system as Onda's brand. Prior design assets are historical references only.
 
-Evaluate logo directions at app-icon size, monochrome, on light/dark surfaces and alongside the Onda wordmark. Seek warmth and curiosity without childishness; credibility without clinical formality. Wave symbolism is a creative option, not naming-research evidence.
+Evaluate logo directions at app-icon size, monochrome, on light/dark surfaces and alongside the Onda wordmark. Seek warmth and curiosity without childishness; credibility without clinical formality. The [new naming report](research/naming/README.md) supports exploring same-wavelength symbolism, but that recommendation is untested with parents. It does not establish legal clearance or a final identity.
 
 The first three exploratory directions are recorded in [design/README.md](design/README.md). Import selected originals and provenance under `design/` after review; no final logo or palette has been selected. See [design explorations in the private Space](https://chatgpt.com/space/page_6ae1052b100c8191bb269fff213de33e).

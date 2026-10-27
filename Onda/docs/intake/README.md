@@ -1,8 +1,8 @@
 # Pending inputs
 
-## Naming recommendation
+## Naming recommendation — received
 
-The new naming research mentioned by Miguel has not been supplied. Save the original report under `naming/` here when received, retain author/date/source and a SHA-256, then add an evidence summary and link from the index. Do not replace it with the older archived positioning/names report. Do not infer trademark, domain or linguistic clearance.
+The newly supplied report is archived in [research/naming](../research/naming/README.md), with the complete authorized text copy and provenance manifest. It recommends Onda as a working name, subject to legal clearance and bilingual parent validation. Download failed once; full-text read was complete. See the naming index for copy limitations and prelaunch gates. The older archived positioning/names report remains a separate historical source.
 
 ## Visual concepts
 

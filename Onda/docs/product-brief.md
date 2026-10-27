@@ -21,3 +21,7 @@ No diagnostic labels, attachment grades, composite relationship score, covert mo
 Use synthetic moments first. Check whether parents can distinguish observations from assumptions, correct the understanding, choose a feasible adjustment, rehearse it and understand sharing boundaries. Compare matched histories and attention across simpler alternatives. Study burden, voluntary use and adverse pressure; improvement claims need independent evidence beyond parent satisfaction. Clinical or commercial claims and content rights remain unresolved.
 
 Source basis: [iteration-2 strategy](archive/repository/docs/next-level/iteration-2/strategy.md), [competitors](archive/repository/docs/next-level/iteration-2/research/parent_iteration2_competitors.md), [safety](archive/repository/docs/next-level/iteration-2/profile-safety.md). These are archived proposals, not adopted implementation or validated outcomes.
+
+## Naming readiness
+
+Onda remains the chosen working name. The [received naming report](research/naming/README.md) recommends bilingual warmth and same-wavelength meaning, with Understory and Ajá as fallbacks. These are author judgments; no parent testing was conducted. Preliminary trademark conflicts require qualified clearance before public commitment. Bilingual meaning, pronunciation, recall, inclusion and trust require caregiver validation before launch.
