@@ -1,0 +1,48 @@
+{
+  "scope": "Image inspection event evidence only; no other thread content or private data.",
+  "events": [
+    {
+      "threadId": "thr_j9k3v3vcff",
+      "provider": "codex",
+      "eventSequence": 44,
+      "eventType": "item/completed",
+      "operation": {
+        "type": "imageView",
+        "id": "da7b2be100-i5",
+        "path": "/Users/miguelalvarado/Documents/Codex/2026-10-27/task-3/onda-foundation/Onda/docs/design/reviews/assets/onda-concept-04-wonder-into-practice.png",
+        "presentation": {
+          "label": {
+            "pending": "Viewing image",
+            "completed": "Viewed image"
+          },
+          "icon": {
+            "glyph": "Eye"
+          },
+          "title": "onda-concept-04-wonder-into-practice.png"
+        }
+      }
+    },
+    {
+      "threadId": "thr_mtyssr3t4x",
+      "provider": "claude",
+      "eventSequence": 221,
+      "eventType": "item/completed",
+      "operation": {
+        "type": "fileRead",
+        "id": "da6f7cb12e-i5",
+        "path": "/Users/miguelalvarado/Documents/Codex/2026-10-27/task-3/onda-foundation/Onda/docs/design/reviews/assets/onda-concept-04-wonder-into-practice.png",
+        "status": "completed",
+        "presentation": {
+          "label": {
+            "pending": "Reading file",
+            "completed": "Read file"
+          },
+          "icon": {
+            "glyph": "FileText"
+          },
+          "title": "onda-concept-04-wonder-into-practice.png"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-27",
+  "method": "Supported authorized Page attachment reader returned original PNG bytes as MCP image blocks. Local decoded bytes match original-file metadata SHA-256 and size. Not screenshots. Coordinator-provided Library identifiers identify the corresponding research artifacts; exact Page attachment references establish the retrieved bytes.",
+  "sourcePage": "https://chatgpt.com/space/page_6ae1052b100c8191bb269fff213de33e",
+  "files": [
+    {
+      "localFile": "onda-real-life-balanced-neutrals.png",
+      "sourceLibraryIdProvidedByCoordinator": "libfile_47186e13ff548191a9156d59669bc868",
+      "sourceBackingFileIdProvidedByCoordinator": "file_00000000d58481f898b4e2e33da8a0cd",
+      "page_id": "page_6ae1052b100c8191bb269fff213de33e",
+      "reference": "library-file:fde1_bGliZmlsZV90S29Fa19xMkVxdWw1czZaazIyMnpR_FileDrive_a408f2bdcb3c81918ff7ce5ab24ebdba",
+      "mime_type": "image/png",
+      "byte_size": 1920018,
+      "sha256": "7f45f130623a16712a6752d52974df43099bbe9f8b61c8777bdb92a88185205f",
+      "text": null,
+      "text_representation": null,
+      "text_byte_size": null,
+      "kind": "image",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "localFile": "onda-visual-reset-three-directions.png",
+      "sourceLibraryIdProvidedByCoordinator": "libfile_139b5934287881918dc52d2f090aa475",
+      "sourceBackingFileIdProvidedByCoordinator": null,
+      "page_id": "page_6ae1052b100c8191bb269fff213de33e",
+      "reference": "library-file:fde1_bGliZmlsZV9sTzIwRG9XWnNyS2tKdnA0NjQwTlFB_FileDrive_a408f2bdcb3c81918ff7ce5ab24ebdba",
+      "mime_type": "image/png",
+      "byte_size": 1783495,
+      "sha256": "13760de7e4a1dcdc4e693fa34e80d3033682689350af5ae897d4ce91ecacc8dc",
+      "text": null,
+      "text_representation": null,
+      "text_byte_size": null,
+      "kind": "image",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "localFile": "onda-concept-05-a-little-help-right-now.png",
+      "sourceLibraryIdProvidedByCoordinator": "libfile_de42cc534f04819185a2f6a91c9ee1ff",
+      "sourceBackingFileIdProvidedByCoordinator": null,
+      "page_id": "page_6ae1052b100c8191bb269fff213de33e",
+      "reference": "library-file:fde1_bGliZmlsZV9FeVRWX3U3YzV4V2tpQm9yenJ0a3dB_FileDrive_a408f2bdcb3c81918ff7ce5ab24ebdba",
+      "mime_type": "image/png",
+      "byte_size": 2096389,
+      "sha256": "34b266efe90ebbe812774c5876c38f89b29782eed1ea8eb7a766cfff12c35b26",
+      "text": null,
+      "text_representation": null,
+      "text_byte_size": null,
+      "kind": "image",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "localFile": "onda-brand-directions-v1.png",
+      "sourceLibraryIdProvidedByCoordinator": "libfile_7cdc32554d1c8191b0ff69400e604d32",
+      "sourceBackingFileIdProvidedByCoordinator": "file_000000008b4c81f5a1ce0f3f1eecc69d",
+      "page_id": "page_6ae1052b100c8191bb269fff213de33e",
+      "reference": "library-file:fde1_bGliZmlsZV9aQmJUdlhSN1F0VXVLNG5ab21pV2lR_FileDrive_a408f2bdcb3c81918ff7ce5ab24ebdba",
+      "mime_type": "image/png",
+      "byte_size": 2194204,
+      "sha256": "8510d5c516dd8c3db44c8a0251e8fe126e21d34b8fd3afe252c61494ba2d4a3e",
+      "text": null,
+      "text_representation": null,
+      "text_byte_size": null,
+      "kind": "image",
+      "width": 1536,
+      "height": 1024
+    }
+  ]
+}

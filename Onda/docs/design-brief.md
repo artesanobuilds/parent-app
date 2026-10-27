@@ -1,11 +1,25 @@
 # Design brief
 
-Onda should feel parent-oriented, fun, productive and credible: curiosity and learning made visible. Aim for a graphically rich product with purposeful diagrams, expressive illustrations, layered cards, clear choices and legible progress through a practice loop. Graphical richness must help parents understand and act, including on low-capacity days.
+## Selected direction
 
-Explore expressive typography, warm saturated accents, playful geometry, dynamic wave/rhythm motifs and human relationship cues. Show ordinary life, shared interests, joy and repair without idealized-family pressure. Keep controls, text contrast, focus order and reduced-motion behavior accessible.
+**Real Life with human illustrations, balanced warm neutrals and soft dusty-blue emphasis** is the current user-endorsed visual direction. Use [the neutral Real Life board](design/boards/onda-real-life-balanced-neutrals.png) as the reference and [decision 0002](decisions/0002-real-life-visual-direction.md) for scope. Ivory, oat and slate ground the system; restrained clay and sage add warmth and variation. Keep the first screen's approachable entry and the second screen's dusty-blue emphasis in one coherent flow.
 
-The visual identity must be distinctly different from Soulfire's muted, meditative green landscape style. Avoid inheriting that landscape vocabulary or adopting the archived Hearth system as Onda's brand. Prior design assets are historical references only.
+Make Onda parent-oriented, fun, productive and credible: curiosity and learning made visible through recognizable family moments. The reference depicts a playground transition, a correctable possibility and words a caregiver can practice. Graphical richness should help parents understand and act, including on low-capacity days. Human illustration, expression and everyday context distinguish this direction from Soulfire's muted meditative green landscape style. Contextual surroundings support the family situation; they should not become the product's central metaphor.
 
-Evaluate logo directions at app-icon size, monochrome, on light/dark surfaces and alongside the Onda wordmark. Seek warmth and curiosity without childishness; credibility without clinical formality. The [new naming report](research/naming/README.md) supports exploring same-wavelength symbolism, but that recommendation is untested with parents. It does not establish legal clearance or a final identity.
+## Product and interaction principles
 
-The first three exploratory directions are recorded in [design/README.md](design/README.md). Import selected originals and provenance under `design/` after review; no final logo or palette has been selected. See [design explorations in the private Space](https://chatgpt.com/space/page_6ae1052b100c8191bb269fff213de33e).
+Support noticing, reinterpretation, one adjustment the adult controls, optional private rehearsal, trying and honest reflection. Make observations, interpretations and uncertainty distinguishable, with correction visible. Avoid diagnosis, parenting ranks, perfect-parent pressure and child-compliance scoring. Represent shared joy and repair alongside difficult moments. Parent-private context and remembering/sharing need explicit designed boundaries.
+
+Rich illustrations can invite attention, while text, actions and correction controls stay legible. Test short and long content, larger text, one-handed use, reduced motion and screen-reader navigation. Exact color/font tokens, accessible state colors and physical device typography are not established by the raster board.
+
+## Identity and testing
+
+A visual direction is approved; the final production logo is not. Test icon/wordmark recognition at app-icon and small UI sizes, in monochrome, and on light/dark surfaces. Extend caregiver depictions across ordinary, imperfect family circumstances and test cultural fit rather than claiming universal appeal.
+
+The [new naming report](research/naming/README.md) supports the Onda working name and same-wavelength meaning, subject to legal clearance and bilingual caregiver validation. Visual preference does not resolve those gates.
+
+## Preserved exploration
+
+Wonder notes, softened Concept 04, Concept 05 and the brief Bright Side selection are superseded as active directions. Keep them in the [board archive](design/boards/README.md). The [independent Codex/Claude visual critiques](design/reviews/README.md) address Concept 04 only, not Real Life. Their reasoning/correction questions can inform future testing, while their artwork judgments remain specific to the reviewed board.
+
+See the [private Space design page](https://chatgpt.com/space/page_6ae1052b100c8191bb269fff213de33e). This brief records a selected exploration, not implementation, a launch decision or validated relationship outcomes.

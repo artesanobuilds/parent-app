@@ -6,7 +6,7 @@ The newly supplied report is archived in [research/naming](../research/naming/RE
 
 ## Visual concepts
 
-Separate workers own logo/look-and-feel exploration. Import reviewed assets under `../design/` with generator/source, date, concept label and selection status. Current concepts are exploratory, not a final identity.
+All five embedded boards are archived in the [design inventory](../design/boards/README.md), with original-byte provenance. [Real Life with balanced neutrals and soft dusty blue](../decisions/0002-real-life-visual-direction.md) is the selected direction. The production logo, exact tokens and audience validation remain open. Independent Codex/Claude visual critiques are archived under [design/reviews](../design/reviews/README.md) and address softened Concept 04 only.
 
 ## Connected workspace
 

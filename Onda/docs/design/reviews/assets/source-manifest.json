@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-27",
+  "sourcePage": "https://chatgpt.com/space/page_6ae1052b100c8191bb269fff213de33e",
+  "pageReference": "library-file:fde1_bGliZmlsZV96ZzdaSTBmekZtMG9VSEZhczBtRlhn_FileDrive_a408f2bdcb3c81918ff7ce5ab24ebdba",
+  "libraryFileId": "libfile_dfbf3674883881918c6be55e2f4603d7",
+  "libraryVersion": 1,
+  "backingFileId": "file_00000000317081f8b5d82eecceed2adc",
+  "localFile": "onda-concept-04-wonder-into-practice.png",
+  "width": 1536,
+  "height": 1024,
+  "bytes": 2133766,
+  "sha256": "8260e738a89f2faea51ff72eb1fd841d4d489e9ec3d86e36b15e5e46bfe97806",
+  "transfer": "Authorized Page read returned exact observed attachment reference. Page attachment reader returned original PNG bytes as MCP image content, decoded locally. Local hash and byte count match Page reader original-file metadata. Not a screenshot. Earlier Library transfer failed once.",
+  "status": "Exploratory softened Concept 04; not final identity, trademark clearance or functioning app."
+}

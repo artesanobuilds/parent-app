@@ -1,6 +1,6 @@
 {
   "date": "2026-10-27",
-  "status": "Text-only independent reviews complete; both visual critiques blocked pending pixels.",
+  "status": "Both independent visual critiques completed after original Page attachment transfer resolved image access; text-only reports and synthesis retained as provisional history.",
   "bbProject": "proj_n8nzqmjtxd",
   "environment": "env_n28xr8qfxg",
   "image": {
@@ -9,7 +9,7 @@
     "backingFileId": "file_00000000317081f8b5d82eecceed2adc",
     "filename": "onda-concept-04-wonder-into-practice.png",
     "revision": "Concept 04 softened palette; not original neon-orange revision",
-    "materialization": "Prepared successfully; single supported helper download failed with network access. No image bytes installed. No visual claims authorized."
+    "materialization": "Initial Library transfer failed once. Subsequently read the exact embedded reference from the authorized private Space Page through its attachment reader; original PNG bytes saved locally with byte count and SHA-256 matching reader metadata. Not a screenshot. See assets/source-manifest.json."
   },
   "independence": "Identical neutral brief; separate requested providers; no critic output shared with the other; each instructed not to write files. Reports archived after both returned.",
   "reports": [
@@ -32,6 +32,30 @@
       "sha256": "d76d92adfa04f3acd6ddd4908d99ba9a0ec5ffc2672670a8a359bd0d7b92eb05",
       "inspectedPixels": false,
       "scope": "Textual brief review only; complete output preserved."
+    }
+  ],
+  "visualReports": [
+    {
+      "providerId": "codex",
+      "bbThreadId": "thr_j9k3v3vcff",
+      "providerSessionId": "01a17f12-3e8a-7440-9987-739b26c84b42",
+      "terminalState": "idle",
+      "file": "codex-visual-review.md",
+      "sha256": "598c3129425201157f20b1d3adea30280dcbbc3dea7df52c146eb8b79ae894e3",
+      "inspectedPixels": true,
+      "imageInspectionReceipts": "image-inspection-receipts.json",
+      "scope": "Complete independent visual report, preserved unedited. Statements remain each critic\u2019s judgments, not automatically verified facts."
+    },
+    {
+      "providerId": "claude-code",
+      "bbThreadId": "thr_mtyssr3t4x",
+      "providerSessionId": "e98d0c22-dffb-47a5-bcd8-1ad44d2c4d9f",
+      "terminalState": "idle",
+      "file": "claude-code-visual-review.md",
+      "sha256": "84634f3d90e2a6a8705ca182da8fc538c28626401a3e434be4f8ef9fcba87f24",
+      "inspectedPixels": true,
+      "imageInspectionReceipts": "image-inspection-receipts.json",
+      "scope": "Complete independent visual report, preserved unedited. Statements remain each critic\u2019s judgments, not automatically verified facts."
     }
   ]
 }
